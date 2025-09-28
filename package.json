@@ -1,0 +1,41 @@
+{
+  "name": "loom",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "@google/genai": "^1.21.0",
+    "katex": "^0.16.11",
+    "rehype-katex": "^7.0.0",
+    "remark-math": "^6.0.0",
+    "rehype-raw": "^7.0.0",
+    "rehype-sanitize": "^6.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.36.0",
+    "@google/generative-ai": "^0.24.1",
+    "@tailwindcss/postcss": "^4.1.13",
+    "@types/react": "^19.1.13",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.3",
+    "autoprefixer": "^10.4.21",
+    "eslint": "^9.36.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.20",
+    "globals": "^16.4.0",
+    "openai": "^5.23.1",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.13",
+    "vite": "^7.1.7"
+  }
+}

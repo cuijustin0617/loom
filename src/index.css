@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+:root {
+  font-family: Manrope, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background-color: #ffffff;
+  color: #000000;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* (Reverted github-markdown-css; keep our base styles lean) */
+
+/* Hide scrollbars for small one-line sources */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* KaTeX overflow handling for long equations */
+.katex-display { overflow-x: auto; }
+.katex-display > .katex { white-space: nowrap; }
