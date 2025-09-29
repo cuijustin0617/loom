@@ -1,4 +1,6 @@
 import Logo from './Logo';
+import { useEffect, useState } from 'react';
+import ProfileMenu from './ProfileMenu';
 
 const Sidebar = ({ 
   conversations, 
@@ -10,7 +12,7 @@ const Sidebar = ({
   onCollapse,
 }) => {
   return (
-    <div className="bg-loom-gray flex flex-col h-full">
+    <div className="bg-loom-gray flex flex-col h-full relative">
       {/* Header with Logo and Explore button */}
       <div className="p-3 sm:p-4 border-b border-gray-200">
         <div className="flex items-center justify-between mb-3">
@@ -22,14 +24,6 @@ const Sidebar = ({
               ) : (
                 'Explore'
               )}
-            </button>
-            <button
-              type="button"
-              onClick={onCollapse}
-              title="Collapse sidebar"
-              className="w-8 h-8 inline-flex items-center justify-center rounded-full border border-gray-300 text-gray-600 hover:bg-gray-50 shadow-sm"
-            >
-              <span className="text-base">&lt;</span>
             </button>
           </div>
         </div>
@@ -90,6 +84,23 @@ const Sidebar = ({
           </div>
         )}
       </div>
+
+      {/* Profile footer */}
+      <div className="border-t border-gray-200 p-3 sm:p-4">
+        <div className="flex items-center gap-2">
+          <ProfileMenu />
+        </div>
+      </div>
+
+      {/* Middle collapse handle */}
+      <button
+        type="button"
+        onClick={onCollapse}
+        title="Collapse sidebar"
+        className="absolute right-2 top-1/2 -translate-y-1/2 z-10 w-8 h-8 inline-flex items-center justify-center rounded-full border border-gray-300 text-gray-600 bg-white/90 hover:bg-white shadow"
+      >
+        <span className="text-base">&lt;</span>
+      </button>
     </div>
   );
 };

@@ -2,8 +2,12 @@ import { useEffect, useState, useRef } from 'react';
 import { useConversations } from './hooks/useConversations';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
+import OnboardingGate from './components/OnboardingGate';
 
 function App() {
+  // Always pass through the onboarding gate once; it will auto-complete
+  // when login + API key requirements are already satisfied.
+  const [needsGate, setNeedsGate] = useState(true);
   // Sidebar collapse state (fixed width, no resize)
   const SIDEBAR_WIDTH = 256; // px
   const MIN_CHAT_WIDTH = 560; // px, below this auto-collapse
@@ -82,6 +86,10 @@ function App() {
   };
 
   const currentConversation = getCurrentConversation();
+
+  if (needsGate) {
+    return <OnboardingGate onComplete={() => setNeedsGate(false)} />;
+  }
 
   return (
     <div className="flex h-screen bg-white relative">
