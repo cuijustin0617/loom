@@ -1,25 +1,133 @@
 import { useEffect, useState } from 'react';
 import { loadSettings, saveSettings, API_KEY_MAX_AGE_DAYS } from '../utils/storage';
+import { onAuthChanged, db } from '../services/firebase';
+import { collection, getDocs, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { decryptJSON, encryptJSON } from '../utils/crypto';
 
 const SettingsModal = ({ open, onClose }) => {
   const [key, setKey] = useState('');
-  const [pass, setPass] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // Passphrase change state
+  const [user, setUser] = useState(null);
+  const [hasExistingPass, setHasExistingPass] = useState(false);
+  const [currentPass, setCurrentPass] = useState('');
+  const [newPass, setNewPass] = useState('');
+  const [confirmPass, setConfirmPass] = useState('');
+  const [migrating, setMigrating] = useState(false);
+  const [migrateTotal, setMigrateTotal] = useState(0);
+  const [migrateDone, setMigrateDone] = useState(0);
+  const [migrateError, setMigrateError] = useState('');
 
   useEffect(() => {
     if (!open) return;
     const s = loadSettings() || {};
     setKey(s.byokGeminiKey || '');
-    setPass(s.e2eePassphrase || '');
+    setHasExistingPass(!!(s.e2eePassphrase || '').trim());
   }, [open]);
+
+  useEffect(() => {
+    const unsub = onAuthChanged(setUser);
+    return () => unsub && unsub();
+  }, []);
 
   const save = () => {
     setSaving(true);
-    saveSettings({ byokGeminiKey: key, e2eePassphrase: pass });
+    // Only update BYOK here; passphrase changes use the migration flow below
+    saveSettings({ byokGeminiKey: key });
     // Refresh freshness timestamp even if the key didn't change
     saveSettings({ byokGeminiKeyUpdatedAt: Date.now() });
     setSaving(false);
     onClose?.();
+  };
+
+  const reencryptAll = async () => {
+    setMigrateError('');
+    if (!newPass || newPass !== confirmPass) {
+      setMigrateError('New passphrases do not match.');
+      return;
+    }
+    if (!currentPass && hasExistingPass) {
+      setMigrateError('Enter your current passphrase.');
+      return;
+    }
+    // If not signed in or db missing, we can only update local passphrase
+    if (!user || !db) {
+      saveSettings({ e2eePassphrase: newPass });
+      setHasExistingPass(true);
+      setCurrentPass(''); setNewPass(''); setConfirmPass('');
+      onClose?.();
+      return;
+    }
+
+    try {
+      setMigrating(true);
+      setMigrateTotal(0);
+      setMigrateDone(0);
+      // 1) List conversations
+      const convsRef = collection(db, 'users', user.uid, 'conversations');
+      const convsSnap = await getDocs(convsRef);
+
+      // First pass: count total messages and verify current pass using first payload
+      let firstPayload = null;
+      let total = 0;
+      for (const conv of convsSnap.docs) {
+        const msgsRef = collection(db, 'users', user.uid, 'conversations', conv.id, 'messages');
+        const msgsSnap = await getDocs(msgsRef);
+        total += msgsSnap.size;
+        if (!firstPayload) {
+          const d = msgsSnap.docs[0];
+          firstPayload = d?.data()?.contentCiphertext || null;
+        }
+      }
+      setMigrateTotal(total);
+
+      if (hasExistingPass && firstPayload) {
+        // Verify current pass quickly
+        try { await decryptJSON(currentPass, firstPayload); }
+        catch { throw new Error('Current passphrase is incorrect.'); }
+      }
+
+      // 2) Re-encrypt each message
+      let done = 0;
+      for (const conv of convsSnap.docs) {
+        const msgsRef = collection(db, 'users', user.uid, 'conversations', conv.id, 'messages');
+        const msgsSnap = await getDocs(msgsRef);
+        for (const m of msgsSnap.docs) {
+          const data = m.data() || {};
+          const payload = data.contentCiphertext;
+          if (!payload) { done += 1; setMigrateDone(done); continue; }
+          let decrypted;
+          try {
+            if (hasExistingPass) {
+              decrypted = await decryptJSON(currentPass, payload);
+            } else {
+              // No old passphrase in use; skip this message (it may be local-only)
+              done += 1; setMigrateDone(done); continue;
+            }
+          } catch {
+            throw new Error('Failed to decrypt a message. Current passphrase may be incorrect.');
+          }
+          const newPayload = await encryptJSON(newPass, decrypted);
+          await updateDoc(m.ref, {
+            contentCiphertext: newPayload,
+            updatedAt: serverTimestamp(),
+          });
+          done += 1;
+          setMigrateDone(done);
+        }
+      }
+
+      // 3) Save the new pass locally
+      saveSettings({ e2eePassphrase: newPass });
+      setHasExistingPass(true);
+      setCurrentPass(''); setNewPass(''); setConfirmPass('');
+      setMigrating(false);
+      onClose?.();
+    } catch (e) {
+      setMigrating(false);
+      setMigrateError(e?.message || 'Re-encryption failed.');
+    }
   };
 
   if (!open) return null;
@@ -35,7 +143,7 @@ const SettingsModal = ({ open, onClose }) => {
           </button>
         </div>
 
-        <div className="mt-4 space-y-4">
+        <div className="mt-4 space-y-6">
           <div>
             <label className="block text-sm font-medium text-gray-700">Gemini API key</label>
             <input
@@ -52,21 +160,70 @@ const SettingsModal = ({ open, onClose }) => {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">End‑to‑end passphrase (optional)</label>
-            <input
-              type="password"
-              value={pass}
-              onChange={(e) => setPass(e.target.value)}
-              placeholder="Set a passphrase to encrypt cloud sync"
-              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-500"
-            />
-            <p className="mt-1 text-xs text-gray-500">When set, messages you sync to the cloud are encrypted on your device with this passphrase. Keep it safe; we can’t recover it.</p>
+            <div className="flex items-center justify-between">
+              <label className="block text-sm font-medium text-gray-700">End‑to‑end encryption</label>
+              {migrating && (
+                <span className="text-xs text-gray-500">{migrateDone}/{migrateTotal}</span>
+              )}
+            </div>
+            {hasExistingPass ? (
+              <div className="mt-2 space-y-2">
+                <input
+                  type="password"
+                  value={currentPass}
+                  onChange={(e) => setCurrentPass(e.target.value)}
+                  placeholder="Current passphrase"
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                />
+                <input
+                  type="password"
+                  value={newPass}
+                  onChange={(e) => setNewPass(e.target.value)}
+                  placeholder="New passphrase"
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                />
+                <input
+                  type="password"
+                  value={confirmPass}
+                  onChange={(e) => setConfirmPass(e.target.value)}
+                  placeholder="Confirm new passphrase"
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                />
+                {migrateError && <div className="text-sm text-red-600">{migrateError}</div>}
+                <button
+                  onClick={reencryptAll}
+                  disabled={migrating}
+                  className="w-full rounded-md bg-violet-600 text-white px-3 py-2 hover:bg-violet-700 disabled:opacity-50"
+                >
+                  {migrating ? 'Re‑encrypting…' : 'Re‑encrypt and save'}
+                </button>
+                <p className="text-xs text-gray-500">We will decrypt all your cloud-synced messages with your current passphrase and re-encrypt them with the new one. Keep the new passphrase safe; we can’t recover it.</p>
+              </div>
+            ) : (
+              <div className="mt-2 space-y-2">
+                <input
+                  type="password"
+                  value={newPass}
+                  onChange={(e) => setNewPass(e.target.value)}
+                  placeholder="Set a passphrase to enable encrypted sync"
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                />
+                {migrateError && <div className="text-sm text-red-600">{migrateError}</div>}
+                <button
+                  onClick={reencryptAll}
+                  className="w-full rounded-md bg-violet-600 text-white px-3 py-2 hover:bg-violet-700"
+                >
+                  Save passphrase
+                </button>
+                <p className="text-xs text-gray-500">Cloud messages created after setting a passphrase will be encrypted on your device before syncing.</p>
+              </div>
+            )}
           </div>
         </div>
 
         <div className="mt-5 flex items-center justify-end gap-2">
-          <button onClick={onClose} className="px-3 py-2 rounded-md border border-gray-300 bg-white hover:bg-gray-50">Cancel</button>
-          <button onClick={save} disabled={saving} className="px-3 py-2 rounded-md bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">Save</button>
+          <button onClick={onClose} className="px-3 py-2 rounded-md border border-gray-300 bg-white hover:bg-gray-50">Close</button>
+          <button onClick={save} disabled={saving} className="px-3 py-2 rounded-md bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">Save key</button>
         </div>
       </div>
     </div>
