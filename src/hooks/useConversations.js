@@ -1,4 +1,18 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { onAuthChanged, db } from '../services/firebase';
+import {
+  collection,
+  doc,
+  setDoc,
+  addDoc,
+  onSnapshot,
+  serverTimestamp,
+  query,
+  orderBy,
+  deleteDoc,
+  getDocs,
+} from 'firebase/firestore';
+import { encryptJSON, decryptJSON } from '../utils/crypto';
 import { sendOpenAIMessage } from '../services/openai';
 import { sendGeminiMessage, generateTitle, generateSummary } from '../services/gemini';
 import { sendGeminiLiveIncremental } from '../services/geminiLive';
@@ -18,6 +32,7 @@ export const useConversations = () => {
   const [selectedModel, setSelectedModel] = useState('gemini-2.5-flash+search+incremental');
   const [isLoading, setIsLoading] = useState(false);
   const [inactivityTimer, setInactivityTimer] = useState(null);
+  const [user, setUser] = useState(null);
 
   // Load data on mount
   useEffect(() => {
@@ -36,6 +51,12 @@ export const useConversations = () => {
     setConversations(normalizedConversations);
     setCurrentConversationId(loadedCurrentId);
     if (loadedSettings.selectedModel) setSelectedModel(loadedSettings.selectedModel);
+  }, []);
+
+  // Firebase auth state
+  useEffect(() => {
+    const unsub = onAuthChanged((u) => setUser(u || null));
+    return () => { if (typeof unsub === 'function') unsub(); };
   }, []);
 
   // Save conversations whenever they change (debounced to avoid heavy writes during streaming)
@@ -64,6 +85,102 @@ export const useConversations = () => {
     saveSettings({ selectedModel });
   }, [selectedModel]);
 
+  // Remote sync: conversations metadata for logged-in user
+  useEffect(() => {
+    if (!user || !db) return;
+    const convsRef = collection(db, 'users', user.uid, 'conversations');
+    const unsub = onSnapshot(convsRef, (snap) => {
+      const remote = [];
+      snap.forEach((d) => {
+        const data = d.data() || {};
+        remote.push({
+          id: d.id,
+          title: data.title || 'New Chat',
+          summary: data.summary || '',
+          model: data.model || selectedModel,
+          createdAt: data.createdAt || new Date().toISOString(),
+          messages: [],
+        });
+      });
+      // Merge remote metadata into local list without overriding local messages
+      setConversations((prev) => {
+        const map = new Map(prev.map((c) => [c.id, c]));
+        for (const rc of remote) {
+          const existing = map.get(rc.id);
+          if (existing) {
+            map.set(rc.id, { ...existing, title: rc.title, summary: rc.summary, model: rc.model });
+          } else {
+            map.set(rc.id, rc);
+          }
+        }
+        return Array.from(map.values()).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+      });
+    });
+    return () => unsub();
+  }, [user]);
+
+  // Remote sync: messages of current conversation (requires passphrase)
+  useEffect(() => {
+    if (!user || !currentConversationId || !db) return;
+    const passphrase = (loadSettings()?.e2eePassphrase || '').trim();
+    if (!passphrase) return;
+    const msgsRef = query(
+      collection(db, 'users', user.uid, 'conversations', currentConversationId, 'messages'),
+      orderBy('createdAt', 'asc')
+    );
+    const unsub = onSnapshot(msgsRef, async (snap) => {
+      try {
+        const remoteMsgs = [];
+        for (const d of snap.docs) {
+          const data = d.data() || {};
+          const payload = data.contentCiphertext;
+          if (!payload) continue;
+          const decrypted = await decryptJSON(passphrase, payload);
+          remoteMsgs.push({
+            id: d.id,
+            role: data.author || 'assistant',
+            content: normalizeText(decrypted.content || ''),
+            attachments: Array.isArray(decrypted.attachments) ? decrypted.attachments : [],
+            timestamp: data.createdAt?.toDate?.()?.toISOString?.() || new Date().toISOString(),
+          });
+        }
+        setConversations((prev) => prev.map((c) => c.id === currentConversationId ? { ...c, messages: remoteMsgs } : c));
+      } catch (e) {
+        // If decryption fails, skip updating to avoid clobbering local state
+      }
+    });
+    return () => unsub();
+  }, [user, currentConversationId]);
+
+  // Helpers for Firestore writes
+  const ensureConversationDoc = useCallback(async (conversationId, meta) => {
+    if (!user || !db) return;
+    const ref = doc(db, 'users', user.uid, 'conversations', conversationId);
+    await setDoc(ref, {
+      title: meta?.title || 'New Chat',
+      summary: meta?.summary || '',
+      model: meta?.model || selectedModel,
+      createdAt: meta?.createdAt || new Date().toISOString(),
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  }, [user, selectedModel]);
+
+  const writeMessage = useCallback(async (conversationId, message) => {
+    if (!user || !db) return;
+    const passphrase = (loadSettings()?.e2eePassphrase || '').trim();
+    if (!passphrase) return;
+    const payload = await encryptJSON(passphrase, {
+      content: message.content || '',
+      attachments: Array.isArray(message.attachments) ? message.attachments : [],
+    });
+    const msgsRef = collection(db, 'users', user.uid, 'conversations', conversationId, 'messages');
+    await addDoc(msgsRef, {
+      author: message.role === 'user' ? 'user' : 'assistant',
+      contentCiphertext: payload,
+      createdAt: serverTimestamp(),
+    });
+  }, [user]);
+
   const getCurrentConversation = useCallback(() => {
     return conversations.find(conv => conv.id === currentConversationId);
   }, [conversations, currentConversationId]);
@@ -89,9 +206,11 @@ export const useConversations = () => {
       return [newConversation, ...pruned];
     });
     setCurrentConversationId(newId);
+    // Create remote container if signed in
+    ensureConversationDoc(newId, newConversation).catch(() => {});
     
     return newId;
-  }, [selectedModel, currentConversationId]);
+  }, [selectedModel, currentConversationId, ensureConversationDoc]);
 
   const switchToConversation = useCallback(async (conversationId) => {
     // Capture current conversation before switching
@@ -132,7 +251,18 @@ export const useConversations = () => {
       }
       return next;
     });
-  }, [currentConversationId]);
+    // Remote delete (best effort)
+    if (user && db) {
+      (async () => {
+        try {
+          const msgsCol = collection(db, 'users', user.uid, 'conversations', conversationId, 'messages');
+          const snap = await getDocs(msgsCol);
+          await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
+          await deleteDoc(doc(db, 'users', user.uid, 'conversations', conversationId));
+        } catch {}
+      })();
+    }
+  }, [currentConversationId, user]);
 
   const sendMessage = useCallback(async (content) => {
     // Ensure there's an active conversation; create one if missing
@@ -181,6 +311,10 @@ export const useConversations = () => {
     setIsLoading(true);
     
     try {
+      // Best-effort remote write for user message
+      await ensureConversationDoc(targetConversationId, { model: selectedModel });
+      await writeMessage(targetConversationId, userMessage);
+
       // Build the messages payload. If we created the conversation in this call,
       // the previous messages are guaranteed to be empty.
       let messagesForAPI = [userMessage];
@@ -273,6 +407,15 @@ export const useConversations = () => {
             ? { ...conv, messages: [...messagesForAPI, assistantMessage] }
             : conv
         ));
+        // Remote write assistant message
+        await writeMessage(targetConversationId, assistantMessage);
+      } else {
+        // For incremental mode, write the final assistant message after streaming completes
+        const current = getCurrentConversation();
+        const last = current?.messages?.[current.messages.length - 1];
+        if (last && last.role === 'assistant') {
+          await writeMessage(targetConversationId, last);
+        }
       }
 
       // Generate title after 2nd user message (4 total messages)
@@ -299,6 +442,8 @@ export const useConversations = () => {
               ? { ...conv, title }
               : conv
           ));
+          // Persist title in remote metadata
+          await ensureConversationDoc(targetConversationId, { title });
         } catch (error) {
           console.error('Failed to generate title:', error);
         }
@@ -335,6 +480,9 @@ export const useConversations = () => {
           setConversations(prev => prev.map(c => 
             c.id === conv.id ? { ...c, summary } : c
           ));
+          if (user && db) {
+            await ensureConversationDoc(conv.id, { summary });
+          }
         } catch (error) {
           console.error('Failed to generate summary:', error);
         }

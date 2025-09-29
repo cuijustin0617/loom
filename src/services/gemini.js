@@ -1,6 +1,11 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { loadSettings } from '../utils/storage';
 
-const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
+const getGenAI = () => {
+  const key = (loadSettings()?.byokGeminiKey || '').trim();
+  if (!key) throw new Error('Gemini API key is missing. Open Settings to add your key.');
+  return new GoogleGenerativeAI(key);
+};
 
 // Build Gemini "parts" array from a message that may include text + attachments
 const buildPartsFromMessage = (msg) => {
@@ -35,7 +40,7 @@ export const sendGeminiMessage = async (messages, model = 'gemini-2.5-flash') =>
     // Strip everything after '+' and remove optional '-search'
     const baseModel = normalized.split('+')[0].replace('-search', '');
 
-    const geminiModel = genAI.getGenerativeModel({ model: baseModel });
+    const geminiModel = getGenAI().getGenerativeModel({ model: baseModel });
 
     // Always use structured contents to support multimodal parts
     const contents = messages.map(msg => ({
@@ -110,7 +115,7 @@ export const sendGeminiMessage = async (messages, model = 'gemini-2.5-flash') =>
 
 export const generateTitle = async (messages) => {
   try {
-    const geminiModel = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
+    const geminiModel = getGenAI().getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
     
     const conversationText = messages.slice(0, 4).map(msg => 
       `${msg.role === 'user' ? 'Human' : 'Assistant'}: ${msg.content}`
@@ -130,7 +135,7 @@ export const generateTitle = async (messages) => {
 
 export const generateSummary = async (messages) => {
   try {
-    const geminiModel = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const geminiModel = getGenAI().getGenerativeModel({ model: 'gemini-2.5-flash' });
     
     const conversationText = messages.map(msg => 
       `${msg.role === 'user' ? 'Human' : 'Assistant'}: ${msg.content}`

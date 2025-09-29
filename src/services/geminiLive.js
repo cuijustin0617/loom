@@ -1,9 +1,14 @@
 import { GoogleGenAI, Modality } from '@google/genai';
+import { loadSettings } from '../utils/storage';
 
 // Live model to use for streaming (preview as per docs)
 const LIVE_MODEL = 'gemini-live-2.5-flash-preview';
 
-const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+const getAi = () => {
+  const key = (loadSettings()?.byokGeminiKey || '').trim();
+  if (!key) throw new Error('Gemini API key is missing. Open Settings to add your key.');
+  return new GoogleGenAI({ apiKey: key });
+};
 
 const toTurns = (messages) => {
   return messages.map((m) => {
@@ -46,6 +51,7 @@ export const sendGeminiLiveIncremental = async (messages, onDelta, onDone, useSe
   }
 
   try {
+    const ai = getAi();
     session = await ai.live.connect({
       model: LIVE_MODEL,
       callbacks: {

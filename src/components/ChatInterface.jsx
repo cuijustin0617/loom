@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Message from './Message';
 import ModelSelector from './ModelSelector';
+// settings are managed via Profile menu modal
 
 const ChatInterface = ({ 
   conversation, 
@@ -206,6 +207,7 @@ const ChatInterface = ({
             onModelChange={onModelChange}
           />
         </div>
+        {/* Settings moved into Profile menu; keep header clean */}
       </div>
 
       {/* Messages */}
