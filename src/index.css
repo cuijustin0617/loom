@@ -26,3 +26,33 @@ body {
 /* KaTeX overflow handling for long equations */
 .katex-display { overflow-x: auto; }
 .katex-display > .katex { white-space: nowrap; }
+
+/* Emerald theme overrides: map violet utilities to emerald when Explore is active */
+.theme-emerald .text-violet-600 { @apply text-emerald-600; }
+.theme-emerald .text-violet-700 { @apply text-emerald-700; }
+.theme-emerald .text-violet-500 { @apply text-emerald-500; }
+.theme-emerald .bg-violet-50 { @apply bg-emerald-50; }
+.theme-emerald .bg-violet-100 { @apply bg-emerald-100; }
+.theme-emerald .bg-violet-600 { @apply bg-emerald-600; }
+.theme-emerald .bg-violet-400 { @apply bg-emerald-400; }
+.theme-emerald .hover\:bg-violet-700:hover { @apply bg-emerald-700; }
+.theme-emerald .hover\:bg-violet-100:hover { @apply bg-emerald-100; }
+.theme-emerald .hover\:bg-violet-600\/10:hover { @apply bg-emerald-600/10; }
+.theme-emerald .border-violet-600 { @apply border-emerald-600; }
+.theme-emerald .border-violet-300 { @apply border-emerald-300; }
+.theme-emerald .border-violet-200 { @apply border-emerald-200; }
+.theme-emerald .border-violet-100 { @apply border-emerald-100; }
+.theme-emerald .border-violet-200\/70 { @apply border-emerald-200/70; }
+.theme-emerald .bg-violet-50\/60 { @apply bg-emerald-50/60; }
+.theme-emerald .bg-violet-600\/60 { @apply bg-emerald-600/60; }
+.theme-emerald .bg-violet-700\/60 { @apply bg-emerald-700/60; }
+.theme-emerald .bg-violet-600\/15 { @apply bg-emerald-600/15; }
+.theme-emerald .ring-violet-500 { @apply ring-emerald-500; }
+.theme-emerald .focus\:ring-violet-600:focus { @apply ring-emerald-600; }
+.theme-emerald .focus\:ring-violet-500:focus { @apply ring-emerald-500; }
+.theme-emerald .from-violet-50 { @apply from-emerald-50; }
+
+/* Simple, safe line clamp helpers (avoid plugin dependency) */
+.line-clamp-1 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; overflow: hidden; }
+.line-clamp-2 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.line-clamp-3 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }

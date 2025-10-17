@@ -18,12 +18,35 @@ export function normalizeText(input) {
   // Collapse multiple ε into a single one
   s = s.replace(/ε{2,}/g, 'ε');
 
+  // Map common stray LaTeX macros (when not wrapped in $...$) to Unicode so they render nicely in plain text
+  // Keep this conservative to avoid affecting code blocks (handled further below by table fixer’s fence detection)
+  const macroMap = [
+    { re: /\\implies\b/g, rep: '⇒' },
+    { re: /\\impliedby\b/g, rep: '⇐' },
+    { re: /\\iff\b/g, rep: '⇔' },
+    { re: /\\to\b/g, rep: '→' },
+    { re: /\\rightarrow\b/g, rep: '→' },
+    { re: /\\leftarrow\b/g, rep: '←' },
+    { re: /\\geq\b/g, rep: '≥' },
+    { re: /\\leq\b/g, rep: '≤' },
+    { re: /\\times\b/g, rep: '×' },
+    { re: /\\cdot\b/g, rep: '·' },
+    { re: /\\pm\b/g, rep: '±' },
+  ];
+  for (const { re, rep } of macroMap) s = s.replace(re, rep);
+
   // Collapse triplicate synonym patterns like x0x_0x0 or xtx_txt to x_0 / x_t
   // Optional whitespace allowed between parts
   s = s.replace(/\b([A-Za-z])([A-Za-z0-9])\s*\1_\2\s*\1\2\b/g, '$1_$2');
 
   // Common typo from model outputs
   s = s.replace(/\bvvv-prediction\b/gi, 'v-prediction');
+
+  // De-duplicate some common copy/paste artifacts where expressions repeat back-to-back
+  // e.g., "P(I)P(I)P(I)" -> "P(I)"
+  s = s.replace(/\b([A-Za-z]\([^\)]+\))(?:\s*\1){1,}/g, '$1');
+  // e.g., lines like "Check: expr expr expr" (same expr repeated thrice) -> single expr
+  s = s.replace(/(Check:\s*)([^\n]+?)\s*\2\s*\2/gi, '$1$2');
 
   // Wrap bare LaTeX subscripts/superscripts so KaTeX renders when markdown is parsed later
   // Keep this conservative to avoid over-wrapping (avoid already wrapped expressions)

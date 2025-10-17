@@ -39,7 +39,7 @@ export const saveSettings = (settings) => {
 
 export const loadSettings = () => {
   const stored = localStorage.getItem(STORAGE_KEYS.SETTINGS);
-  return stored ? JSON.parse(stored) : { selectedModel: 'gemini-2.5-flash+search+incremental', byokGeminiKey: '', e2eePassphrase: '', byokGeminiKeyUpdatedAt: 0 };
+  return stored ? JSON.parse(stored) : { selectedModel: 'gemini-2.5-pro+search+incremental', byokGeminiKey: '', e2eePassphrase: '', byokGeminiKeyUpdatedAt: 0 };
 };
 
 // API key freshness helpers

@@ -10,6 +10,7 @@ const ModelSelector = ({ selectedModel, onModelChange, compact = false }) => {
     { id: 'gemini-2.5-flash-lite+search', name: 'Gemini 2.5 Flash Lite + Search' },
     { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
     { id: 'gemini-2.5-pro+search', name: 'Gemini 2.5 Pro + Search' },
+    { id: 'gemini-2.5-pro+search+incremental', name: 'Gemini 2.5 Pro + Search (Live)' },
     // OpenAI
     { id: 'gpt-4o-mini', name: 'GPT-4o Mini' }
   ];

@@ -2,7 +2,13 @@ import { GoogleGenAI, Modality } from '@google/genai';
 import { loadSettings } from '../utils/storage';
 
 // Live model to use for streaming (preview as per docs)
-const LIVE_MODEL = 'gemini-live-2.5-flash-preview';
+const getLiveModel = (selectedModel = '') => {
+  const normalized = (selectedModel || '').trim();
+  if (normalized.includes('pro')) {
+    return 'gemini-live-2.5-pro-preview';
+  }
+  return 'gemini-live-2.5-flash-preview';
+};
 
 const getAi = () => {
   const key = (loadSettings()?.byokGeminiKey || '').trim();
@@ -39,7 +45,7 @@ const toTurns = (messages) => {
  * @param {boolean} useSearch - Whether to enable Google Search grounding
  * @returns {Promise<string>} Resolves with the final concatenated text
  */
-export const sendGeminiLiveIncremental = async (messages, onDelta, onDone, useSearch = false) => {
+export const sendGeminiLiveIncremental = async (messages, onDelta, onDone, useSearch = false, selectedModel = '') => {
   const responseQueue = [];
   let session;
 
@@ -53,7 +59,7 @@ export const sendGeminiLiveIncremental = async (messages, onDelta, onDone, useSe
   try {
     const ai = getAi();
     session = await ai.live.connect({
-      model: LIVE_MODEL,
+      model: getLiveModel(selectedModel),
       callbacks: {
         onopen: function () {
           // opened
