@@ -17,7 +17,8 @@ const ChatInterface = ({
   const messagesEndRef = useRef(null);
   const scrollContainerRef = useRef(null);
   const textareaRef = useRef(null);
-  const fileInputRef = useRef(null);
+  const fileInputTopRef = useRef(null);
+  const fileInputBottomRef = useRef(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -249,7 +250,7 @@ const ChatInterface = ({
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => fileInputRef.current?.click()}
+                        onClick={() => fileInputTopRef.current?.click()}
                         className="p-2 rounded-full hover:bg-gray-100 text-gray-700"
                         title="Attach files"
                       >
@@ -258,7 +259,7 @@ const ChatInterface = ({
                         </svg>
                       </button>
                       <input
-                        ref={fileInputRef}
+                        ref={fileInputTopRef}
                         type="file"
                         accept="image/*,application/pdf"
                         multiple
@@ -287,6 +288,35 @@ const ChatInterface = ({
                   </div>
                 </div>
               </form>
+              {/* Attachments Preview for empty-state composer */}
+              {attachments.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {attachments.map((att, idx) => {
+                    const isImage = (att.mimeType || '').startsWith('image/');
+                    const dataUrl = `data:${att.mimeType};base64,${att.base64}`;
+                    return (
+                      <div key={idx} className="group relative border border-violet-200 rounded-md p-2 bg-white shadow-sm">
+                        {isImage ? (
+                          <img src={dataUrl} alt={att.name} className="h-16 w-16 object-cover rounded" />
+                        ) : (
+                          <div className="flex items-center gap-2 text-sm text-gray-700">
+                            <svg className="h-5 w-5 text-violet-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                              <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                              <path d="M14 2v6h6"/>
+                            </svg>
+                            <span className="max-w-[180px] truncate" title={att.name}>{att.name}</span>
+                          </div>
+                        )}
+                        <button type="button" onClick={() => removeAttachment(idx)} className="absolute -top-2 -right-2 bg-white border border-gray-300 rounded-full p-0.5 shadow hover:bg-gray-50">
+                          <svg className="h-4 w-4 text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M18 6L6 18M6 6l12 12"/>
+                          </svg>
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               {isDragging && (
                 <div className="mt-4 rounded-xl border-2 border-dashed border-violet-300 bg-violet-50/60 text-violet-700 flex items-center justify-center py-12 text-sm">
                   Drop your file to attach
@@ -363,7 +393,7 @@ const ChatInterface = ({
           >
             <button
               type="button"
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => fileInputBottomRef.current?.click()}
               className="p-2 rounded-full hover:bg-gray-100 text-gray-700"
               title="Attach files"
             >
@@ -372,7 +402,7 @@ const ChatInterface = ({
               </svg>
             </button>
             <input
-              ref={fileInputRef}
+              ref={fileInputBottomRef}
               type="file"
               accept="image/*,application/pdf"
               multiple

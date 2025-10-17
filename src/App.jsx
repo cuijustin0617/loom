@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useConversations } from './hooks/useConversations';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
+import ExploreView from './components/ExploreView';
 import OnboardingGate from './components/OnboardingGate';
 
 function App() {
@@ -13,6 +14,7 @@ function App() {
   const MIN_CHAT_WIDTH = 560; // px, below this auto-collapse
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('loom_sidebar_collapsed') === '1');
   const autoCollapsedRef = useRef(false);
+  const [exploreActive, setExploreActive] = useState(false);
 
   useEffect(() => {
     localStorage.setItem('loom_sidebar_collapsed', sidebarCollapsed ? '1' : '0');
@@ -91,6 +93,15 @@ function App() {
     return <OnboardingGate onComplete={() => setNeedsGate(false)} />;
   }
 
+  if (exploreActive) {
+    return (
+      <ExploreView
+        conversations={conversations}
+        onExitExplore={() => setExploreActive(false)}
+      />
+    );
+  }
+
   return (
     <div className="flex h-screen bg-white relative">
       {/* Sidebar (fixed width, collapsible) */}
@@ -104,6 +115,7 @@ function App() {
             onDeleteConversation={deleteConversation}
             isCompact={false}
             onCollapse={toggleCollapse}
+            onExplore={() => setExploreActive(true)}
           />
         </div>
       )}

@@ -126,10 +126,18 @@ export const generateTitle = async (messages) => {
     const result = await geminiModel.generateContent(prompt);
     const response = await result.response;
     
-    return response.text().trim();
+    let t = (response.text() || '').trim();
+    // Basic cleanup
+    t = t.replace(/^"+|"+$/g, ''); // strip surrounding quotes
+    t = t.replace(/^'+|'+$/g, '');
+    if (!t) return null;
+    const lower = t.toLowerCase();
+    if (lower === 'new chat' || lower === 'new conversation' || lower === 'untitled' || lower === 'conversation') return null;
+    if (t.length > 60) t = t.slice(0, 57) + '…';
+    return t;
   } catch (error) {
     console.error('Title generation failed:', error);
-    return 'New Conversation';
+    return null; // avoid overwriting with a placeholder
   }
 };
 

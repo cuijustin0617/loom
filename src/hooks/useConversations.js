@@ -29,10 +29,16 @@ import {
 export const useConversations = () => {
   const [conversations, setConversations] = useState([]);
   const [currentConversationId, setCurrentConversationId] = useState(null);
-  const [selectedModel, setSelectedModel] = useState('gemini-2.5-flash+search+incremental');
+  const [selectedModel, setSelectedModel] = useState('gemini-2.5-pro+search+incremental');
   const [isLoading, setIsLoading] = useState(false);
   const [inactivityTimer, setInactivityTimer] = useState(null);
   const [user, setUser] = useState(null);
+
+  // Helper to identify placeholder titles we should avoid persisting/overwriting with
+  const isPlaceholderTitle = useCallback((t) => {
+    const s = String(t || '').trim().toLowerCase();
+    return !s || s === 'new chat' || s === 'new conversation' || s === 'untitled' || s === 'conversation';
+  }, []);
 
   // Load data on mount
   useEffect(() => {
@@ -41,15 +47,19 @@ export const useConversations = () => {
     const loadedSettings = loadSettings() || {};
 
     // One-time normalization for stored messages to reduce render-time work
-    const normalizedConversations = loadedConversations.map(c => ({
-      ...c,
-      messages: Array.isArray(c.messages)
-        ? c.messages.map(m => ({ ...m, content: normalizeText(m.content) }))
-        : [],
-    }));
+    const normalizedConversations = loadedConversations
+      .map(c => ({
+        ...c,
+        messages: Array.isArray(c.messages)
+          ? c.messages.map(m => ({ ...m, content: normalizeText(m.content) }))
+          : [],
+      }))
+      // Drop any persisted empty conversations
+      .filter(c => Array.isArray(c.messages) && c.messages.length > 0);
 
     setConversations(normalizedConversations);
-    setCurrentConversationId(loadedCurrentId);
+    const exists = normalizedConversations.some(c => c.id === loadedCurrentId);
+    setCurrentConversationId(exists ? loadedCurrentId : null);
     if (loadedSettings.selectedModel) setSelectedModel(loadedSettings.selectedModel);
   }, []);
 
@@ -66,7 +76,9 @@ export const useConversations = () => {
     if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current);
     const delay = isLoading ? 600 : 150;
     saveDebounceRef.current = setTimeout(() => {
-      saveConversations(conversations);
+      // Persist only non-empty conversations to avoid resurrecting empty placeholders
+      const toPersist = conversations.filter(c => Array.isArray(c.messages) && c.messages.length > 0);
+      saveConversations(toPersist);
     }, delay);
     return () => {
       if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current);
@@ -93,6 +105,11 @@ export const useConversations = () => {
       const remote = [];
       snap.forEach((d) => {
         const data = d.data() || {};
+        // Skip remote placeholders that have no messages
+        const looksEmptyRemote = !data.hasMessages && (!data.summary || String(data.summary).trim() === '') && isPlaceholderTitle(data.title);
+        if (looksEmptyRemote) {
+          return; // ignore empty placeholders
+        }
         remote.push({
           id: d.id,
           title: data.title || 'New Chat',
@@ -108,7 +125,11 @@ export const useConversations = () => {
         for (const rc of remote) {
           const existing = map.get(rc.id);
           if (existing) {
-            map.set(rc.id, { ...existing, title: rc.title, summary: rc.summary, model: rc.model });
+            // Prefer a non-default local title over a default/placeholder remote one
+            const mergedTitle = (!isPlaceholderTitle(existing.title) && isPlaceholderTitle(rc.title))
+              ? existing.title
+              : (rc.title || existing.title || 'New Chat');
+            map.set(rc.id, { ...existing, title: mergedTitle, summary: rc.summary || existing.summary || '', model: rc.model || existing.model });
           } else {
             map.set(rc.id, rc);
           }
@@ -131,6 +152,7 @@ export const useConversations = () => {
     const unsub = onSnapshot(msgsRef, async (snap) => {
       try {
         const remoteMsgs = [];
+        let containsOmitted = false;
         for (const d of snap.docs) {
           const data = d.data() || {};
           const payload = data.contentCiphertext;
@@ -143,8 +165,20 @@ export const useConversations = () => {
             attachments: Array.isArray(decrypted.attachments) ? decrypted.attachments : [],
             timestamp: data.createdAt?.toDate?.()?.toISOString?.() || new Date().toISOString(),
           });
+          if (decrypted.attachmentsOmitted || data.attachmentsOmitted) containsOmitted = true;
         }
-        setConversations((prev) => prev.map((c) => c.id === currentConversationId ? { ...c, messages: remoteMsgs } : c));
+        // Do not clobber local messages if remote is behind.
+        // - Ignore when remote has zero messages (likely not yet synced).
+        // - Only apply when remote has at least as many messages as local.
+        setConversations((prev) => prev.map((c) => {
+          if (c.id !== currentConversationId) return c;
+          const remoteCount = remoteMsgs.length;
+          const localCount = Array.isArray(c.messages) ? c.messages.length : 0;
+          if (remoteCount === 0) return c;
+          if (remoteCount < localCount) return c;
+          if (containsOmitted) return c; // preserve local attachments when remote trimmed
+          return { ...c, messages: remoteMsgs };
+        }));
       } catch (e) {
         // If decryption fails, skip updating to avoid clobbering local state
       }
@@ -169,16 +203,33 @@ export const useConversations = () => {
     if (!user || !db) return;
     const passphrase = (loadSettings()?.e2eePassphrase || '').trim();
     if (!passphrase) return;
-    const payload = await encryptJSON(passphrase, {
-      content: message.content || '',
-      attachments: Array.isArray(message.attachments) ? message.attachments : [],
-    });
+    const att = Array.isArray(message.attachments) ? message.attachments : [];
+    const approxBase64Bytes = att.reduce((sum, a) => sum + (a?.base64?.length || 0), 0);
+    const approxContentBytes = (message.content || '').length;
+    const SHOULD_TRIM = approxBase64Bytes > 200000 || approxBase64Bytes + approxContentBytes > 900000;
+    const toEncrypt = SHOULD_TRIM
+      ? {
+          content: message.content || '',
+          attachments: [],
+          attachmentsOmitted: att.length > 0,
+          attachmentsMeta: att.map(a => ({ name: a?.name, mimeType: a?.mimeType, size: a?.size })),
+        }
+      : {
+          content: message.content || '',
+          attachments: att,
+        };
+    const payload = await encryptJSON(passphrase, toEncrypt);
     const msgsRef = collection(db, 'users', user.uid, 'conversations', conversationId, 'messages');
     await addDoc(msgsRef, {
       author: message.role === 'user' ? 'user' : 'assistant',
       contentCiphertext: payload,
       createdAt: serverTimestamp(),
+      attachmentsOmitted: SHOULD_TRIM ? true : false,
     });
+    try {
+      const ref = doc(db, 'users', user.uid, 'conversations', conversationId);
+      await setDoc(ref, { hasMessages: true, updatedAt: serverTimestamp() }, { merge: true });
+    } catch {}
   }, [user]);
 
   const getCurrentConversation = useCallback(() => {
@@ -206,8 +257,7 @@ export const useConversations = () => {
       return [newConversation, ...pruned];
     });
     setCurrentConversationId(newId);
-    // Create remote container if signed in
-    ensureConversationDoc(newId, newConversation).catch(() => {});
+    // Do not create remote container until the first message is sent
     
     return newId;
   }, [selectedModel, currentConversationId, ensureConversationDoc]);
@@ -286,6 +336,18 @@ export const useConversations = () => {
       timestamp: new Date().toISOString()
     };
 
+    // Build a quick provisional title from the first user input
+    const computeProvisionalTitle = (t) => {
+      const raw = String(t || '').trim().replace(/\s+/g, ' ');
+      if (!raw) return 'New Chat';
+      // Take first sentence or first ~6 words, max ~60 chars
+      const firstSentence = raw.split(/[.!?]\s+/)[0];
+      const words = firstSentence.split(' ').slice(0, 6).join(' ');
+      const clipped = words.length > 60 ? words.slice(0, 57) + '…' : words;
+      return clipped || 'New Chat';
+    };
+    const provisionalTitle = computeProvisionalTitle(userMessage.content);
+
     // Add user message immediately; if the convo doesn't exist yet in state,
     // create a minimal one to ensure the echo shows up.
     setConversations(prev => {
@@ -293,7 +355,7 @@ export const useConversations = () => {
       if (!existing) {
         const tempConversation = {
           id: targetConversationId,
-          title: 'New Chat',
+          title: provisionalTitle,
           messages: [userMessage],
           model: selectedModel,
           createdAt: new Date().toISOString(),
@@ -303,7 +365,11 @@ export const useConversations = () => {
         return [tempConversation, ...prev];
       }
       // Append user message and move this conversation to the top (most recent)
-      const updated = { ...existing, messages: [...existing.messages, userMessage] };
+      const updated = { 
+        ...existing, 
+        title: (isPlaceholderTitle(existing.title)) ? provisionalTitle : existing.title,
+        messages: [...existing.messages, userMessage] 
+      };
       const others = prev.filter(c => c.id !== targetConversationId);
       return [updated, ...others];
     });
@@ -314,6 +380,20 @@ export const useConversations = () => {
       // Best-effort remote write for user message
       await ensureConversationDoc(targetConversationId, { model: selectedModel });
       await writeMessage(targetConversationId, userMessage);
+
+      // Kick off early title generation based on the first user message
+      // Update only if the title hasn't been customized yet
+      try {
+        const earlyTitle = await generateTitle([userMessage]);
+        if (earlyTitle && !isPlaceholderTitle(earlyTitle)) {
+          setConversations(prev => prev.map(conv => 
+            conv.id === targetConversationId && (isPlaceholderTitle(conv.title) || conv.title === provisionalTitle)
+              ? { ...conv, title: earlyTitle }
+              : conv
+          ));
+          await ensureConversationDoc(targetConversationId, { title: earlyTitle });
+        }
+      } catch {}
 
       // Build the messages payload. If we created the conversation in this call,
       // the previous messages are guaranteed to be empty.
@@ -418,35 +498,33 @@ export const useConversations = () => {
         }
       }
 
-      // Generate title after 2nd user message (4 total messages)
-      const totalMessages = messagesForAPI.length + 1;
-      if (totalMessages === 4) {
-        try {
-          // Build the convo end depending on streaming
-          let convoForTitle;
-          if (selectedModel.includes('+incremental')) {
-            const current = getCurrentConversation();
-            const lastAssistant = current?.messages[current.messages.length - 1];
-            convoForTitle = [...messagesForAPI, lastAssistant];
-          } else {
-            const assistantMessage = {
-              role: 'assistant',
-              content: response,
-              timestamp: new Date().toISOString()
-            };
-            convoForTitle = [...messagesForAPI, assistantMessage];
-          }
-          const title = await generateTitle(convoForTitle);
+      // Update/refine title after first assistant response if still default/provisional
+      try {
+        // Build the convo end depending on streaming
+        let convoForTitle;
+        if (selectedModel.includes('+incremental')) {
+          const current = getCurrentConversation();
+          const lastAssistant = current?.messages[current.messages.length - 1];
+          convoForTitle = [...messagesForAPI, lastAssistant];
+        } else {
+          const assistantMessage = {
+            role: 'assistant',
+            content: response,
+            timestamp: new Date().toISOString()
+          };
+          convoForTitle = [...messagesForAPI, assistantMessage];
+        }
+        const refinedTitle = await generateTitle(convoForTitle);
+        if (refinedTitle && !isPlaceholderTitle(refinedTitle)) {
           setConversations(prev => prev.map(conv => 
-            conv.id === targetConversationId 
-              ? { ...conv, title }
+            conv.id === targetConversationId && (isPlaceholderTitle(conv.title) || conv.title === provisionalTitle)
+              ? { ...conv, title: refinedTitle }
               : conv
           ));
-          // Persist title in remote metadata
-          await ensureConversationDoc(targetConversationId, { title });
-        } catch (error) {
-          console.error('Failed to generate title:', error);
+          await ensureConversationDoc(targetConversationId, { title: refinedTitle });
         }
+      } catch (error) {
+        console.error('Failed to generate title:', error);
       }
 
     } catch (error) {
