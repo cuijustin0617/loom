@@ -2,7 +2,8 @@ import { useEffect, useState, useRef } from 'react';
 import { useConversations } from './hooks/useConversations';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
-import ExploreView from './components/ExploreView';
+import ModeToggle from './components/ModeToggle';
+import LearnView from './components/LearnView';
 import OnboardingGate from './components/OnboardingGate';
 
 function App() {
@@ -14,7 +15,7 @@ function App() {
   const MIN_CHAT_WIDTH = 560; // px, below this auto-collapse
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('loom_sidebar_collapsed') === '1');
   const autoCollapsedRef = useRef(false);
-  const [exploreActive, setExploreActive] = useState(false);
+  const [learnActive, setLearnActive] = useState(false);
 
   useEffect(() => {
     localStorage.setItem('loom_sidebar_collapsed', sidebarCollapsed ? '1' : '0');
@@ -93,17 +94,29 @@ function App() {
     return <OnboardingGate onComplete={() => setNeedsGate(false)} />;
   }
 
-  if (exploreActive) {
+  if (learnActive) {
     return (
-      <ExploreView
-        conversations={conversations}
-        onExitExplore={() => setExploreActive(false)}
-      />
+      <>
+        {/* Global sticky toggle: centered top, consistent across modes */}
+        <div className="fixed top-3 left-1/2 -translate-x-1/2 z-40">
+          <ModeToggle mode={'learn'} onChange={(m)=>{ if (m==='chat') setLearnActive(false); }} />
+        </div>
+        <LearnView
+          conversations={conversations}
+          onExitLearn={() => setLearnActive(false)}
+        />
+      </>
     );
   }
 
+  const mode = learnActive ? 'learn' : 'chat';
+
   return (
     <div className="flex h-screen bg-white relative">
+      {/* Global sticky toggle: centered top, consistent across modes */}
+      <div className="fixed top-3 left-1/2 -translate-x-1/2 z-40">
+        <ModeToggle mode={'chat'} onChange={(m)=>{ if (m==='learn') setLearnActive(true); }} />
+      </div>
       {/* Sidebar (fixed width, collapsible) */}
       {!sidebarCollapsed && (
         <div className="h-full border-r border-gray-200 bg-loom-gray select-none" style={{ width: SIDEBAR_WIDTH }}>
@@ -115,7 +128,8 @@ function App() {
             onDeleteConversation={deleteConversation}
             isCompact={false}
             onCollapse={toggleCollapse}
-            onExplore={() => setExploreActive(true)}
+            mode={mode}
+            onModeChange={(m) => setLearnActive(m === 'learn')}
           />
         </div>
       )}
@@ -133,6 +147,7 @@ function App() {
 
       <ChatInterface
         conversation={currentConversation}
+        conversations={conversations}
         isLoading={isLoading}
         onSendMessage={handleSendMessage}
         selectedModel={selectedModel}

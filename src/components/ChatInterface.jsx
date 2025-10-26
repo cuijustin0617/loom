@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Message from './Message';
 import ModelSelector from './ModelSelector';
+import { generateMissingSummaries } from '../services/learn_simple';
 // settings are managed via Profile menu modal
 
 const ChatInterface = ({ 
-  conversation, 
+  conversation,
+  conversations, // All conversations for summary generation
   isLoading, 
   onSendMessage, 
   selectedModel, 
@@ -19,6 +21,8 @@ const ChatInterface = ({
   const textareaRef = useRef(null);
   const fileInputTopRef = useRef(null);
   const fileInputBottomRef = useRef(null);
+  const [generatingSummaries, setGeneratingSummaries] = useState(false);
+  const [summaryStats, setSummaryStats] = useState(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -92,6 +96,31 @@ const ChatInterface = ({
     const processed = await Promise.all(toRead.map(readAsBase64));
     setAttachments(prev => [...prev, ...processed]);
   }, []);
+
+  const handleGenerateSummaries = useCallback(async () => {
+    if (!conversations || conversations.length === 0) {
+      setSummaryStats({ error: 'No conversations to summarize' });
+      setTimeout(() => setSummaryStats(null), 3000);
+      return;
+    }
+    setGeneratingSummaries(true);
+    setSummaryStats(null);
+    try {
+      const { stats } = await generateMissingSummaries({ 
+        conversations, 
+        preferredModel: 'gemini-2.5-flash-lite' 
+      });
+      setSummaryStats(stats);
+      // Auto-hide stats after 5 seconds
+      setTimeout(() => setSummaryStats(null), 5000);
+    } catch (error) {
+      console.error('Failed to generate summaries:', error);
+      setSummaryStats({ error: error?.message || 'Failed to generate summaries' });
+      setTimeout(() => setSummaryStats(null), 5000);
+    } finally {
+      setGeneratingSummaries(false);
+    }
+  }, [conversations]);
 
   const handleScroll = (e) => {
     const isLive = selectedModel?.includes('+incremental');
@@ -199,16 +228,39 @@ const ChatInterface = ({
     <div className="flex-1 min-w-0 flex flex-col bg-white">
       {/* Header with Model Selector */}
       <div className="sticky top-0 z-10 border-b border-violet-200/70 bg-white/70 backdrop-blur px-3 sm:px-6 py-4">
-        <div className="flex justify-between items-center">
+        <div className="flex justify-between items-center gap-3">
           <h2 className="text-lg font-semibold text-gray-800 truncate">
             {conversation.title}
           </h2>
-          <ModelSelector 
-            selectedModel={selectedModel} 
-            onModelChange={onModelChange}
-          />
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={handleGenerateSummaries} 
+              disabled={generatingSummaries}
+              className={`px-3 py-1.5 text-sm rounded-md border border-violet-600 text-violet-700 ${generatingSummaries ? 'opacity-60 cursor-not-allowed' : 'hover:bg-violet-50'}`}
+              title="Generate summaries for Learn mode using Flash Lite model"
+            >
+              {generatingSummaries ? 'Generating...' : 'Generate summaries'}
+            </button>
+            <ModelSelector 
+              selectedModel={selectedModel} 
+              onModelChange={onModelChange}
+            />
+          </div>
         </div>
         {/* Settings moved into Profile menu; keep header clean */}
+        {/* Summary generation feedback */}
+        {summaryStats && (
+          <div className={`mt-2 px-3 py-2 rounded-md border text-sm ${summaryStats.error ? 'border-red-300 bg-red-50 text-red-800' : 'border-violet-300 bg-violet-50 text-violet-800'}`}>
+            {summaryStats.error ? (
+              <span>Error: {summaryStats.error}</span>
+            ) : (
+              <span>
+                ✓ Summaries: {summaryStats.existing || 0} existing, {summaryStats.generated || 0} generated, {summaryStats.failed || 0} failed
+                {summaryStats.generated === 0 && summaryStats.failed === 0 ? ' (all up to date)' : ''}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Messages */}

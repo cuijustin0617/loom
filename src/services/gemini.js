@@ -48,7 +48,10 @@ export const sendGeminiMessage = async (messages, model = 'gemini-2.5-flash') =>
       parts: buildPartsFromMessage(msg),
     }));
 
-    const request = useSearch
+    // Heuristic: if the prompt demands JSON-only output, avoid adding search tool noise and skip appending sources.
+    const wantsJsonOnly = Array.isArray(messages) && messages.some(m => /\b(json only|return only valid json|output:\s*json only)/i.test(String(m.content || '')));
+
+    const request = (useSearch && !wantsJsonOnly)
       ? { contents, tools: [{ googleSearch: {} }] }
       : { contents };
 
@@ -58,53 +61,52 @@ export const sendGeminiMessage = async (messages, model = 'gemini-2.5-flash') =>
     // Base text
     let out = response.text();
 
-    // Attempt to extract links with titles and append as Sources
-    try {
-      const candidates = response.candidates || [];
-      const linkMap = new Map(); // url -> title
+    // Attempt to extract links and append as Sources only when not JSON-only
+    if (!wantsJsonOnly) {
+      try {
+        const candidates = response.candidates || [];
+        const linkMap = new Map(); // url -> title
 
-      const titleForUrl = (url, obj) => {
-        let title = obj?.title || obj?.pageTitle || obj?.sourceTitle || obj?.name;
-        try {
-          if (!title) {
-            const u = new URL(url);
-            title = u.hostname.replace(/^www\./, '');
+        const titleForUrl = (url, obj) => {
+          let title = obj?.title || obj?.pageTitle || obj?.sourceTitle || obj?.name;
+          try {
+            if (!title) {
+              const u = new URL(url);
+              title = u.hostname.replace(/^www\./, '');
+            }
+          } catch {}
+          return title || url;
+        };
+
+        const collectFromObj = (obj) => {
+          if (!obj) return;
+          if (Array.isArray(obj)) { obj.forEach(collectFromObj); return; }
+          if (typeof obj !== 'object') return;
+
+          // If object has a url-like field, record it with any nearby title
+          const url = obj.uri || obj.url || obj.sourceUrl;
+          if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
+            linkMap.set(url, titleForUrl(url, obj));
           }
-        } catch {}
-        return title || url;
-      };
 
-      const collectFromObj = (obj) => {
-        if (!obj) return;
-        if (Array.isArray(obj)) { obj.forEach(collectFromObj); return; }
-        if (typeof obj !== 'object') return;
+          for (const v of Object.values(obj)) collectFromObj(v);
+        };
 
-        // If object has a url-like field, record it with any nearby title
-        const url = obj.uri || obj.url || obj.sourceUrl;
-        if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
-          linkMap.set(url, titleForUrl(url, obj));
+        for (const cand of candidates) {
+          if (cand.urlContextMetadata) collectFromObj(cand.urlContextMetadata);
+          if (cand.citationMetadata) collectFromObj(cand.citationMetadata);
+          if (cand.groundingMetadata) collectFromObj(cand.groundingMetadata);
         }
 
-        // Known containers: urlContextMetadata.urlMetadata, citationMetadata.citations, groundingMetadata.*
-        for (const v of Object.values(obj)) {
-          collectFromObj(v);
+        if (linkMap.size > 0) {
+          const linksMd = Array.from(linkMap.entries())
+            .map(([u, t]) => `- [${t}](${u})`)
+            .join('\n');
+          out = `${out}\n\nSources:\n${linksMd}`;
         }
-      };
-
-      for (const cand of candidates) {
-        if (cand.urlContextMetadata) collectFromObj(cand.urlContextMetadata);
-        if (cand.citationMetadata) collectFromObj(cand.citationMetadata);
-        if (cand.groundingMetadata) collectFromObj(cand.groundingMetadata);
+      } catch {
+        // best-effort only
       }
-
-      if (linkMap.size > 0) {
-        const linksMd = Array.from(linkMap.entries())
-          .map(([u, t]) => `- [${t}](${u})`)
-          .join('\n');
-        out = `${out}\n\nSources:\n${linksMd}`;
-      }
-    } catch {
-      // best-effort only
     }
 
     return out;

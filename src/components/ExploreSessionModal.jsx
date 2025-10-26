@@ -5,7 +5,8 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import rehypeRaw from 'rehype-raw';
-import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
+import rehypeSanitize from 'rehype-sanitize';
+import { defaultSchema } from 'hast-util-sanitize';
 import { normalizeText } from '../utils/normalize';
 import { getCachedSession, setCachedSession } from '../utils/exploreStorage';
 
@@ -141,10 +142,22 @@ export default function ExploreSessionModal({ open, card, onClose, onComplete })
     return { main: out.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd(), sources: uniq };
   };
 
-  const sanitizeSchema = {
-    ...defaultSchema,
-    tagNames: [...(defaultSchema.tagNames || []), 'br'],
-  };
+  const sanitizeSchema = useMemo(() => {
+    try {
+      if (defaultSchema && typeof defaultSchema === 'object') {
+        return { ...defaultSchema, tagNames: [...(defaultSchema.tagNames || []), 'br'] };
+      }
+    } catch {}
+    return { tagNames: ['p','strong','em','code','pre','h1','h2','h3','ul','ol','li','table','thead','tbody','tr','th','td','a','br','span','div'] };
+  }, []);
+  const rehypePluginsSafe = useMemo(() => {
+    const list = [rehypeKatex];
+    if (sanitizeSchema && sanitizeSchema.tagNames) {
+      list.push(rehypeRaw);
+      list.push([rehypeSanitize, sanitizeSchema]);
+    }
+    return list;
+  }, [sanitizeSchema]);
 
   const { stripped: withoutQuiz, quiz } = useMemo(() => extractQuizJSON(content || ''), [content]);
   const normalizedQuiz = useMemo(() => {
@@ -301,7 +314,7 @@ export default function ExploreSessionModal({ open, card, onClose, onComplete })
             <div className="text-sm leading-relaxed break-words">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm, remarkMath]}
-                rehypePlugins={[rehypeKatex, rehypeRaw, [rehypeSanitize, sanitizeSchema]]}
+                rehypePlugins={rehypePluginsSafe}
                 components={mdComponents}
               >
                 {normalizeText(mainText)}

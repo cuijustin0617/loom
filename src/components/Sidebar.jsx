@@ -10,30 +10,17 @@ const Sidebar = ({
   onDeleteConversation,
   isCompact = false,
   onCollapse,
-  // Explore wiring (optional)
-  onExplore,
-  hideExploreButton = false,
+  // (Global toggle rendered from App)
   primaryButtonLabel = 'New Chat',
   onPrimaryButton,
   hideCollapseHandle = false,
 }) => {
   return (
     <div className="bg-loom-gray flex flex-col h-full relative">
-      {/* Header with Logo and Explore button */}
+      {/* Header with brand */}
       <div className="p-3 sm:p-4 border-b border-gray-200">
         <div className="flex items-center justify-between mb-3">
           <Logo />
-          <div className="flex items-center gap-2">
-            {!hideExploreButton && (
-              <button onClick={onExplore} className="px-2.5 py-1 text-sm text-violet-600 border border-violet-600 rounded-md hover:bg-violet-600 hover:text-white transition-colors" title="Explore">
-                {isCompact ? (
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l3 7 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1 3-7z"/></svg>
-                ) : (
-                  'Explore'
-                )}
-              </button>
-            )}
-          </div>
         </div>
         
         {/* New Chat Button */}
