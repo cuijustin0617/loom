@@ -4,7 +4,8 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import rehypeRaw from 'rehype-raw';
-import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
+import rehypeSanitize from 'rehype-sanitize';
+import { defaultSchema } from 'hast-util-sanitize';
 import { normalizeText } from '../utils/normalize';
 
 const extractSources = (text) => {
@@ -28,10 +29,14 @@ const extractSources = (text) => {
   return { main, sources };
 };
 
-const sanitizeSchema = {
-  ...defaultSchema,
-  tagNames: [...(defaultSchema.tagNames || []), 'br'],
-};
+const sanitizeSchema = (() => {
+  try {
+    if (defaultSchema && typeof defaultSchema === 'object') {
+      return { ...defaultSchema, tagNames: [...(defaultSchema.tagNames || []), 'br'] };
+    }
+  } catch {}
+  return { tagNames: ['p','strong','em','code','pre','h1','h2','h3','ul','ol','li','table','thead','tbody','tr','th','td','a','br','span','div'] };
+})();
 
 // Extract a human-friendly host and an unwrapped destination URL.
 // Many providers return aggregator/redirector URLs (e.g., vertexaisearch) with the true URL

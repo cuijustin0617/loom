@@ -3,6 +3,7 @@ import ExploreSidebar from './ExploreSidebar';
 import ExploreSessionModal from './ExploreSessionModal';
 import { getExploreBatch, swapCard, getSessionContent } from '../services/explore';
 import { appendLog, loadPrefs, loadSaved, loadSessions, savePrefs, saveSaved, saveSessions, loadFeed, saveFeed, getCachedSession, setCachedSession, clearSessionCache } from '../utils/exploreStorage';
+import { generateMissingSummaries } from '../services/learn_simple';
 
 const MINUTES = [3, 5, 10, 15];
 const MODES = ['Read', 'Code', 'Quiz'];
@@ -110,12 +111,33 @@ export default function ExploreView({
   const [sessions, setSessions] = useState(() => loadSessions());
   const [sessionOpen, setSessionOpen] = useState(false);
   const [sessionCard, setSessionCard] = useState(null);
+  const [generatingSummaries, setGeneratingSummaries] = useState(false);
+  const [summaryStats, setSummaryStats] = useState(null);
 
   const GROUP_COPY = {
     review: 'Quick refresh of what you already covered — concise, no fluff.',
     deep_dive: 'Build depth on the same theme — introduce a next-step concept.',
     adjacent: 'Widen the map with closely related, high‑relevance topics.',
   };
+
+  const handleGenerateSummaries = useCallback(async () => {
+    setGeneratingSummaries(true);
+    setSummaryStats(null);
+    try {
+      const { stats } = await generateMissingSummaries({ 
+        conversations, 
+        preferredModel: 'gemini-2.5-flash-lite' 
+      });
+      setSummaryStats(stats);
+      // Auto-hide stats after 5 seconds
+      setTimeout(() => setSummaryStats(null), 5000);
+    } catch (error) {
+      console.error('Failed to generate summaries:', error);
+      setSummaryStats({ error: error?.message || 'Failed to generate summaries' });
+    } finally {
+      setGeneratingSummaries(false);
+    }
+  }, [conversations]);
 
   const regenerate = useCallback(async () => {
     setLoading(true);
@@ -245,10 +267,34 @@ export default function ExploreView({
                   {VIBES.map((vb) => (
                     <Chip key={vb} active={vb === vibe} onClick={() => setVibe(prev => prev === vb ? null : vb)}>{vb}</Chip>
                   ))}
-                  <button onClick={() => { clearSessionCache(); regenerate(); }} className="ml-auto px-3 py-1.5 text-sm rounded-md bg-emerald-600 text-white hover:bg-emerald-700">Refresh</button>
+                  <div className="ml-auto flex items-center gap-2">
+                    <button 
+                      onClick={handleGenerateSummaries} 
+                      disabled={generatingSummaries}
+                      className={`px-3 py-1.5 text-sm rounded-md border border-emerald-600 text-emerald-700 ${generatingSummaries ? 'opacity-60 cursor-not-allowed' : 'hover:bg-emerald-50'}`}
+                      title="Generate summaries for Learn mode using Flash Lite model"
+                    >
+                      {generatingSummaries ? 'Generating...' : 'Generate summaries'}
+                    </button>
+                    <button onClick={() => { clearSessionCache(); regenerate(); }} className="px-3 py-1.5 text-sm rounded-md bg-emerald-600 text-white hover:bg-emerald-700">Refresh</button>
+                  </div>
                 </div>
               </div>
             </div>
+
+            {/* Summary generation feedback */}
+            {summaryStats && (
+              <div className={`mt-3 px-3 py-2 rounded-md border text-sm ${summaryStats.error ? 'border-red-300 bg-red-50 text-red-800' : 'border-emerald-300 bg-emerald-50 text-emerald-800'}`}>
+                {summaryStats.error ? (
+                  <span>Error: {summaryStats.error}</span>
+                ) : (
+                  <span>
+                    ✓ Summaries: {summaryStats.existing || 0} existing, {summaryStats.generated || 0} generated, {summaryStats.failed || 0} failed
+                    {summaryStats.generated === 0 && summaryStats.failed === 0 ? ' (all up to date)' : ''}
+                  </span>
+                )}
+              </div>
+            )}
 
             {/* Content */}
             {activeTab === 'feed' && (
