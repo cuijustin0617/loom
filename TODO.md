@@ -1,5 +1,10 @@
 TODO 
+-------------INSTRUCTIONS-----------------------
+- for this file, NEVER remove these few lines of instructions at the top, never write progress updates in this file. ; for finished TODOs, no need to generate a md file with progress update everytime.. KEEP THE ADDED TESTS IF STILL USEFUL
+- FOR ALL CHANGES:
+    - please first see if a related test already exists for this, and if its passing already or failing, if not, add a test for it -- dont be lazy
+    - implement the change or fix the bug and MAKE SURE the corresponding tests pass, if not, keep fixing it until its passed.
+------------------------------------------------
 
-1. the regroup button doesnt work. -- make it trigger grouping again
 
-2. redesign the goal mechanism and make a distinction between the suggested goal when outline is generated vs the final recorded goal groups in progress section: when generating outlines, we pass in the lerner state which includes goals, but the generated course outline's associated goal does NOT need to be one of the exitsing goals even if similar, just put an appropriate label of the goal SOLELY based on the course itself. that inital goal label is just for a visualized tag to ease user decision of which lesson to take.    Then, once a user completes a lesson, the completed lesson is put into a "pending" section in the progress section, then the regroup is automatically triggered when new lessons are completed -- the regroup can decide to rename existing goals to include new closely related pending lessons, or dont even rename and include directly, or leave the lesson in the pending section. There should only be a goal section for a goal if there are at least two lessons under it, otherwise leave those in pending and wait for another regroup run to maybe group them together. so the regroup could also put a few pending ones together into a new group.  -- so i imagine the wording of prompts, the UI mechanism and logic all need to be adjusted. Do it carefully and the results should feel natural
+- sometimes the generation doesnt work simply cuz user didnt put an API key, so the content page just says "preparing your course" without moving at all -- this misleads the user, it should tell user to fill in key in setting; also if when user started the course and it got moved to continue already but generation failed, when user clicks continue it stays on "preparing your course" and just stays tehre and doesnt trigger generate again even when user has the api key now.. -- fix this rigourously

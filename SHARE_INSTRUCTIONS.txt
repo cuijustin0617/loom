@@ -1,0 +1,71 @@
+🎯 LOOM - Setup Instructions for Testing
+============================================
+
+📦 Installation Steps:
+----------------------
+1. Extract the "dist" folder from the zip file
+2. Open the "dist" folder
+3. Read "README_START_HERE.txt" for detailed instructions
+
+QUICK START:
+- Mac: RIGHT-CLICK "START_SERVER.command" → Select "Open" → Click "Open" again
+- Windows: Double-click "START_SERVER.bat"
+- Your browser will open automatically to http://localhost:8080
+
+⚠️ IMPORTANT FOR MAC USERS:
+macOS will block the .command file if you double-click it.
+You MUST right-click and select "Open" instead!
+
+OR just use Terminal:
+  cd path/to/dist
+  python3 -m http.server 8080
+  Then open: http://localhost:8080
+
+🔑 First-Time Setup:
+-------------------
+When you first open the app, you'll need to:
+1. Click the Settings icon (gear icon in top right)
+2. Get a FREE Gemini API key:
+   - Go to: https://ai.google.dev/
+   - Click "Get API Key"
+   - Sign in with Google
+   - Create a new API key
+3. Paste the API key into Settings
+4. Click Save
+
+✨ You're ready to use LOOM!
+
+📋 Features to Test:
+-------------------
+CHAT MODE:
+- Create new conversations
+- Send messages (try with text, questions)
+- Attach images or PDFs
+- Switch between AI models
+- Check conversation history in sidebar
+
+LEARN MODE:
+- Generate course outlines from chat conversations
+- Track progress through modules
+- Save courses
+- Complete quizzes
+
+💾 Data Storage:
+---------------
+- Everything is saved locally in your browser
+- Data persists between sessions
+- No cloud backup (unless you configure Firebase)
+
+⚠️ Important Notes:
+------------------
+- Works best in Chrome, Edge, or Firefox
+- Needs internet connection (to call Gemini API)
+- Your API key stays on your computer
+- All data is private and local
+
+🐛 Found Issues?
+---------------
+Let Justin know! He'd love your feedback.
+
+Enjoy testing! 🚀
+

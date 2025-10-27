@@ -1,160 +1,163 @@
-import { useEffect, useState, useRef } from 'react';
-import { useConversations } from './hooks/useConversations';
-import Sidebar from './components/Sidebar';
-import ChatInterface from './components/ChatInterface';
-import ModeToggle from './components/ModeToggle';
-import LearnView from './components/LearnView';
-import OnboardingGate from './components/OnboardingGate';
+/**
+ * App.jsx - Main Application Entry Point
+ * 
+ * Initializes database, runs migration, and manages app-level state.
+ */
 
-function App() {
-  // Always pass through the onboarding gate once; it will auto-complete
-  // when login + API key requirements are already satisfied.
-  const [needsGate, setNeedsGate] = useState(true);
-  // Sidebar collapse state (fixed width, no resize)
-  const SIDEBAR_WIDTH = 256; // px
-  const MIN_CHAT_WIDTH = 560; // px, below this auto-collapse
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('loom_sidebar_collapsed') === '1');
-  const autoCollapsedRef = useRef(false);
-  const [learnActive, setLearnActive] = useState(false);
+import { useEffect, useState, Suspense } from 'react';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
+import queryClient from './lib/queryClient';
+import ErrorBoundary from './shared/components/ErrorBoundary';
+import { runMigration, getMigrationStatus } from './lib/db/migration';
+import { initializeSettings, useSettingsStore } from './shared/store/settingsStore';
+import { initializeChat, useChatStore } from './features/chat/store/chatStore';
+import { initializeLearn } from './features/learn/store/learnStore';
+import OnboardingGate from './shared/components/OnboardingGate';
+import ModeToggle from './shared/components/ModeToggle';
 
-  useEffect(() => {
-    localStorage.setItem('loom_sidebar_collapsed', sidebarCollapsed ? '1' : '0');
-  }, [sidebarCollapsed]);
+// Lazy load features for code splitting
+import { lazy } from 'react';
+const ChatView = lazy(() => import('./features/chat/components/ChatView'));
+const LearnView = lazy(() => import('./features/learn/components/LearnView'));
 
-  const toggleCollapse = () => {
-    setSidebarCollapsed((v) => !v);
-    // manual action cancels auto mode until next resize forces it again
-    autoCollapsedRef.current = false;
-  };
-  const reopenSidebar = () => {
-    setSidebarCollapsed(false);
-    autoCollapsedRef.current = false;
-  };
-
-  // Auto collapse/expand on viewport changes
-  useEffect(() => {
-    const recalc = () => {
-      const vw = window.innerWidth || document.documentElement.clientWidth;
-      const needsCollapse = vw - SIDEBAR_WIDTH < MIN_CHAT_WIDTH;
-      if (needsCollapse && !sidebarCollapsed) {
-        setSidebarCollapsed(true);
-        autoCollapsedRef.current = true;
-      } else if (!needsCollapse && sidebarCollapsed && autoCollapsedRef.current) {
-        setSidebarCollapsed(false);
-        autoCollapsedRef.current = false;
-      }
-    };
-    recalc();
-    window.addEventListener('resize', recalc);
-    return () => window.removeEventListener('resize', recalc);
-  }, [sidebarCollapsed]);
-
-  const {
-    conversations,
-    currentConversationId,
-    selectedModel,
-    isLoading,
-    getCurrentConversation,
-    createNewConversation,
-    switchToConversation,
-    sendMessage,
-    setSelectedModel,
-    deleteConversation,
-  } = useConversations();
-
-  // Create first conversation if none exists
-  useEffect(() => {
-    if (conversations.length === 0 && !currentConversationId) {
-      createNewConversation();
-    }
-  }, [conversations.length, currentConversationId, createNewConversation]);
-
-  const handleNewChat = () => {
-    createNewConversation();
-  };
-
-  const handleSwitchConversation = (conversationId) => {
-    switchToConversation(conversationId);
-  };
-
-  const handleSendMessage = (content) => {
-    // Create new conversation if none exists
-    if (!currentConversationId) {
-      const newId = createNewConversation();
-      // Wait for next tick to ensure conversation is created
-      setTimeout(() => sendMessage(content), 0);
-    } else {
-      sendMessage(content);
-    }
-  };
-
-  const currentConversation = getCurrentConversation();
-
-  if (needsGate) {
-    return <OnboardingGate onComplete={() => setNeedsGate(false)} />;
-  }
-
-  if (learnActive) {
-    return (
-      <>
-        {/* Global sticky toggle: centered top, consistent across modes */}
-        <div className="fixed top-3 left-1/2 -translate-x-1/2 z-40">
-          <ModeToggle mode={'learn'} onChange={(m)=>{ if (m==='chat') setLearnActive(false); }} />
-        </div>
-        <LearnView
-          conversations={conversations}
-          onExitLearn={() => setLearnActive(false)}
-        />
-      </>
-    );
-  }
-
-  const mode = learnActive ? 'learn' : 'chat';
-
+/**
+ * Loading spinner component
+ */
+function LoadingSpinner({ message = 'Loading...' }) {
   return (
-    <div className="flex h-screen bg-white relative">
-      {/* Global sticky toggle: centered top, consistent across modes */}
-      <div className="fixed top-3 left-1/2 -translate-x-1/2 z-40">
-        <ModeToggle mode={'chat'} onChange={(m)=>{ if (m==='learn') setLearnActive(true); }} />
+    <div className="min-h-screen flex items-center justify-center bg-white">
+      <div className="text-center">
+        <div className="inline-block w-12 h-12 border-4 border-violet-200 border-t-violet-600 rounded-full animate-spin mb-4"></div>
+        <p className="text-gray-600">{message}</p>
       </div>
-      {/* Sidebar (fixed width, collapsible) */}
-      {!sidebarCollapsed && (
-        <div className="h-full border-r border-gray-200 bg-loom-gray select-none" style={{ width: SIDEBAR_WIDTH }}>
-          <Sidebar 
-            conversations={conversations}
-            currentConversationId={currentConversationId}
-            onNewChat={handleNewChat}
-            onSwitchConversation={handleSwitchConversation}
-            onDeleteConversation={deleteConversation}
-            isCompact={false}
-            onCollapse={toggleCollapse}
-            mode={mode}
-            onModeChange={(m) => setLearnActive(m === 'learn')}
-          />
-        </div>
-      )}
-
-      {/* Open button when collapsed */}
-      {sidebarCollapsed && (
-        <button
-          onClick={reopenSidebar}
-          className="absolute left-3 top-1/2 -translate-y-1/2 z-20 w-9 h-9 inline-flex items-center justify-center rounded-full border border-gray-300 bg-white/90 backdrop-blur shadow hover:bg-white"
-          title="Open sidebar"
-        >
-          <span className="text-base text-gray-700">&gt;</span>
-        </button>
-      )}
-
-      <ChatInterface
-        conversation={currentConversation}
-        conversations={conversations}
-        isLoading={isLoading}
-        onSendMessage={handleSendMessage}
-        selectedModel={selectedModel}
-        onModelChange={setSelectedModel}
-      />
     </div>
   );
 }
 
-export default App;
+/**
+ * Main App Component
+ */
+function App() {
+  const [isInitialized, setIsInitialized] = useState(false);
+  const [initError, setInitError] = useState(null);
+  const [needsOnboarding, setNeedsOnboarding] = useState(true);
+  const [mode, setMode] = useState('chat'); // 'chat' | 'learn'
+  
+  // Initialize on mount
+  useEffect(() => {
+    async function initialize() {
+      try {
+        console.log('[App] Starting initialization...');
+        
+        // Step 1: Run migration if needed
+        const migrationStatus = getMigrationStatus();
+        if (!migrationStatus.complete && migrationStatus.hasOldData) {
+          console.log('[App] Running migration from localStorage...');
+          const result = await runMigration();
+          
+          if (!result.success) {
+            throw new Error(`Migration failed: ${result.error}`);
+          }
+          
+          console.log('[App] Migration completed:', result.stats);
+        } else if (migrationStatus.complete) {
+          console.log('[App] Migration already completed, skipping');
+        } else {
+          console.log('[App] No old data found, skipping migration');
+        }
+        
+        // Step 2: Initialize stores
+        console.log('[App] Initializing stores...');
+        await Promise.all([
+          initializeSettings(),
+          initializeChat(),
+          initializeLearn()
+        ]);
+        
+        console.log('[App] Initialization complete');
+        setIsInitialized(true);
+      } catch (error) {
+        console.error('[App] Initialization failed:', error);
+        setInitError(error.message || 'Failed to initialize app');
+      }
+    }
+    
+    initialize();
+  }, []);
+  
+  // Check if onboarding is needed
+  const apiKey = useSettingsStore(state => state.apiKey);
+  const isSettingsLoaded = useSettingsStore(state => state.isLoaded);
+  
+  useEffect(() => {
+    if (isSettingsLoaded) {
+      // Auto-complete onboarding if API key exists
+      if (apiKey && apiKey.trim()) {
+        setNeedsOnboarding(false);
+      }
+    }
+  }, [apiKey, isSettingsLoaded]);
+  
+  // Show loading during initialization
+  if (!isInitialized) {
+    if (initError) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-white px-4">
+          <div className="max-w-md w-full bg-red-50 border border-red-200 rounded-lg p-6">
+            <h2 className="text-lg font-semibold text-red-900 mb-2">Initialization Failed</h2>
+            <p className="text-sm text-red-700 mb-4">{initError}</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="w-full px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
+            >
+              Reload App
+            </button>
+          </div>
+        </div>
+      );
+    }
+    
+    return <LoadingSpinner message="Initializing app..." />;
+  }
+  
+  // Show onboarding gate if needed
+  if (needsOnboarding) {
+    return <OnboardingGate onComplete={() => setNeedsOnboarding(false)} />;
+  }
+  
+  // Main app UI
+  return (
+    <div className="h-screen w-screen overflow-hidden">
+      {/* Global mode toggle - serves as title/brand */}
+      <div className="fixed top-3 left-4 z-50">
+        <ModeToggle 
+          mode={mode} 
+          onChange={setMode}
+        />
+      </div>
+      
+      {/* Feature views */}
+      <Suspense fallback={<LoadingSpinner message="Loading view..." />}>
+        {mode === 'chat' ? <ChatView /> : <LearnView />}
+      </Suspense>
+    </div>
+  );
+}
+
+/**
+ * App wrapper with providers and error boundary
+ */
+function AppWrapper() {
+  return (
+    <ErrorBoundary onReset={() => queryClient.clear()}>
+      <QueryClientProvider client={queryClient}>
+        <App />
+        {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
+      </QueryClientProvider>
+    </ErrorBoundary>
+  );
+}
+
+export default AppWrapper;
+
