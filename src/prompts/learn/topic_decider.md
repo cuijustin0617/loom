@@ -34,7 +34,7 @@ Constraints:
   - strengthen: course modules should mix [Review], [Link to prior knowledge], and [Deepen] phases across modules while staying coherent.
   - explore: adjacent "unknown unknowns"; explicitly justify adjacency in the "reason" field.
 Notes:
-- EXISTING_GOALS is provided for context only; do not try to exactly match or map to it.
+- EXISTING_GOALS is provided for context only; no need to exactly match or map to it.
 
 Input fields:
 - INPUT_ONE_LINERS: a JSON array of { chat_id, one_liner, goal_hints[], active_thread, timestamp, difficulty_hint }
