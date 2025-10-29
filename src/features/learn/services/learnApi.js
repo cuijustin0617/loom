@@ -202,13 +202,12 @@ export async function generateFullCourse({ outline, conversations, model }) {
   }
   
   const input = [
-    `INPUT_OUTLINE: <<<OUTLINE_JSON>>>\n${JSON.stringify({
+    `OUTLINE: <<<OUTLINE_JSON>>>\n${JSON.stringify({
       title: outline.title,
       questions_you_will_answer: outline.questions,
       modules: outline.moduleSummary
     })}`,
-    `\nRELEVANT_CHAT_EXCERPTS: <<<TEXT>>>\n${excerpts.join('\n\n')}`,
-    `\nAVOID_OUTLINES: <<<LIST_JSON>>>\n${JSON.stringify([])}\n`
+    `\nRELEVANT_CHAT_EXCERPTS: <<<TEXT>>>\n${excerpts.join('\n\n')}`
   ].join('\n');
 
   const cgMsg = { role: 'user', content: `${courseGeneratorPrompt}\n\n${input}` };
