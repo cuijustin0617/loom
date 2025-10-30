@@ -9,6 +9,17 @@ import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import db, { generateId, now } from '../../../lib/db/database';
 
+// Preserve store state across HMR (Hot Module Replacement) during development
+let preservedState = null;
+
+if (import.meta.hot) {
+  // Save state before HMR
+  import.meta.hot.dispose(() => {
+    preservedState = useLearnStore?.getState();
+    console.log('[LearnStore] HMR: Preserved state before reload');
+  });
+}
+
 /**
  * Learn Store
  */
@@ -26,6 +37,7 @@ export const useLearnStore = create(
     // UI state
     activeCourseId: null,
     generatingCourseIds: {}, // { [courseId]: true }
+    generationErrors: {}, // { [courseId]: { error: string, timestamp: string } }
     isAutoRefreshing: false, // Auto-refresh suggested feed in progress
     isAutoRegrouping: false, // Auto-regroup in progress
     
@@ -117,6 +129,25 @@ export const useLearnStore = create(
      */
     loadLearnData: async () => {
       try {
+        // If we have preserved state from HMR, restore it first
+        if (preservedState) {
+          console.log('[LearnStore] Restoring state from HMR preservation');
+          set(draft => {
+            draft.courses = preservedState.courses || {};
+            draft.modules = preservedState.modules || {};
+            draft.goals = preservedState.goals || {};
+            draft.outlines = preservedState.outlines || {};
+            draft.goalCourses = preservedState.goalCourses || {};
+            draft.generatingCourseIds = preservedState.generatingCourseIds || {};
+            draft.generationErrors = preservedState.generationErrors || {};
+            draft.isAutoRefreshing = preservedState.isAutoRefreshing || false;
+            draft.isAutoRegrouping = preservedState.isAutoRegrouping || false;
+          });
+          // Clear preserved state after restoration
+          preservedState = null;
+          return;
+        }
+        
         const [courses, modules, goals, outlines, goalCourseRels] = await Promise.all([
           db.courses.toArray(),
           db.modules.toArray(),
@@ -313,12 +344,16 @@ export const useLearnStore = create(
       // Check if course already exists
       const existingCourse = get().courses[courseId];
       if (existingCourse) {
-        // Just update status
+        // Check if it's a shell course (no modules)
+        const needsGeneration = !existingCourse.moduleIds || existingCourse.moduleIds.length === 0;
+        
+        // Update status if needed
         if (existingCourse.status !== 'started') {
           await get().updateCourseStatus(courseId, 'started');
         }
         await get().updateOutlineStatus(outlineId, 'started');
-        return { success: true, courseId };
+        
+        return { success: true, courseId, needsGeneration };
       }
       
       // Create shell course immediately so it shows in "Continue" section
@@ -433,35 +468,55 @@ export const useLearnStore = create(
             });
           }
           
-          // Update store
+          // Update store with new data
           set(draft => {
             draft.courses[courseId] = course;
             
-            for (const mod of modulesArray) {
-              const moduleId = mod.id || mod.module_id;
-              if (moduleId && draft.modules[moduleId]) {
-                draft.modules[moduleId] = {
-                  ...draft.modules[moduleId],
-                  ...mod
-                };
-              } else if (moduleId) {
-                draft.modules[moduleId] = mod;
-              }
+            // Add modules to store
+            for (const moduleData of modulesArray) {
+              const moduleId = moduleData.id || moduleData.module_id || generateId('mod');
+              draft.modules[moduleId] = {
+                id: moduleId,
+                courseId: courseId,
+                idx: moduleData.idx || 1,
+                title: moduleData.title || 'Module',
+                estMinutes: moduleData.estMinutes || moduleData.est_minutes || 5,
+                lesson: moduleData.lesson || '',
+                microTask: moduleData.microTask || moduleData.micro_task || '',
+                quiz: moduleData.quiz || [],
+                refs: moduleData.refs || []
+              };
             }
             
-            // Update outline
-            if (draft.outlines[courseId]) {
-              draft.outlines[courseId].status = course.status;
+            // Update outline if it exists
+            const outlineKey = Object.keys(draft.outlines).find(key => 
+              draft.outlines[key].courseId === courseId
+            );
+            if (outlineKey) {
+              draft.outlines[outlineKey].status = course.status;
+            }
+            
+            // Update goal cache
+            if (course.goal) {
+              // Find or create goal in store
+              let goalEntry = Object.values(draft.goals).find(g => g.label === course.goal);
+              if (goalEntry && draft.goalCourses[goalEntry.id]) {
+                // Add course to goal cache if not already there
+                if (!draft.goalCourses[goalEntry.id][course.status].includes(courseId)) {
+                  draft.goalCourses[goalEntry.id][course.status].push(courseId);
+                }
+              }
             }
           });
         });
         
-        // Reload goal relationships
-        await get().loadLearnData();
+        // DO NOT call loadLearnData() here - we've already updated the store
+        // Reloading could cause race conditions and data loss
         
         return { success: true };
       } catch (error) {
         console.error('[LearnStore] Failed to save course:', error);
+        // DO NOT reload data on error - keep existing state intact
         return { success: false, error: error.message };
       }
     },
@@ -595,6 +650,34 @@ export const useLearnStore = create(
      */
     isGenerating: (courseId) => {
       return !!get().generatingCourseIds[courseId];
+    },
+    
+    /**
+     * Set generation error for a course
+     * @param {string} courseId - Course ID
+     * @param {string|null} error - Error message or null to clear
+     */
+    setGenerationError: (courseId, error) => {
+      set(draft => {
+        if (error) {
+          draft.generationErrors[courseId] = {
+            error: String(error),
+            timestamp: now()
+          };
+        } else {
+          delete draft.generationErrors[courseId];
+        }
+      });
+    },
+    
+    /**
+     * Get generation error for a course
+     * @param {string} courseId - Course ID
+     * @returns {string|null} Error message or null
+     */
+    getGenerationError: (courseId) => {
+      const errorObj = get().generationErrors[courseId];
+      return errorObj ? errorObj.error : null;
     },
     
     /**
@@ -781,16 +864,31 @@ export const useLearnStore = create(
             delete draft.modules[moduleId];
           }
           
+          // Remove course from goal cache
+          if (course.goal) {
+            const goalEntry = Object.values(draft.goals).find(g => g.label === course.goal);
+            if (goalEntry && draft.goalCourses[goalEntry.id]) {
+              const statuses = ['started', 'completed', 'suggested'];
+              for (const status of statuses) {
+                draft.goalCourses[goalEntry.id][status] = 
+                  draft.goalCourses[goalEntry.id][status].filter(id => id !== courseId);
+              }
+            }
+          }
+          
           // Remove course
           delete draft.courses[courseId];
           
-          // Remove outline
-          delete draft.outlines[courseId];
+          // Remove outline(s) with this courseId
+          for (const outlineId in draft.outlines) {
+            if (draft.outlines[outlineId].courseId === courseId) {
+              delete draft.outlines[outlineId];
+            }
+          }
         }
       });
       
-      // Reload to refresh relationships
-      await get().loadLearnData();
+      // DO NOT reload data - we've already updated the store
     },
     
     /**

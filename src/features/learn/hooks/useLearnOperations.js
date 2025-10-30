@@ -27,6 +27,7 @@ export function useLearnOperations() {
   const updateCourseStatus = useLearnStore(state => state.updateCourseStatus);
   const setGenerating = useLearnStore(state => state.setGenerating);
   const isGenerating = useLearnStore(state => state.isGenerating);
+  const setGenerationError = useLearnStore(state => state.setGenerationError);
   
   const conversations = useChatStore(state => state.conversations);
   const allMessages = useChatStore(state => state.messages);
@@ -130,6 +131,7 @@ export function useLearnOperations() {
       // If needs generation, generate now
       if (result.needsGeneration) {
         setGenerating(courseId, true);
+        setGenerationError(courseId, null); // Clear any previous errors
         
         try {
           // Build conversations data
@@ -153,8 +155,12 @@ export function useLearnOperations() {
           
           return { courseId, generated: true };
         } catch (error) {
-          // Rollback on error
-          await updateOutlineStatus(outlineId, 'suggested');
+          // Set error state
+          const errorMessage = error.message || 'Failed to generate course';
+          setGenerationError(courseId, errorMessage);
+          console.error('[Learn] Course generation failed:', error);
+          
+          // Don't rollback - keep course in started state so user can retry
           throw error;
         } finally {
           setGenerating(courseId, false);

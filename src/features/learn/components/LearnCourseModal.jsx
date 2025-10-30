@@ -6,11 +6,13 @@
 
 import { useState, useEffect } from 'react';
 import { useLearnStore } from '../store/learnStore';
+import { useSettingsStore } from '../../../shared/store/settingsStore';
 import ReactMarkdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
 import remarkGfm from 'remark-gfm';
+import ProgressTimer from '../../../shared/components/ProgressTimer';
 
-export default function LearnCourseModal({ open, courseId, onClose }) {
+export default function LearnCourseModal({ open, courseId, onClose, onRetryGeneration }) {
   const [currentModuleIdx, setCurrentModuleIdx] = useState(0);
   const [showQuiz, setShowQuiz] = useState(false);
   const [quizAnswers, setQuizAnswers] = useState({});
@@ -19,9 +21,12 @@ export default function LearnCourseModal({ open, courseId, onClose }) {
   const getCourseWithModules = useLearnStore(state => state.getCourseWithModules);
   const updateModuleProgress = useLearnStore(state => state.updateModuleProgress);
   const isGenerating = useLearnStore(state => state.isGenerating);
+  const getGenerationError = useLearnStore(state => state.getGenerationError);
+  const learnModel = useSettingsStore(state => state.learnModel);
   
   const course = getCourseWithModules(courseId);
   const generating = isGenerating(courseId);
+  const generationError = getGenerationError(courseId);
   
   if (!open) return null;
   
@@ -99,6 +104,12 @@ export default function LearnCourseModal({ open, courseId, onClose }) {
     setShowQuiz(false);
     setQuizAnswers({});
     setQuizSubmitted(false);
+    
+    // Scroll to top when module changes
+    const contentDiv = document.querySelector('.flex-1.overflow-y-auto.p-6');
+    if (contentDiv) {
+      contentDiv.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   }, [currentModuleIdx]);
 
   return (
@@ -144,19 +155,66 @@ export default function LearnCourseModal({ open, courseId, onClose }) {
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6">
           {(generating || modules.length === 0) && course?.status === 'started' ? (
-            <div className="max-w-2xl mx-auto text-center py-12">
-              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-emerald-100 flex items-center justify-center animate-pulse">
-                <svg className="w-8 h-8 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
-                </svg>
+            generationError ? (
+              // Error state
+              <div className="max-w-2xl mx-auto text-center py-12">
+                <div className="mb-6 flex justify-center">
+                  <div className="w-20 h-20 rounded-full bg-red-100 flex items-center justify-center">
+                    <svg className="w-10 h-10 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-2">
+                  Course Generation Failed
+                </h3>
+                <p className="text-gray-600 mb-4">
+                  {generationError}
+                </p>
+                <div className="space-y-3">
+                  <button
+                    onClick={() => {
+                      if (onRetryGeneration) {
+                        onRetryGeneration(courseId);
+                      }
+                    }}
+                    className="px-6 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors font-medium"
+                  >
+                    Try Again
+                  </button>
+                  <div className="text-sm text-gray-500">
+                    If the problem persists, try switching to a different model
+                  </div>
+                </div>
               </div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-2">
-                Preparing Your Personalized Course...
-              </h3>
-              <p className="text-gray-600">
-                Please wait while we create personalized lesson content based on your conversations.
-              </p>
-            </div>
+            ) : (
+              // Loading state
+              <div className="max-w-2xl mx-auto text-center py-12">
+              <div className="mb-6 flex justify-center">
+                <ProgressTimer 
+                  model={learnModel} 
+                  isComplete={modules.length > 0}
+                  size={140}
+                  color="emerald"
+                />
+              </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-2">
+                  Preparing Your Personalized Course...
+                </h3>
+                <p className="text-gray-600 mb-3">
+                  Please wait while we create personalized lesson content based on your conversations.
+                </p>
+                <div className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-50 border border-amber-200">
+                  <svg className="w-5 h-5 text-amber-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M12 16v-4m0-4h.01"/>
+                  </svg>
+                  <p className="text-sm text-amber-800">
+                    Sorry, speed optimization hasn't been a focus yet, so it might be a little slow right now!
+                  </p>
+                </div>
+              </div>
+            )
           ) : currentModule ? (
             <div className="max-w-3xl mx-auto">
               {/* Module Header */}

@@ -19,8 +19,9 @@ export const useSettingsStore = create(
     openaiKey: '',
     e2eePassphrase: '',
     selectedModel: 'gemini-2.5-pro+search+incremental',
-    learnModel: 'gemini-2.5-flash-lite',
+    learnModel: 'gemini-2.5-flash',
     currentConversationId: null,
+    currentMode: 'chat', // 'chat' | 'learn'
     
     // Loading state
     isLoaded: false,
@@ -42,8 +43,9 @@ export const useSettingsStore = create(
           draft.openaiKey = settingsMap.openaiKey || '';
           draft.e2eePassphrase = settingsMap.e2eePassphrase || '';
           draft.selectedModel = settingsMap.selectedModel || 'gemini-2.5-pro+search+incremental';
-          draft.learnModel = settingsMap.learnModel || 'gemini-2.5-flash-lite';
+          draft.learnModel = settingsMap.learnModel || 'gemini-2.5-flash';
           draft.currentConversationId = settingsMap.currentConversationId || null;
+          draft.currentMode = 'chat'; // Don't persist mode, always start in chat
           draft.isLoaded = true;
         });
       } catch (error) {
@@ -118,6 +120,17 @@ export const useSettingsStore = create(
         draft.currentConversationId = id;
       });
       await db.settings.put({ key: 'currentConversationId', value: id });
+    },
+    
+    /**
+     * Set current mode (chat or learn)
+     * @param {'chat'|'learn'} mode - Current mode
+     */
+    setCurrentMode: (mode) => {
+      set(draft => {
+        draft.currentMode = mode;
+      });
+      // Don't persist mode - it's UI state only
     }
   }))
 );

@@ -197,5 +197,150 @@ describe('Dismiss Action', () => {
     expect(startedCourses.filter(c => courseIds.includes(c.id)).length).toBe(1);
     expect(startedCourses.some(c => c.id === courseIds[2])).toBe(true);
   });
+
+  it('should handle dismissing course when outline is missing (edge case)', async () => {
+    // This tests the bug reported: when a course is in "continue" state but outline is missing
+    const courseId = generateId('course');
+    
+    await act(async () => {
+      // Create a course directly without creating an outline first
+      const shellCourse = {
+        id: courseId,
+        title: 'Test Course Without Outline',
+        goal: '',
+        questionIds: [],
+        moduleIds: [],
+        whereToGoNext: '',
+        status: 'started',
+        progressByModule: {},
+        completedVia: null,
+        createdAt: new Date().toISOString(),
+        completedAt: null
+      };
+      
+      await useLearnStore.getState().saveCourse(shellCourse);
+    });
+
+    // Verify course exists and is started
+    let store = useLearnStore.getState();
+    let course = store.courses[courseId];
+    expect(course).toBeDefined();
+    expect(course.status).toBe('started');
+    
+    // Verify course is in started courses list
+    let startedCourses = store.getStartedCourses();
+    expect(startedCourses.some(c => c.id === courseId)).toBe(true);
+    
+    // Try to dismiss using courseId (simulating user clicking dismiss on the course)
+    // This should NOT throw an error even though outline doesn't exist
+    await act(async () => {
+      await expect(markOutlineStatus(courseId, 'dismissed', 'dismiss')).resolves.not.toThrow();
+    });
+
+    // Verify course is removed
+    store = useLearnStore.getState();
+    course = store.courses[courseId];
+    expect(course).toBeUndefined();
+    
+    // Verify it's no longer in started courses
+    startedCourses = store.getStartedCourses();
+    expect(startedCourses.some(c => c.id === courseId)).toBe(false);
+  });
+
+  it('should handle dismissing with invalid ID gracefully', async () => {
+    const invalidId = 'nonexistent_id_12345';
+    
+    // Should not throw error, should handle gracefully
+    await act(async () => {
+      await expect(markOutlineStatus(invalidId, 'dismissed', 'dismiss')).resolves.not.toThrow();
+    });
+    
+    // Store should remain consistent
+    const store = useLearnStore.getState();
+    expect(store.courses[invalidId]).toBeUndefined();
+    expect(store.outlines[invalidId]).toBeUndefined();
+  });
+
+  it('should handle dismissing course that was generated and then regenerated', async () => {
+    // Edge case: user clicks continue, course generates, then user tries to dismiss
+    const outlineId = generateId('outline');
+    const courseId = generateId('course');
+    
+    await act(async () => {
+      // Create outline
+      await useLearnStore.getState().saveOutline({
+        id: outlineId,
+        courseId: courseId,
+        title: 'Test Regeneration Outline',
+        goal: '',
+        questions: ['Q1', 'Q2'],
+        modules: [],
+        moduleSummary: [
+          { title: 'Module 1', estMinutes: 5 },
+          { title: 'Module 2', estMinutes: 5 }
+        ],
+        whereToGoNext: '',
+        status: 'suggested',
+        createdAt: new Date().toISOString(),
+      });
+      
+      // Start course (creates shell)
+      await markOutlineStatus(outlineId, 'started', 'save');
+      
+      // Simulate course generation completing
+      const fullCourse = {
+        id: courseId,
+        title: 'Test Regeneration Outline',
+        goal: '',
+        questionIds: ['Q1', 'Q2'],
+        modules: [
+          {
+            id: generateId('mod'),
+            courseId: courseId,
+            idx: 1,
+            title: 'Module 1',
+            estMinutes: 5,
+            lesson: 'Lesson content here',
+            microTask: '',
+            quiz: [],
+            refs: []
+          }
+        ],
+        whereToGoNext: '',
+        status: 'started',
+        progressByModule: {},
+        completedVia: null,
+        createdAt: new Date().toISOString(),
+        completedAt: null
+      };
+      
+      await useLearnStore.getState().saveCourse(fullCourse);
+    });
+
+    // Verify course has modules
+    let store = useLearnStore.getState();
+    let course = store.getCourseWithModules(courseId);
+    expect(course).toBeDefined();
+    expect(course.modules.length).toBeGreaterThan(0);
+    
+    // Now dismiss it
+    await act(async () => {
+      await markOutlineStatus(outlineId, 'dismissed', 'dismiss');
+    });
+
+    // Verify course is removed/dismissed
+    store = useLearnStore.getState();
+    course = store.courses[courseId];
+    expect(course).toBeUndefined();
+    
+    // Verify outline is dismissed (it might have been deleted along with the course)
+    const outline = store.outlines[outlineId];
+    if (outline) {
+      expect(outline.status).toBe('dismissed');
+    } else {
+      // Outline was deleted, which is also acceptable behavior
+      expect(outline).toBeUndefined();
+    }
+  });
 });
 

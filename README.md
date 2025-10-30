@@ -44,7 +44,7 @@ npm install
 npm run dev
 ```
 
-The app runs at `http://localhost:5173`
+The terminal will display the local URL where the app is running (typically `http://localhost:5174`)
 
 ### Configuration
 

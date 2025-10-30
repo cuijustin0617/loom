@@ -28,6 +28,23 @@ class ErrorBoundary extends Component {
     }
   };
 
+  handleResetApiKey = async () => {
+    // Clear API key and reload
+    try {
+      const { useSettingsStore } = await import('../store/settingsStore');
+      await useSettingsStore.getState().setApiKey('');
+      window.location.reload();
+    } catch (err) {
+      console.error('Failed to reset API key:', err);
+      window.location.reload();
+    }
+  };
+
+  isApiKeyError = () => {
+    const errorMessage = this.state.error?.message || '';
+    return /api[_\s]?key|credential|authorization|authentication|invalid.*key|missing.*key/i.test(errorMessage);
+  };
+
   render() {
     if (this.state.hasError) {
       return (
@@ -55,18 +72,37 @@ class ErrorBoundary extends Component {
               )}
               
               <div className="flex gap-3">
-                <button
-                  onClick={this.handleReset}
-                  className="flex-1 px-4 py-2 bg-violet-600 text-white rounded-md hover:bg-violet-700 transition-colors"
-                >
-                  Try Again
-                </button>
-                <button
-                  onClick={() => window.location.reload()}
-                  className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition-colors"
-                >
-                  Reload App
-                </button>
+                {this.isApiKeyError() ? (
+                  <>
+                    <button
+                      onClick={this.handleResetApiKey}
+                      className="flex-1 px-4 py-2 bg-violet-600 text-white rounded-md hover:bg-violet-700 transition-colors"
+                    >
+                      Re-enter API Key
+                    </button>
+                    <button
+                      onClick={() => window.location.reload()}
+                      className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition-colors"
+                    >
+                      Reload App
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={this.handleReset}
+                      className="flex-1 px-4 py-2 bg-violet-600 text-white rounded-md hover:bg-violet-700 transition-colors"
+                    >
+                      Try Again
+                    </button>
+                    <button
+                      onClick={() => window.location.reload()}
+                      className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition-colors"
+                    >
+                      Reload App
+                    </button>
+                  </>
+                )}
               </div>
               
               {process.env.NODE_ENV === 'development' && this.state.errorInfo && (

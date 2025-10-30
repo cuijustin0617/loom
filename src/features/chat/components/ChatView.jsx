@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useChatStore } from '../store/chatStore';
 import { useSettingsStore } from '../../../shared/store/settingsStore';
+import db from '../../../lib/db/database';
 import ChatInterface from './ChatInterface';
 import Sidebar from './Sidebar';
 
@@ -21,7 +22,55 @@ function ChatView() {
   
   const currentConversationId = useSettingsStore(state => state.currentConversationId);
   const conversations = useChatStore(state => state.conversations);
+  const messages = useChatStore(state => state.messages);
+  const loadConversations = useChatStore(state => state.loadConversations);
+  const loadAllMessages = useChatStore(state => state.loadAllMessages);
   const currentConversation = conversations[currentConversationId];
+  
+  // Auto-recovery: Check if store is empty but data exists in IndexedDB
+  // This handles cases where HMR resets the store unexpectedly
+  const hasCheckedRecovery = useRef(false);
+  useEffect(() => {
+    async function checkAndRecover() {
+      // Only check once per mount
+      if (hasCheckedRecovery.current) return;
+      hasCheckedRecovery.current = true;
+      
+      // Check if store is empty
+      const storeEmpty = Object.keys(conversations).length === 0 && Object.keys(messages).length === 0;
+      
+      if (!storeEmpty) {
+        console.log('[ChatView] Store has data, no recovery needed');
+        return;
+      }
+      
+      // Check if IndexedDB has data
+      try {
+        const [dbConversations, dbMessages] = await Promise.all([
+          db.conversations.count(),
+          db.messages.count()
+        ]);
+        
+        const hasData = dbConversations > 0 || dbMessages > 0;
+        
+        if (hasData) {
+          console.log('[ChatView] Store empty but IndexedDB has data - recovering...', {
+            conversations: dbConversations,
+            messages: dbMessages
+          });
+          await loadConversations();
+          await loadAllMessages();
+          console.log('[ChatView] Recovery complete');
+        } else {
+          console.log('[ChatView] No data in store or IndexedDB - fresh start');
+        }
+      } catch (error) {
+        console.error('[ChatView] Recovery check failed:', error);
+      }
+    }
+    
+    checkAndRecover();
+  }, [conversations, messages, loadConversations, loadAllMessages]);
   
   // Compute conversation IDs sorted by update time
   const conversationIds = useMemo(() => {

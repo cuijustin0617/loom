@@ -220,9 +220,57 @@ export async function generateFullCourse({ outline, conversations, model }) {
     throw error;
   }
   
+  console.log('[LearnAPI] Raw response from LLM (first 500 chars):', raw?.substring(0, 500));
+  console.log('[LearnAPI] Raw response length:', raw?.length);
+  
   const parsed = safeParse(raw);
-  if (!parsed || !Array.isArray(parsed.modules)) {
-    throw new Error('Course generation returned invalid JSON');
+  console.log('[LearnAPI] Parsed response:', parsed);
+  
+  if (!parsed) {
+    console.error('[LearnAPI] Failed to parse JSON. Raw response (first 1000 chars):', raw?.substring(0, 1000));
+    throw new Error('Course generation returned invalid JSON - could not parse response');
+  }
+  
+  if (!parsed.modules) {
+    console.error('[LearnAPI] Parsed JSON missing modules field. Parsed:', parsed);
+    throw new Error('Course generation returned invalid JSON - missing modules field');
+  }
+  
+  if (!Array.isArray(parsed.modules)) {
+    console.error('[LearnAPI] Modules field is not an array. Type:', typeof parsed.modules, 'Value:', parsed.modules);
+    throw new Error('Course generation returned invalid JSON - modules is not an array');
+  }
+  
+  if (parsed.modules.length === 0) {
+    console.error('[LearnAPI] Modules array is empty');
+    throw new Error('Course generation returned invalid JSON - modules array is empty');
+  }
+  
+  // Validate each module has required fields
+  for (let i = 0; i < parsed.modules.length; i++) {
+    const mod = parsed.modules[i];
+    if (!mod) {
+      console.error(`[LearnAPI] Module ${i} is null/undefined`);
+      throw new Error(`Course generation returned invalid JSON - module ${i} is null`);
+    }
+    if (!mod.title) {
+      console.error(`[LearnAPI] Module ${i} missing title:`, mod);
+      throw new Error(`Course generation returned invalid JSON - module ${i} missing title`);
+    }
+    if (!mod.lesson) {
+      console.error(`[LearnAPI] Module ${i} missing lesson:`, mod);
+      throw new Error(`Course generation returned invalid JSON - module ${i} missing lesson content`);
+    }
+    // Check if quiz is incomplete (array started but not finished)
+    if (mod.quiz && Array.isArray(mod.quiz)) {
+      for (let j = 0; j < mod.quiz.length; j++) {
+        const q = mod.quiz[j];
+        if (!q || !q.prompt || !Array.isArray(q.choices) || q.choices.length < 2) {
+          console.error(`[LearnAPI] Module ${i} quiz ${j} is incomplete:`, q);
+          throw new Error(`Course generation returned invalid JSON - module ${i} quiz ${j} is incomplete`);
+        }
+      }
+    }
   }
 
   // Build course object
@@ -261,9 +309,9 @@ export async function generateFullCourse({ outline, conversations, model }) {
  * Regroup all completed courses
  */
 export async function regroupAllCompleted() {
-  const store = useLearnStore.getState();
-  const courses = Object.values(store.courses);
-  const goals = Object.values(store.goals);
+  const storeState = useLearnStore.getState();
+  const courses = Object.values(storeState.courses);
+  const goals = Object.values(storeState.goals);
   
   // Get completed courses that need grouping
   const completedCourses = courses.filter(c => c.status === 'completed');
@@ -282,7 +330,7 @@ export async function regroupAllCompleted() {
   }));
   
   const existingBrief = goals.map(g => {
-    const goalCourses = store.getGoalCourses(g.id);
+    const goalCourses = storeState.getGoalCourses(g.id);
     return {
       label: g.label,
       members: goalCourses.completed.slice(0, 12).map(course => ({
@@ -322,6 +370,43 @@ export async function regroupAllCompleted() {
   let regroupedCount = 0;
   const db = (await import('../../../lib/db/database')).default;
   
+  // 0. Handle remove_groups (remove entire groups and make their courses pending)
+  if (Array.isArray(parsed.remove_groups) && parsed.remove_groups.length > 0) {
+    for (const labelToRemove of parsed.remove_groups) {
+      if (!labelToRemove) continue;
+      
+      const goal = goals.find(g => g.label === labelToRemove);
+      if (!goal) {
+        console.warn('[LearnAPI] Goal not found for removal:', labelToRemove);
+        continue;
+      }
+      
+      console.log('[LearnAPI] Removing goal:', labelToRemove);
+      
+      // Find all courses assigned to this goal and make them pending
+      const goalCourses = courses.filter(c => c.goal === labelToRemove);
+      for (const course of goalCourses) {
+        await db.courses.update(course.id, { goal: '' });
+        console.log('[LearnAPI] Made course pending:', course.title);
+      }
+      
+      // Delete the goal
+      await db.goals.delete(goal.id);
+      
+      console.log('[LearnAPI] Removed goal and made', goalCourses.length, 'courses pending');
+    }
+    
+    // Reload store data to reflect changes
+    await useLearnStore.getState().loadLearnData();
+    
+    // Refresh references after removal
+    const updatedState = useLearnStore.getState();
+    courses.length = 0;
+    courses.push(...Object.values(updatedState.courses));
+    goals.length = 0;
+    goals.push(...Object.values(updatedState.goals));
+  }
+  
   // 1. Handle renames (rename existing goal labels)
   if (Array.isArray(parsed.rename)) {
     for (const rename of parsed.rename) {
@@ -330,7 +415,9 @@ export async function regroupAllCompleted() {
       
       if (!oldLabel || !newLabel) continue;
       
-      const goal = goals.find(g => g.label === oldLabel);
+      // Refresh goal reference from updated state
+      const currentGoals = Object.values(useLearnStore.getState().goals);
+      const goal = currentGoals.find(g => g.label === oldLabel);
       if (!goal) continue;
       
       console.log('[LearnAPI] Renaming goal:', oldLabel, '->', newLabel);
@@ -366,20 +453,45 @@ export async function regroupAllCompleted() {
       }
       
       // Reload store data to reflect changes
-      await store.loadLearnData();
+      await useLearnStore.getState().loadLearnData();
     }
+    
+    // Refresh references after renames
+    const updatedState = useLearnStore.getState();
+    courses.length = 0;
+    courses.push(...Object.values(updatedState.courses));
+    goals.length = 0;
+    goals.push(...Object.values(updatedState.goals));
   }
   
-  // 2. Handle add_to_existing (assign pending courses to existing goals)
+  // 2. Handle add_to_existing (assign courses to existing goals)
   if (Array.isArray(parsed.add_to_existing)) {
     for (const assignment of parsed.add_to_existing) {
       const courseId = assignment.course_id;
       const targetLabel = assignment.target_label;
       
-      if (!courseId || !targetLabel) continue;
+      if (!courseId || !targetLabel) {
+        console.warn('[LearnAPI] Invalid add_to_existing assignment:', assignment);
+        continue;
+      }
       
-      const course = courses.find(c => c.id === courseId);
-      if (!course) continue;
+      // Refresh references to get current state
+      const currentState = useLearnStore.getState();
+      const currentCourses = Object.values(currentState.courses);
+      const currentGoals = Object.values(currentState.goals);
+      
+      const course = currentCourses.find(c => c.id === courseId);
+      if (!course) {
+        console.warn('[LearnAPI] Course not found for assignment:', courseId);
+        continue;
+      }
+      
+      // Validate target goal exists
+      const targetGoal = currentGoals.find(g => g.label === targetLabel);
+      if (!targetGoal) {
+        console.warn('[LearnAPI] Target goal not found:', targetLabel);
+        continue;
+      }
       
       console.log('[LearnAPI] Assigning course', course.title, 'to goal', targetLabel);
       
@@ -387,40 +499,66 @@ export async function regroupAllCompleted() {
       await db.courses.update(courseId, { goal: targetLabel });
       
       // Update store
-      await store.updateCourseGoal(courseId, targetLabel);
+      await currentState.updateCourseGoal(courseId, targetLabel);
       
       regroupedCount++;
     }
   }
   
-  // 3. Handle new_groups (create new goals with pending courses)
+  // 3. Handle new_groups (create new goals with courses)
   if (Array.isArray(parsed.new_groups)) {
     for (const group of parsed.new_groups) {
       const goalLabel = group.label;
       const memberIds = group.members || [];
       
-      if (!goalLabel || memberIds.length < 2) continue;
+      if (!goalLabel || memberIds.length < 2) {
+        console.warn('[LearnAPI] Invalid new_group - need at least 2 members:', group);
+        continue;
+      }
       
       console.log('[LearnAPI] Creating new goal:', goalLabel, 'with', memberIds.length, 'members');
       
+      // Refresh references
+      const currentState = useLearnStore.getState();
+      const currentCourses = Object.values(currentState.courses);
+      
+      // Validate all members exist
+      const validMembers = memberIds.filter(id => {
+        const course = currentCourses.find(c => c.id === id);
+        if (!course) {
+          console.warn('[LearnAPI] Course not found for new group member:', id);
+          return false;
+        }
+        return true;
+      });
+      
+      if (validMembers.length < 2) {
+        console.warn('[LearnAPI] Not enough valid members for new group:', goalLabel);
+        continue;
+      }
+      
       // Assign each member to this goal
-      for (const courseId of memberIds) {
-        const course = courses.find(c => c.id === courseId);
-        if (!course) continue;
-        
+      for (const courseId of validMembers) {
         await db.courses.update(courseId, { goal: goalLabel });
-        await store.updateCourseGoal(courseId, goalLabel);
+        await currentState.updateCourseGoal(courseId, goalLabel);
         
         regroupedCount++;
       }
     }
   }
   
-  const pendingCount = completedCourses.length - regroupedCount;
+  // Recalculate final state
+  await useLearnStore.getState().loadLearnData();
+  const finalState = useLearnStore.getState();
+  const finalCourses = Object.values(finalState.courses);
+  const finalGoals = Object.values(finalState.goals);
   
-  console.log('[LearnAPI] Regroup complete:', regroupedCount, 'regrouped,', pendingCount, 'pending');
+  // Count actual pending courses (completed with no goal)
+  const pendingCount = finalCourses.filter(c => c.status === 'completed' && !c.goal).length;
   
-  return { regrouped: regroupedCount, pending: pendingCount, groups: goals.length };
+  console.log('[LearnAPI] Regroup complete:', regroupedCount, 'operations performed,', pendingCount, 'pending,', finalGoals.length, 'total goals');
+  
+  return { regrouped: regroupedCount, pending: pendingCount, groups: finalGoals.length };
 }
 
 /**
@@ -430,10 +568,34 @@ export async function markOutlineStatus(outlineId, status, action) {
   console.log('[LearnAPI] markOutlineStatus:', { outlineId, status, action });
   
   const store = useLearnStore.getState();
-  const outline = store.outlines[outlineId];
+  let outline = store.outlines[outlineId];
+  
+  // If outline not found by ID, try to find it by courseId (in case we received a courseId instead)
+  if (!outline) {
+    console.log('[LearnAPI] Outline not found by ID, trying to find by courseId:', outlineId);
+    outline = Object.values(store.outlines).find(o => o.courseId === outlineId);
+  }
+  
+  // Special handling for dismiss action - always allow dismissing even if outline not found
+  if (action === 'dismiss' && !outline) {
+    console.log('[LearnAPI] Outline not found for dismiss, attempting to delete course directly:', outlineId);
+    
+    // Try to find and delete the course
+    const course = store.courses[outlineId];
+    if (course) {
+      console.log('[LearnAPI] Found course to dismiss:', course.id);
+      // Delete course using store method to properly handle cleanup
+      await store.deleteCourse(course.id);
+      console.log('[LearnAPI] Course dismissed successfully');
+      return;
+    }
+    
+    console.warn('[LearnAPI] Neither outline nor course found for ID:', outlineId);
+    return;
+  }
   
   if (!outline) {
-    console.warn('[LearnAPI] Outline not found:', outlineId);
+    console.warn('[LearnAPI] Outline not found and action is not dismiss:', outlineId, action);
     return;
   }
   
@@ -521,10 +683,8 @@ export async function markOutlineStatus(outlineId, status, action) {
       
       if (course && course.status === 'started') {
         console.log('[LearnAPI] Dismissing corresponding started course:', outline.courseId);
-        // Delete the shell course since it was never actually started
-        const db = (await import('../../../lib/db/database')).default;
-        await db.courses.delete(outline.courseId);
-        await store.loadLearnData();
+        // Delete the shell course since it was never actually started - use deleteCourse to avoid data loss
+        await store.deleteCourse(outline.courseId);
       }
     }
   }
