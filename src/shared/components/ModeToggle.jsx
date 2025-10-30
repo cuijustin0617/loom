@@ -22,7 +22,15 @@ export default function ModeToggle({ mode = 'chat', onChange, size = 'md', class
     setSlider({ left, width });
   };
 
-  useLayoutEffect(() => { recalc(); }, [isLearn]);
+  // Recalculate when mode changes - using both useLayoutEffect and a small delay as fallback
+  useLayoutEffect(() => {
+    recalc();
+    // Add a small delay to ensure DOM is ready after mode changes
+    const timeoutId = setTimeout(recalc, 0);
+    return () => clearTimeout(timeoutId);
+  }, [mode, isLearn]);
+
+  // Setup resize observers and initial calculation
   useEffect(() => {
     recalc();
     const ro = new ResizeObserver(() => recalc());

@@ -8,6 +8,7 @@
 
 import { useLearnStore } from '../store/learnStore';
 import { useChatStore } from '../../chat/store/chatStore';
+import { useSettingsStore } from '../../../shared/store/settingsStore';
 import { generateLearnProposals, regroupAllCompleted } from './learnApi';
 
 /**
@@ -18,6 +19,13 @@ import { generateLearnProposals, regroupAllCompleted } from './learnApi';
 export async function autoRefreshSuggestedFeed() {
   const learnStore = useLearnStore.getState();
   const chatStore = useChatStore.getState();
+  const settingsStore = useSettingsStore.getState();
+  
+  // Don't auto-refresh if user is on Learn page
+  if (settingsStore.currentMode === 'learn') {
+    console.log('[AutoOps] User is on Learn page, skipping auto-refresh');
+    return;
+  }
   
   // Check if already refreshing
   if (learnStore.isAutoRefreshing) {
@@ -121,7 +129,7 @@ export async function autoRegroupPendingCourses() {
 export function shouldTriggerAutoRegroup() {
   const learnStore = useLearnStore.getState();
   const pendingCount = learnStore.getPendingCoursesCount();
-  return pendingCount > 2 && !learnStore.isAutoRegrouping;
+  return pendingCount >= 2 && !learnStore.isAutoRegrouping;
 }
 
 

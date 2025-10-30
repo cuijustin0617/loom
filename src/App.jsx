@@ -43,6 +43,7 @@ function App() {
   const [initError, setInitError] = useState(null);
   const [needsOnboarding, setNeedsOnboarding] = useState(true);
   const [mode, setMode] = useState('chat'); // 'chat' | 'learn'
+  const setCurrentMode = useSettingsStore(state => state.setCurrentMode);
   
   // Initialize on mount
   useEffect(() => {
@@ -126,6 +127,12 @@ function App() {
     return <OnboardingGate onComplete={() => setNeedsOnboarding(false)} />;
   }
   
+  // Handler for mode changes
+  const handleModeChange = (newMode) => {
+    setMode(newMode);
+    setCurrentMode(newMode);
+  };
+  
   // Main app UI
   return (
     <div className="h-screen w-screen overflow-hidden">
@@ -133,7 +140,7 @@ function App() {
       <div className="fixed top-3 left-4 z-50">
         <ModeToggle 
           mode={mode} 
-          onChange={setMode}
+          onChange={handleModeChange}
         />
       </div>
       

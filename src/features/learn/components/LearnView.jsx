@@ -4,10 +4,12 @@
  * Shows suggested courses, in-progress courses, and completed courses with pagination.
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useLearnStore } from '../store/learnStore';
 import { useSettingsStore } from '../../../shared/store/settingsStore';
 import { useLearnOperations } from '../hooks/useLearnOperations';
+import ProgressTimer from '../../../shared/components/ProgressTimer';
+import db from '../../../lib/db/database';
 
 // Lazy import heavy components
 import { lazy, Suspense } from 'react';
@@ -39,6 +41,7 @@ function LearnView() {
   const getCourseWithModules = useLearnStore(state => state.getCourseWithModules);
   const isAutoRefreshing = useLearnStore(state => state.isAutoRefreshing);
   const isAutoRegrouping = useLearnStore(state => state.isAutoRegrouping);
+  const loadLearnData = useLearnStore(state => state.loadLearnData);
   
   const {
     handleStartCourse,
@@ -51,6 +54,54 @@ function LearnView() {
     isStartingCourse,
     isRegrouping
   } = useLearnOperations();
+  
+  // Auto-recovery: Check if store is empty but data exists in IndexedDB
+  // This handles cases where HMR resets the store unexpectedly
+  const hasCheckedRecovery = useRef(false);
+  useEffect(() => {
+    async function checkAndRecover() {
+      // Only check once per mount
+      if (hasCheckedRecovery.current) return;
+      hasCheckedRecovery.current = true;
+      
+      // Check if store is empty
+      const storeEmpty = Object.keys(courses).length === 0 && 
+                        Object.keys(outlines).length === 0 && 
+                        Object.keys(goals).length === 0;
+      
+      if (!storeEmpty) {
+        console.log('[LearnView] Store has data, no recovery needed');
+        return;
+      }
+      
+      // Check if IndexedDB has data
+      try {
+        const [dbCourses, dbOutlines, dbGoals] = await Promise.all([
+          db.courses.count(),
+          db.outlines.count(),
+          db.goals.count()
+        ]);
+        
+        const hasData = dbCourses > 0 || dbOutlines > 0 || dbGoals > 0;
+        
+        if (hasData) {
+          console.log('[LearnView] Store empty but IndexedDB has data - recovering...', {
+            courses: dbCourses,
+            outlines: dbOutlines,
+            goals: dbGoals
+          });
+          await loadLearnData();
+          console.log('[LearnView] Recovery complete');
+        } else {
+          console.log('[LearnView] No data in store or IndexedDB - fresh start');
+        }
+      } catch (error) {
+        console.error('[LearnView] Recovery check failed:', error);
+      }
+    }
+    
+    checkAndRecover();
+  }, [courses, outlines, goals, loadLearnData]);
   
   // Compute derived data from state
   const suggested = useMemo(() => {
@@ -117,7 +168,7 @@ function LearnView() {
       if (maxCourseCount === 0) return 1;
       const totalCount = completedCount + startedCount;
       const normalized = totalCount / maxCourseCount;
-      return 0.05 + (normalized * 0.95); // 5% to 100%
+      return 0.26 + (normalized * 0.74); // 26% to 100%
     };
   }, [goalsWithStats]);
   
@@ -148,8 +199,25 @@ function LearnView() {
       console.log('[LearnView] Start course result:', result);
     } catch (error) {
       console.error('[LearnView] Start course error:', error);
-      // Keep modal open but show error in console
-      // User can close modal manually if needed
+      // Keep modal open with error state visible to user
+    }
+  };
+  
+  const handleRetryGeneration = async (courseId) => {
+    try {
+      console.log('[LearnView] Retrying generation for course:', courseId);
+      
+      // Find the outline for this course
+      const outline = Object.values(outlines).find(o => o.courseId === courseId);
+      if (!outline) {
+        console.error('[LearnView] Outline not found for retry:', courseId);
+        return;
+      }
+      
+      // Retry generation
+      await handleStartCourse(outline.id);
+    } catch (error) {
+      console.error('[LearnView] Retry failed:', error);
     }
   };
   
@@ -214,16 +282,45 @@ function LearnView() {
           {/* Header */}
           <div className="flex items-center justify-between mb-4">
             <div className="text-xl font-semibold text-gray-900">Learn</div>
-            <div className="flex items-center gap-2">
-              <select
-                value={learnModel}
-                onChange={(e) => setLearnModel(e.target.value)}
-                className="px-3 py-1.5 text-sm border border-gray-200 rounded-full bg-white shadow-sm"
-              >
-                <option value="gemini-2.5-flash">Flash</option>
-                <option value="gemini-2.5-flash-lite">Flash Lite</option>
-                <option value="gemini-2.5-pro">Pro</option>
-              </select>
+            <div className="flex items-center gap-3">
+              <div className="text-sm text-gray-600 hidden sm:block">
+                Model:
+              </div>
+              <div className="relative group">
+                <select
+                  value={learnModel}
+                  onChange={(e) => setLearnModel(e.target.value)}
+                  className="px-4 py-2 text-sm font-medium border-2 border-emerald-300 rounded-lg bg-white shadow-md hover:border-emerald-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 transition-all cursor-pointer appearance-none pr-10"
+                >
+                  <option value="gemini-2.5-flash-lite">Flash Lite (fastest)</option>
+                  <option value="gemini-2.5-flash">Flash (balanced)</option>
+                  <option value="gemini-2.5-pro">Pro (best quality)</option>
+                </select>
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                  <svg className="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+                
+                {/* Tooltip */}
+                <div className="absolute top-full right-0 mt-2 w-72 p-4 bg-gray-900 text-white text-xs rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
+                  <div className="space-y-3">
+                    <div>
+                      <div className="font-semibold text-emerald-300 mb-1">Flash Lite</div>
+                      <div className="text-gray-300">Fastest generation (~10s) • Good for quick learning • May be less detailed</div>
+                    </div>
+                    <div>
+                      <div className="font-semibold text-emerald-400 mb-1">Flash (Recommended)</div>
+                      <div className="text-gray-300">Balanced speed (~30s) • Great quality • Best for most users</div>
+                    </div>
+                    <div>
+                      <div className="font-semibold text-emerald-500 mb-1">Pro</div>
+                      <div className="text-gray-300">Highest quality (~50s) • Most comprehensive • Best for deep learning</div>
+                    </div>
+                  </div>
+                  <div className="absolute -top-1 right-6 w-2 h-2 bg-gray-900 transform rotate-45"></div>
+                </div>
+              </div>
             </div>
           </div>
           
@@ -247,20 +344,37 @@ function LearnView() {
                   <Suspense fallback={<div>Loading...</div>}>
                     <div className="rounded-xl border border-amber-200 p-3 bg-gradient-to-br from-amber-50/15 to-white">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {paginatedContinue.map(course => (
+                        {paginatedContinue.map(course => {
+                          // Find the corresponding outline to check if it needs generation
+                          const outline = Object.values(outlines).find(o => o.courseId === course.id);
+                          const needsGeneration = course.moduleIds.length === 0;
+                          
+                          return (
                           <CourseCard
                             key={course.id}
                             outline={course}
-                            onStart={() => {
+                            onStart={async () => {
+                              // Open modal immediately
                               setActiveCourseId(course.id);
                               setModalOpen(true);
+                              
+                              // If course needs generation, trigger it
+                              if (needsGeneration && outline) {
+                                console.log('[LearnView] Continue course needs generation, starting:', course.id);
+                                try {
+                                  await handleStartCourse(outline.id);
+                                } catch (error) {
+                                  console.error('[LearnView] Failed to generate course:', error);
+                                }
+                              }
                             }}
                             onSave={() => {}}
                             onDismiss={() => handleDismiss(course)}
                             onAlreadyKnow={() => {}}
                             onlyPrimaryAndRemove
                           />
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                     <PaginationControls section="continue" total={totalPages.continue} />
@@ -305,10 +419,21 @@ function LearnView() {
                 {paginatedSuggested.length === 0 && !isLoadingSuggestions && !isAutoRefreshing ? (
                   <div className="text-gray-600 text-sm">No suggestions yet. Click Refresh to generate.</div>
                 ) : isLoadingSuggestions || isAutoRefreshing ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {Array.from({ length: 9 }).map((_, i) => (
-                      <div key={i} className="h-64 bg-gray-100 rounded-lg animate-pulse" />
-                    ))}
+                  <div className="flex flex-col items-center justify-center py-12 space-y-6">
+                    <ProgressTimer 
+                      model={learnModel} 
+                      isComplete={!isLoadingSuggestions && !isAutoRefreshing}
+                      size={140}
+                      color="emerald"
+                    />
+                    <div className="text-center">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                        Generating Course Suggestions...
+                      </h3>
+                      <p className="text-sm text-gray-600">
+                        Analyzing your conversations to find learning opportunities
+                      </p>
+                    </div>
                   </div>
                 ) : (
                   <Suspense fallback={<div>Loading...</div>}>
@@ -480,6 +605,7 @@ function LearnView() {
               setModalOpen(false);
               setActiveCourseId(null);
             }}
+            onRetryGeneration={handleRetryGeneration}
           />
         </Suspense>
       )}

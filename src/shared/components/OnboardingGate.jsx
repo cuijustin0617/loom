@@ -92,9 +92,9 @@ const OnboardingGate = ({ onComplete }) => {
           </Card>
         ) : needsAuth ? (
           <Card>
-            <h2 className="text-lg font-medium text-gray-900">Sign in to continue</h2>
-            <p className="mt-1 text-sm text-gray-600">Use your Google account to sync conversations across devices.</p>
-            <div className="mt-4">
+            <h2 className="text-lg font-medium text-gray-900">Choose how to continue</h2>
+            <p className="mt-1 text-sm text-gray-600">Sign in to sync your data across devices, or continue as guest.</p>
+            <div className="mt-4 space-y-3">
               <button
                 onClick={signInWithGoogle}
                 className="w-full inline-flex items-center justify-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-800 hover:bg-gray-50 shadow-sm"
@@ -105,11 +105,50 @@ const OnboardingGate = ({ onComplete }) => {
                   <path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.197l-6.191-5.238C29.211 35.091 26.715 36 24 36c-5.192 0-9.607-3.315-11.254-7.946l-6.54 5.036C9.5 39.556 16.227 44 24 44z"/>
                   <path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303c-.792 2.238-2.231 4.166-4.095 5.565l.003-.002 6.191 5.238C35.271 39.205 40 32.667 40 24c0-1.341-.138-2.65-.389-3.917z"/>
                 </svg>
-                Continue with Google
+                Sign in with Google
               </button>
+              
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-gray-300"></div>
+                </div>
+                <div className="relative flex justify-center text-sm">
+                  <span className="px-2 bg-white text-gray-500">or</span>
+                </div>
+              </div>
+              
+              <button
+                onClick={() => setUser({ isGuest: true })}
+                className="w-full inline-flex items-center justify-center gap-2 rounded-md border-2 border-gray-300 bg-white px-3 py-2 text-gray-700 hover:bg-gray-50 font-medium"
+              >
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                  <circle cx="12" cy="7" r="4"/>
+                </svg>
+                Continue as Guest
+              </button>
+              
+              <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                <div className="flex gap-2">
+                  <svg className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M12 16v-4m0-4h.01"/>
+                  </svg>
+                  <div className="text-xs text-blue-800">
+                    <p className="font-medium mb-1">Guest Mode:</p>
+                    <ul className="list-disc list-inside space-y-0.5 ml-1">
+                      <li>No account required</li>
+                      <li>Data stored locally on this device only</li>
+                      <li>Data will be lost if you clear browser data</li>
+                      <li>Not synced across devices</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+              
               {!auth && (
                 <p className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
-                  Firebase is not configured; sign-in is disabled in this build. You can continue without sync.
+                  Firebase is not configured; sign-in is disabled in this build.
                 </p>
               )}
             </div>

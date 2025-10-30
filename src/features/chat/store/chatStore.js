@@ -9,6 +9,17 @@ import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import db, { generateId, now } from '../../../lib/db/database';
 
+// Preserve store state across HMR (Hot Module Replacement) during development
+let preservedState = null;
+
+if (import.meta.hot) {
+  // Save state before HMR
+  import.meta.hot.dispose(() => {
+    preservedState = useChatStore?.getState();
+    console.log('[ChatStore] HMR: Preserved state before reload');
+  });
+}
+
 /**
  * Chat Store
  */
@@ -28,6 +39,15 @@ export const useChatStore = create(
      */
     loadConversations: async () => {
       try {
+        // If we have preserved state from HMR, restore it first
+        if (preservedState) {
+          console.log('[ChatStore] Restoring conversations from HMR preservation');
+          set(draft => {
+            draft.conversations = preservedState.conversations || {};
+          });
+          return;
+        }
+        
         const conversations = await db.conversations.toArray();
         
         set(draft => {
@@ -67,6 +87,18 @@ export const useChatStore = create(
      */
     loadAllMessages: async () => {
       try {
+        // If we have preserved state from HMR, restore it first
+        if (preservedState) {
+          console.log('[ChatStore] Restoring messages from HMR preservation');
+          set(draft => {
+            draft.messages = preservedState.messages || {};
+            draft.isLoading = preservedState.isLoading || false;
+          });
+          // Clear preserved state after restoration
+          preservedState = null;
+          return;
+        }
+        
         const messages = await db.messages.toArray();
         
         console.log('[ChatStore] Loading all messages from database:', messages.length);
