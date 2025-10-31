@@ -9,7 +9,6 @@ import { useChatStore } from '../store/chatStore';
 import { useSettingsStore } from '../../../shared/store/settingsStore';
 import { useChatOperations } from '../hooks/useChatOperations';
 import ProfileMenu from '../../../shared/components/ProfileMenu';
-import Logo from '../../../shared/components/Logo';
 
 function Sidebar({ conversationIds, currentConversationId, onCollapse }) {
   const conversations = useChatStore(state => state.conversations);
@@ -35,8 +34,7 @@ function Sidebar({ conversationIds, currentConversationId, onCollapse }) {
   return (
     <div className="h-full flex flex-col bg-loom-gray">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-200">
-        <Logo />
+      <div className="flex items-center justify-end p-4 border-b border-gray-200">
         <button
           onClick={onCollapse}
           className="p-2 rounded-full hover:bg-gray-200 text-gray-600"
@@ -52,12 +50,28 @@ function Sidebar({ conversationIds, currentConversationId, onCollapse }) {
       <div className="p-3 border-b border-gray-200">
         <button
           onClick={handleNewConversation}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors font-medium"
+          className="group relative w-full flex items-center justify-center gap-2.5 px-5 py-3 text-white rounded-2xl transition-all duration-200 font-semibold active:scale-[0.96] overflow-hidden border border-violet-300/40"
+          style={{
+            background: 'linear-gradient(135deg, rgba(167, 139, 250, 0.7) 0%, rgba(139, 92, 246, 0.75) 25%, rgba(124, 58, 237, 0.75) 50%, rgba(109, 40, 217, 0.8) 75%, rgba(91, 33, 182, 0.85) 100%)',
+          }}
         >
-          <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          {/* Animated gradient overlay on hover */}
+          <div 
+            className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+            style={{
+              background: 'linear-gradient(135deg, rgba(196, 181, 253, 0.7) 0%, rgba(167, 139, 250, 0.8) 50%, rgba(139, 92, 246, 0.85) 100%)',
+            }}
+          ></div>
+          
+          {/* Shimmer effect */}
+          <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-500 ease-in-out">
+            <div className="h-full w-1/2 bg-gradient-to-r from-transparent via-white/30 to-transparent skew-x-12"></div>
+          </div>
+          
+          <svg className="w-5 h-5 relative z-10 group-hover:rotate-90 transition-transform duration-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
             <path d="M12 5v14M5 12h14"/>
           </svg>
-          New Chat
+          <span className="relative z-10 tracking-wide">New Chat</span>
         </button>
       </div>
       

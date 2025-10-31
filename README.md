@@ -1,10 +1,16 @@
 # LOOM - AI-Powered Learning Assistant
 
+<div align="center">
+<sub>🧵 <em>A loom is a weaving machine—we weave unstructured conversations into coherent lessons, thread by thread, building your knowledge tapestry over time.</em></sub>
+</div>
+
+<br>
+
 > Personalized learning informed by daily LLM conversations toward long-term mastery via a learner memory graph.
 
 ## 🎥 Demo
 
-**[➤ Watch Demo Video](https://youtu.be/RuLg0wHLd-k)**
+**[➤ Watch Demo Video](https://www.youtube.com/watch?v=e2vqLYmCpuY)**
 
 ---
 

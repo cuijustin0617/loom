@@ -259,7 +259,7 @@ const Message = ({ message }) => {
           </div>
         </div>
       ) : (
-        <div className="flex flex-col items-start w-full min-w-0">
+        <div className="flex flex-col items-start w-full min-w-0 ml-8">
           <div className="flex items-center gap-2 text-sm font-semibold text-violet-600 mb-1.5 select-none">
             <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M12 3v4M12 17v4M3 12h4M17 12h4"/>
@@ -267,7 +267,7 @@ const Message = ({ message }) => {
             </svg>
             <span className="tracking-wide">LOOM</span>
           </div>
-          <div className={`inline-block max-w-[min(98%,1000px)] px-3 sm:px-4 py-2 rounded-lg break-words min-w-0 ${isError ? 'bg-red-50 border border-red-200 text-red-800' : 'bg-white border border-violet-200 text-gray-800'}`}>
+          <div className={`inline-block max-w-[min(98%,720px)] px-3 sm:px-4 py-2 rounded-lg break-words min-w-0 ${isError ? 'bg-red-50 border border-red-200 text-red-800' : 'bg-white border border-violet-200 text-gray-800'}`}>
             {Array.isArray(message.attachments) && message.attachments.length > 0 && (
               <div className="mb-2 flex flex-wrap gap-2">
                 {message.attachments.map((att, idx) => {
