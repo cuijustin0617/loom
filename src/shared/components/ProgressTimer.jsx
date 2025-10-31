@@ -34,12 +34,13 @@ function getModelDuration(model) {
  * @param {boolean} props.isComplete - Whether generation is complete
  * @param {number} props.size - Size of the circle in pixels (default: 120)
  * @param {string} props.color - Color theme (default: 'emerald')
+ * @param {number} props.durationMultiplier - Multiplier for duration (default: 1.0)
  */
-export default function ProgressTimer({ model, isComplete = false, size = 120, color = 'emerald' }) {
+export default function ProgressTimer({ model, isComplete = false, size = 120, color = 'emerald', durationMultiplier = 1.0 }) {
   const [progress, setProgress] = useState(0);
   const [isWaiting, setIsWaiting] = useState(false);
   
-  const duration = getModelDuration(model);
+  const duration = getModelDuration(model) * durationMultiplier;
   const strokeWidth = 8;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;

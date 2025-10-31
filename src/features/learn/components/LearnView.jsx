@@ -18,9 +18,22 @@ const LearnCourseModal = lazy(() => import('./LearnCourseModal'));
 
 const ITEMS_PER_PAGE = 10;
 
+/**
+ * Get duration multiplier for regroup operation based on model
+ * Regroup operations are faster than course generation
+ */
+function getRegroupMultiplier(model) {
+  if (!model) return 0.5;
+  const modelLower = model.toLowerCase();
+  if (modelLower.includes('lite')) return 0.4; // Flash Lite: 10s -> 4s
+  if (modelLower.includes('pro')) return 0.5;  // Pro: 50s -> 25s
+  return 0.4; // Flash: 30s -> 12s
+}
+
 function LearnView() {
   const [activeCourseId, setActiveCourseId] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState({
     suggested: 0,
     continue: 0
@@ -168,7 +181,7 @@ function LearnView() {
       if (maxCourseCount === 0) return 1;
       const totalCount = completedCount + startedCount;
       const normalized = totalCount / maxCourseCount;
-      return 0.26 + (normalized * 0.74); // 26% to 100%
+      return 0.46 + (normalized * 0.54); // 26% to 100%
     };
   }, [goalsWithStats]);
   
@@ -282,45 +295,147 @@ function LearnView() {
           {/* Header */}
           <div className="flex items-center justify-between mb-4">
             <div className="text-xl font-semibold text-gray-900">Learn</div>
-            <div className="flex items-center gap-3">
-              <div className="text-sm text-gray-600 hidden sm:block">
-                Model:
-              </div>
-              <div className="relative group">
-                <select
-                  value={learnModel}
-                  onChange={(e) => setLearnModel(e.target.value)}
-                  className="px-4 py-2 text-sm font-medium border-2 border-emerald-300 rounded-lg bg-white shadow-md hover:border-emerald-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 transition-all cursor-pointer appearance-none pr-10"
+            <div className="relative">
+              {/* Current Model Button */}
+              <button
+                onClick={() => setModelSelectorOpen(!modelSelectorOpen)}
+                className="px-4 py-2 text-sm font-medium border-2 border-emerald-300 rounded-lg bg-white shadow-md hover:border-emerald-400 hover:shadow-lg transition-all flex items-center gap-2 group"
+              >
+                <span className="text-gray-700">
+                  {learnModel.includes('lite') ? 'Flash Lite' : learnModel.includes('pro') ? 'Pro' : 'Flash'}
+                </span>
+                <svg 
+                  className={`w-4 h-4 text-emerald-600 transition-transform duration-200 ${modelSelectorOpen ? 'rotate-180' : ''}`}
+                  fill="none" 
+                  stroke="currentColor" 
+                  viewBox="0 0 24 24"
                 >
-                  <option value="gemini-2.5-flash-lite">Flash Lite (fastest)</option>
-                  <option value="gemini-2.5-flash">Flash (balanced)</option>
-                  <option value="gemini-2.5-pro">Pro (best quality)</option>
-                </select>
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-                  <svg className="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
-                  </svg>
-                </div>
-                
-                {/* Tooltip */}
-                <div className="absolute top-full right-0 mt-2 w-72 p-4 bg-gray-900 text-white text-xs rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
-                  <div className="space-y-3">
-                    <div>
-                      <div className="font-semibold text-emerald-300 mb-1">Flash Lite</div>
-                      <div className="text-gray-300">Fastest generation (~10s) • Good for quick learning • May be less detailed</div>
-                    </div>
-                    <div>
-                      <div className="font-semibold text-emerald-400 mb-1">Flash (Recommended)</div>
-                      <div className="text-gray-300">Balanced speed (~30s) • Great quality • Best for most users</div>
-                    </div>
-                    <div>
-                      <div className="font-semibold text-emerald-500 mb-1">Pro</div>
-                      <div className="text-gray-300">Highest quality (~50s) • Most comprehensive • Best for deep learning</div>
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              
+              {/* Model Selector Cards */}
+              {modelSelectorOpen && (
+                <>
+                  {/* Backdrop */}
+                  <div 
+                    className="fixed inset-0 z-40" 
+                    onClick={() => setModelSelectorOpen(false)}
+                  />
+                  
+                  {/* Cards Container */}
+                  <div className="absolute top-full right-0 mt-2 w-48 bg-white rounded-lg shadow-2xl border border-gray-200 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                    <div className="p-1.5 space-y-1">
+                      {/* Flash Lite Card */}
+                      <button
+                        onClick={() => {
+                          setLearnModel('gemini-2.5-flash-lite');
+                          setModelSelectorOpen(false);
+                        }}
+                        className={`w-full text-left p-2 rounded-md border transition-all duration-200 ${
+                          learnModel.includes('lite')
+                            ? 'border-emerald-400 bg-emerald-50 shadow-sm'
+                            : 'border-gray-200 hover:border-emerald-300 hover:bg-emerald-50/50 hover:shadow-sm'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="font-semibold text-sm text-gray-900">Flash Lite</div>
+                          <div className="flex items-center gap-0.5">
+                            <svg className="w-3 h-3 text-amber-500" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clipRule="evenodd" />
+                            </svg>
+                            <span className="text-[10px] font-medium text-amber-600">~10s</span>
+                          </div>
+                        </div>
+                        <p className="text-[10px] text-gray-600 leading-snug">
+                          Fastest • Quick learning
+                        </p>
+                        {learnModel.includes('lite') && (
+                          <div className="mt-1 flex items-center gap-0.5 text-emerald-600">
+                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                            </svg>
+                            <span className="text-[10px] font-medium">Selected</span>
+                          </div>
+                        )}
+                      </button>
+                      
+                      {/* Flash Card */}
+                      <button
+                        onClick={() => {
+                          setLearnModel('gemini-2.5-flash');
+                          setModelSelectorOpen(false);
+                        }}
+                        className={`w-full text-left p-2 rounded-md border transition-all duration-200 ${
+                          learnModel === 'gemini-2.5-flash'
+                            ? 'border-emerald-400 bg-emerald-50 shadow-sm'
+                            : 'border-gray-200 hover:border-emerald-300 hover:bg-emerald-50/50 hover:shadow-sm'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-1">
+                            <span className="font-semibold text-sm text-gray-900">Flash</span>
+                            <span className="px-1 py-0.5 text-[9px] font-medium bg-emerald-100 text-emerald-700 rounded">
+                              Recommended
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-0.5">
+                            <svg className="w-3 h-3 text-amber-500" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clipRule="evenodd" />
+                            </svg>
+                            <span className="text-[10px] font-medium text-amber-600">~30s</span>
+                          </div>
+                        </div>
+                        <p className="text-[10px] text-gray-600 leading-snug">
+                          Balanced • Great quality
+                        </p>
+                        {learnModel === 'gemini-2.5-flash' && (
+                          <div className="mt-1 flex items-center gap-0.5 text-emerald-600">
+                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                            </svg>
+                            <span className="text-[10px] font-medium">Selected</span>
+                          </div>
+                        )}
+                      </button>
+                      
+                      {/* Pro Card */}
+                      <button
+                        onClick={() => {
+                          setLearnModel('gemini-2.5-pro');
+                          setModelSelectorOpen(false);
+                        }}
+                        className={`w-full text-left p-2 rounded-md border transition-all duration-200 ${
+                          learnModel.includes('pro')
+                            ? 'border-emerald-400 bg-emerald-50 shadow-sm'
+                            : 'border-gray-200 hover:border-emerald-300 hover:bg-emerald-50/50 hover:shadow-sm'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="font-semibold text-sm text-gray-900">Pro</div>
+                          <div className="flex items-center gap-0.5">
+                            <svg className="w-3 h-3 text-purple-500" fill="currentColor" viewBox="0 0 20 20">
+                              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                            </svg>
+                            <span className="text-[10px] font-medium text-purple-600">~50s</span>
+                          </div>
+                        </div>
+                        <p className="text-[10px] text-gray-600 leading-snug">
+                          Highest quality • Deep learning
+                        </p>
+                        {learnModel.includes('pro') && (
+                          <div className="mt-1 flex items-center gap-0.5 text-emerald-600">
+                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                            </svg>
+                            <span className="text-[10px] font-medium">Selected</span>
+                          </div>
+                        )}
+                      </button>
                     </div>
                   </div>
-                  <div className="absolute -top-1 right-6 w-2 h-2 bg-gray-900 transform rotate-45"></div>
-                </div>
-              </div>
+                </>
+              )}
             </div>
           </div>
           
@@ -431,13 +546,13 @@ function LearnView() {
                         Generating Course Suggestions...
                       </h3>
                       <p className="text-sm text-gray-600">
-                        Analyzing your conversations to find learning opportunities
+                        Analyzing YOUR conversations and study history to find learning opportunities for YOU
                       </p>
                     </div>
                   </div>
                 ) : (
                   <Suspense fallback={<div>Loading...</div>}>
-                    <div className="max-h-[420px] overflow-y-auto rounded-xl border border-emerald-200 p-3 bg-gradient-to-br from-emerald-50/10 to-white">
+                    <div className="max-h-[600px] overflow-y-auto rounded-xl border border-emerald-200 p-3 bg-gradient-to-br from-emerald-50/10 to-white">
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                         {paginatedSuggested.map(outline => (
                           <CourseCard
@@ -491,7 +606,25 @@ function LearnView() {
             
             {expandedSections.goals && (
               <>
-                {goalsWithStats.length === 0 && pendingCourses.length === 0 ? (
+                {isRegrouping || isAutoRegrouping ? (
+                  <div className="flex flex-col items-center justify-center py-12 space-y-6">
+                    <ProgressTimer 
+                      model={learnModel} 
+                      isComplete={!isRegrouping && !isAutoRegrouping}
+                      size={140}
+                      color="emerald"
+                      durationMultiplier={getRegroupMultiplier(learnModel)}
+                    />
+                    <div className="text-center">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                        Regrouping Courses...
+                      </h3>
+                      <p className="text-sm text-gray-600">
+                        Reorganizing YOUR learning progress to better reflect YOUR current learning goals
+                      </p>
+                    </div>
+                  </div>
+                ) : goalsWithStats.length === 0 && pendingCourses.length === 0 ? (
                   <div className="text-gray-600 text-sm">No goals yet. Complete courses to see progress.</div>
                 ) : (
                   <div className="space-y-3">

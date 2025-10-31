@@ -42,7 +42,9 @@ function App() {
   const [isInitialized, setIsInitialized] = useState(false);
   const [initError, setInitError] = useState(null);
   const [needsOnboarding, setNeedsOnboarding] = useState(true);
-  const [mode, setMode] = useState('chat'); // 'chat' | 'learn'
+  
+  // Use mode from settings store as source of truth
+  const mode = useSettingsStore(state => state.currentMode);
   const setCurrentMode = useSettingsStore(state => state.setCurrentMode);
   
   // Initialize on mount
@@ -129,7 +131,6 @@ function App() {
   
   // Handler for mode changes
   const handleModeChange = (newMode) => {
-    setMode(newMode);
     setCurrentMode(newMode);
   };
   
@@ -137,7 +138,7 @@ function App() {
   return (
     <div className="h-screen w-screen overflow-hidden">
       {/* Global mode toggle - serves as title/brand */}
-      <div className="fixed top-3 left-4 z-50">
+      <div className="fixed top-3 left-2 z-50">
         <ModeToggle 
           mode={mode} 
           onChange={handleModeChange}
