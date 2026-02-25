@@ -22,6 +22,13 @@ logs/
 *.log
 npm-debug.log*
 
+# Private / non-distributable
+docs/
+legacy/
+prototypes/
+cursor.md
+TODO.md
+
 # Editor / OS
 .vscode/*
 !.vscode/extensions.json
