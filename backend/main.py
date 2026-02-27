@@ -176,6 +176,11 @@ async def chat_stream_endpoint(req: ChatRequest):
         except Exception:
             metadata = {"topic": {"name": "", "matchedExistingId": None, "confidence": 0}, "concepts": []}
 
+        if isinstance(metadata, list):
+            metadata = metadata[0] if metadata else {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+
         yield f"data: {_json.dumps({'type': 'done', 'response': full_response, 'topic': metadata.get('topic', {}), 'concepts': metadata.get('concepts', [])})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
@@ -265,6 +270,7 @@ async def sidebar_refresh(req: SidebarRefreshRequest):
     status_prompt = STATUS_UPDATE_PROMPT.format(
         topic_name=req.topicName,
         current_status=topic_status_str or "(empty - create fresh)",
+        current_messages=current_messages_text or "(none)",
         recent_summaries=recent_summaries_text,
     )
 

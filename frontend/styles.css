@@ -128,6 +128,7 @@ body {
   padding: 10px 12px; border-radius: 8px; font-size: 13px;
   color: var(--text-secondary); cursor: pointer; margin-bottom: 2px;
   display: flex; align-items: flex-start; gap: 10px; transition: background 0.15s;
+  position: relative;
 }
 .chat-item:hover { background: rgba(0,0,0,0.04); }
 .chat-item.active { background: rgba(74, 124, 89, 0.08); color: var(--primary); font-weight: 600; }
@@ -136,12 +137,16 @@ body {
 .chat-item-title { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-item-summary { font-size: 11px; color: var(--text-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-delete-btn {
-  width: 22px; height: 22px; border: none; background: transparent;
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  width: 28px; height: 28px; border: none;
   border-radius: 5px; font-size: 13px; line-height: 1; color: var(--text-muted);
   cursor: pointer; display: flex; align-items: center; justify-content: center;
-  opacity: 0; transition: opacity 0.15s, background 0.15s; flex-shrink: 0; margin-top: 2px;
+  opacity: 0; transition: opacity 0.15s, background 0.15s;
+  background: linear-gradient(90deg, transparent 0%, var(--bg) 30%);
+  padding-left: 6px;
 }
 .chat-item:hover .chat-delete-btn { opacity: 1; }
+.chat-item.active:hover .chat-delete-btn { background: linear-gradient(90deg, transparent 0%, rgba(74, 124, 89, 0.08) 30%); }
 .chat-delete-btn:hover { background: rgba(239,68,68,0.1); color: var(--danger); }
 
 .sidebar-actions { padding: 8px 16px; }

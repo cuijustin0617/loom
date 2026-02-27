@@ -270,7 +270,8 @@ const App = {
           topic.lastActive = Utils.timestamp();
           Storage.saveTopic(topic);
           if (topic.statusSummary) {
-            content = `[My current status in "${topic.name}": ${topic.statusSummary}]\n\n${content}`;
+            const statusStr = Sidebar._serializeStatus(topic.statusSummary);
+            content = `[My current status in "${topic.name}": ${statusStr}]\n\n${content}`;
           }
           Sidebar.show(this.selectedTopicId);
         }
@@ -764,7 +765,7 @@ const App = {
         topicId: topic.id,
         topicName: topic.name,
         topicColorObj: topic,
-        statusSummary: topic.statusSummary || '',
+        statusSummary: Sidebar._serializeStatus(topic.statusSummary) || '',
         title: dirs[0].title || '',
         question: dirs[0].question || '',
       });
@@ -833,7 +834,7 @@ const App = {
     let attachHtml = '';
     if (msg.attachments && msg.attachments.length > 0) {
       const thumbs = msg.attachments.map(att => {
-        if (att.mimeType && att.mimeType.startsWith('image/')) {
+        if (att.mimeType && att.mimeType.startsWith('image/') && att.data) {
           return `<img src="data:${att.mimeType};base64,${att.data}" style="max-width:200px;max-height:200px;border-radius:8px;margin:4px 0;">`;
         }
         return `<div style="font-size:11px;color:var(--text-muted);">📎 ${Utils.escapeHtml(att.name || 'file')}</div>`;

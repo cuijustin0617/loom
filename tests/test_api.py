@@ -2868,3 +2868,98 @@ class TestAttachmentDataInMessages:
         """_appendMessage should render image attachments using data: URL."""
         js = _get_client().get("/static/app.js").text
         assert "data:${att.mimeType};base64,${att.data}" in js
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Bug fixes: status serialization, image fallback, delete btn, status prompt
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestBug1StatusSerialization:
+    """Status must be serialized before interpolation into chat prompt."""
+
+    def test_app_js_uses_serialize_status_for_topic_injection(self):
+        js = _get_client().get("/static/app.js").text
+        assert "Sidebar._serializeStatus(topic.statusSummary)" in js
+
+    def test_app_js_uses_serialize_status_for_suggestion_cards(self):
+        js = _get_client().get("/static/app.js").text
+        assert "Sidebar._serializeStatus(topic.statusSummary) || ''" in js
+
+    def test_sidebar_serialize_status_handles_string(self):
+        js = _get_client().get("/static/sidebar.js").text
+        assert "_serializeStatus" in js
+        assert "typeof statusSummary === 'string'" in js
+
+    def test_stream_metadata_list_fallback(self):
+        """If LLM returns a list instead of dict for metadata, it should not crash."""
+        async def fake_stream(*args, **kwargs):
+            yield "Answer"
+        with patch("main.llm") as m:
+            m.chat_stream = MagicMock(return_value=fake_stream())
+            m.chat = AsyncMock(return_value=[{"topic": {"name": "ML"}, "concepts": []}])
+            resp = _get_client().post("/api/chat/stream", json={
+                "chatId": "c1", "messages": [{"role": "user", "content": "hi"}],
+            })
+            assert resp.status_code == 200
+            events = []
+            for line in resp.text.split("\n"):
+                if line.startswith("data: "):
+                    import json as _j
+                    events.append(_j.loads(line[6:]))
+            done = [e for e in events if e["type"] == "done"]
+            assert len(done) == 1
+            assert done[0]["topic"]["name"] == "ML"
+
+
+class TestBug2ImageFallback:
+    """Image attachments without data should fall back to filename, not broken img."""
+
+    def test_append_message_checks_att_data_before_img(self):
+        js = _get_client().get("/static/app.js").text
+        assert "att.mimeType.startsWith('image/') && att.data)" in js
+
+    def test_missing_data_falls_through_to_filename(self):
+        js = _get_client().get("/static/app.js").text
+        idx = js.index("_appendMessage(msg) {")
+        block = js[idx:idx+800]
+        assert "att.data" in block
+        assert "att.name || 'file'" in block
+
+
+class TestBug3DeleteBtnOverlay:
+    """Delete button should overlay text on hover, not take permanent space."""
+
+    def test_chat_delete_btn_is_absolute(self):
+        css = _get_client().get("/static/styles.css").text
+        idx = css.index(".chat-delete-btn {")
+        block = css[idx:idx+400]
+        assert "position: absolute" in block
+
+    def test_chat_item_is_relative(self):
+        css = _get_client().get("/static/styles.css").text
+        idx = css.index(".chat-item {")
+        block = css[idx:idx+300]
+        assert "position: relative" in block
+
+    def test_delete_btn_has_gradient_bg(self):
+        css = _get_client().get("/static/styles.css").text
+        idx = css.index(".chat-delete-btn {")
+        block = css[idx:idx+400]
+        assert "linear-gradient" in block
+
+
+class TestBug4StatusPromptNotes:
+    """Status prompt should capture user-provided notes and self-reported knowledge."""
+
+    def test_prompt_mentions_self_reported(self):
+        from prompts import STATUS_UPDATE_PROMPT
+        assert "self-reported" in STATUS_UPDATE_PROMPT
+
+    def test_prompt_mentions_user_notes(self):
+        from prompts import STATUS_UPDATE_PROMPT
+        assert "notes" in STATUS_UPDATE_PROMPT.lower()
+
+    def test_prompt_mentions_stated_expertise(self):
+        from prompts import STATUS_UPDATE_PROMPT
+        assert "stated expertise" in STATUS_UPDATE_PROMPT

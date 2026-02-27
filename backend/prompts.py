@@ -114,32 +114,36 @@ Return JSON:
   ]
 }}"""
 
-STATUS_UPDATE_PROMPT = """You maintain a structured status summary of a user's journey in a topic.
+STATUS_UPDATE_PROMPT = """You maintain a structured summary of a user's status in a topic.
 
 Topic: {topic_name}
 Current status: {current_status}
-Recent chat summaries (newest first):
+Current chat messages:
+{current_messages}
+Past chat summaries (newest first):
 {recent_summaries}
 
 Update the status with two sections:
 
-1. **Overview**: 2-4 bullet points summarizing the user's overall profile in this topic. Think big-picture: background, level, goals. Example: "CS undergrad, comfortable with classical ML, new to deep learning."
+1. **Overview**: 2-4 bullet points summarizing the user's overall profile in this topic. Think big-picture: user's background, context, traits, level, stats, goals, timeline. Incorporate any self-reported knowledge, notes, or stated expertise the user has shared. Example: "CS undergrad at Harvard, comfortable with classical ML, new to deep learning, want to work in silicon Valley"
 
 2. **Specifics**: Individual items the user has explored, one per chat or concept. For each, include a short label and inferred understanding level based on how they asked (their own questions show deeper interest; clicking a suggested question means brief exposure).
 
 Rules:
-- Only ADD new information, don't remove existing info unless directly contradicted
-- Keep each point to 1 short line
-- Infer understanding: "solid" if user asked deep follow-ups, "familiar" if they asked about it, "brief" if they only clicked a suggestion
+- mainly ADD or EDIT(more detailed) information, don't remove existing info unless contradicted or clearly changed
+- Keep each point to 1 short-medium line
+- Write specifics in a personal, descriptive style — e.g. "asked about X and dug into Y", "explored how X works", "briefly touched on X as part of a broader answer" — not just a bare concept name
+- Infer understanding: "solid" if user asked deep follow-ups, "familiar" if they asked about it, "brief" if it's only part of the system's reply and user hasn't seemed to care much yet
+- If the user explicitly states what they know, learned, or shares notes on a topic, include those as specifics with level "solid"/"familiar"
 - If current status is a plain string (legacy), convert it to the structured format
 
 Return JSON:
 {{
   "overview": ["point 1", "point 2"],
   "specifics": [
-    {{"text": "Raft consensus protocol", "level": "solid"}},
-    {{"text": "Paxos algorithm basics", "level": "familiar"}},
-    {{"text": "Byzantine fault tolerance", "level": "brief"}}
+    {{"text": "asked about Raft consensus protocol and dug into leader election implementation", "level": "solid"}},
+    {{"text": "explored Paxos algorithm and how it differs from Raft", "level": "familiar"}},
+    {{"text": "briefly touched on Byzantine fault tolerance as part of a broader answer", "level": "brief"}}
   ]
 }}"""
 
