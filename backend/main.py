@@ -18,8 +18,8 @@ from embeddings import EmbeddingService, cosine_similarity, rank_by_similarity
 from prompts import (
     CHAT_RESPONSE_PROMPT,
     CHAT_STREAM_SYSTEM_PROMPT,
+    CHAT_STREAM_MEMORY_PROMPT,
     CHAT_METADATA_PROMPT,
-    SIDEBAR_BRIDGE_QUESTIONS_PROMPT,
     SIDEBAR_NEW_DIRECTIONS_PROMPT,
     STATUS_UPDATE_PROMPT,
     CHAT_SUMMARIZE_PROMPT,
@@ -76,6 +76,7 @@ class ChatRequest(BaseModel):
     model: str | None = None
     attachments: list[AttachmentItem] = []
     useSearch: bool = False
+    allChatSummaries: list[dict] = []
 
 
 class SidebarRefreshRequest(BaseModel):
@@ -147,12 +148,87 @@ async def chat_stream_endpoint(req: ChatRequest):
     )
     attachments = [{"mimeType": a.mimeType, "data": a.data} for a in req.attachments] if req.attachments else None
 
+    # ── Module 2 Debug ───────────────────────────────────────────────────
+    print("\n" + "=" * 70)
+    print("🔗 MODULE 2 CONNECTION RETRIEVAL DEBUG")
+    print("=" * 70)
+    total_summaries = len(req.allChatSummaries)
+    print(f"📥 allChatSummaries received: {total_summaries}")
+    for i, s in enumerate(req.allChatSummaries):
+        has_emb = "✅" if s.get("embedding") else "❌"
+        has_ua = "✅" if s.get("userAsked") else "❌"
+        has_ac = "✅" if s.get("aiCovered") else "❌"
+        print(f"   [{i}] id={s.get('id','?')[:12]}  title={s.get('title','?')[:30]}  "
+              f"emb={has_emb}  userAsked={has_ua}  aiCovered={has_ac}  "
+              f"topicId={s.get('topicId','none')}")
+
+    # Retrieve relevant past chats via embedding similarity
+    past_chats_for_prompt = []
+    candidates_with_embeddings = [
+        c for c in req.allChatSummaries if c.get("embedding")
+    ]
+    print(f"\n🔍 Candidates with embeddings: {len(candidates_with_embeddings)} / {total_summaries}")
+    if not candidates_with_embeddings:
+        print("   ⚠️  NO candidates have embeddings — memory prompt SKIPPED")
+
+    if candidates_with_embeddings:
+        query_text = " ".join(
+            m.content for m in req.messages[-3:] if m.role == "user"
+        )
+        print(f"📝 Query text (last 3 user msgs): \"{query_text[:120]}{'...' if len(query_text) > 120 else ''}\"")
+        if not query_text.strip():
+            print("   ⚠️  Query text is EMPTY (no user messages) — memory prompt SKIPPED")
+        if query_text.strip():
+            try:
+                query_embedding = await embedder.embed_text(query_text)
+                print(f"✅ Query embedding generated (dim={len(query_embedding)})")
+                ranked = rank_by_similarity(query_embedding, candidates_with_embeddings)
+                print(f"\n📊 Similarity ranking (ALL candidates, no threshold):")
+                for j, r in enumerate(ranked):
+                    marker = "→ SELECTED" if j < 5 else "  skipped"
+                    print(f"   [{j}] score={r['score']:.4f}  id={r['id'][:12]}  "
+                          f"title=\"{r.get('title','?')[:35]}\"  {marker}")
+                past_chats_for_prompt = []
+                for r in ranked[:5]:
+                    ua = r.get("userAsked", "")
+                    ac = r.get("aiCovered", "")
+                    if not ua and not ac:
+                        fallback = r.get("summary", "")
+                        ua = fallback
+                        ac = ""
+                    past_chats_for_prompt.append({
+                        "chatId": r["id"],
+                        "title": r.get("title", ""),
+                        "userAsked": ua,
+                        "aiCovered": ac,
+                    })
+            except Exception as e:
+                print(f"❌ EMBEDDING ERROR (silently caught): {type(e).__name__}: {e}")
+
+    print(f"\n🧠 Past chats injected into prompt: {len(past_chats_for_prompt)}")
+    if past_chats_for_prompt:
+        prompt_mode = "MEMORY prompt (with connections)"
+        system_prompt = CHAT_STREAM_MEMORY_PROMPT.format(
+            past_chats_json=_json.dumps(past_chats_for_prompt, indent=2)
+        )
+        for pc in past_chats_for_prompt:
+            print(f"   • {pc['chatId'][:12]}  \"{pc['title'][:35]}\"")
+            if pc['userAsked']:
+                print(f"     userAsked: {pc['userAsked'][:60]}")
+            if pc['aiCovered']:
+                print(f"     aiCovered: {pc['aiCovered'][:60]}")
+    else:
+        prompt_mode = "STANDARD prompt (no connections)"
+        system_prompt = CHAT_STREAM_SYSTEM_PROMPT
+    print(f"📤 Prompt mode: {prompt_mode}")
+    print("=" * 70)
+
     async def event_generator():
         full_response_parts = []
         try:
             async for chunk in llm.chat_stream(
                 messages=[{"role": m.role, "content": m.content} for m in req.messages],
-                system_prompt=CHAT_STREAM_SYSTEM_PROMPT,
+                system_prompt=system_prompt,
                 model=req.model,
                 attachments=attachments,
                 use_search=req.useSearch,
@@ -165,11 +241,53 @@ async def chat_stream_endpoint(req: ChatRequest):
 
         full_response = "".join(full_response_parts)
 
+        # ── Module 2 Response Debug ──────────────────────────────────────
+        import re as _re
+        _markers = _re.findall(r'\{~(\d+)\}', full_response)
+        _has_conn_block = '{~CONNECTIONS~}' in full_response and '{~END~}' in full_response
+        print("\n" + "-" * 70)
+        print("🤖 MODULE 2 LLM RESPONSE DEBUG")
+        print("-" * 70)
+        print(f"📏 Response length: {len(full_response)} chars")
+        print(f"🔖 Connection markers found: {_markers if _markers else 'NONE'}")
+        print(f"📦 Connection block present: {'✅ YES' if _has_conn_block else '❌ NO'}")
+        if _has_conn_block:
+            _conn_start = full_response.index('{~CONNECTIONS~}')
+            _conn_end = full_response.index('{~END~}')
+            _conn_json_str = full_response[_conn_start + len('{~CONNECTIONS~}'):_conn_end].strip()
+            try:
+                _conn_data = _json.loads(_conn_json_str)
+                print(f"📋 Connections parsed: {len(_conn_data)} items")
+                for _c in _conn_data:
+                    print(f"   • id={_c.get('id')}  chatId={_c.get('chatId','?')[:12]}  "
+                          f"title=\"{_c.get('chatTitle','?')[:30]}\"")
+                    if _c.get('userAsked'):
+                        print(f"     userAsked: {_c['userAsked'][:60]}")
+                    if _c.get('text'):
+                        print(f"     insight: {_c['text'][:60]}")
+            except _json.JSONDecodeError as _e:
+                print(f"   ⚠️  Connection JSON parse error: {_e}")
+                print(f"   Raw: {_conn_json_str[:200]}")
+        elif _markers:
+            print("   ⚠️  Markers exist but no connection block — LLM forgot {~CONNECTIONS~}...{~END~}")
+        else:
+            print("   ℹ️  LLM chose not to add any connections (or wasn't given memory prompt)")
+        print(f"📄 Response preview: \"{full_response[:150]}{'...' if len(full_response) > 150 else ''}\"")
+        print("-" * 70 + "\n")
+
         # Lightweight metadata extraction (topic + concepts)
         try:
             meta_prompt = CHAT_METADATA_PROMPT.format(topics_json=topics_json)
+            # Strip connection markers from the response before metadata extraction
+            clean_response = full_response
+            conn_start = clean_response.find("{~CONNECTIONS~}")
+            if conn_start != -1:
+                clean_response = clean_response[:conn_start].strip()
+            import re
+            clean_response = re.sub(r'\{~\d+\}', '', clean_response)
+
             messages_for_meta = [{"role": m.role, "content": m.content} for m in req.messages]
-            messages_for_meta.append({"role": "assistant", "content": full_response})
+            messages_for_meta.append({"role": "assistant", "content": clean_response})
             metadata = await llm.chat(
                 messages_for_meta, meta_prompt, json_mode=True, model=req.model,
             )
@@ -188,46 +306,13 @@ async def chat_stream_endpoint(req: ChatRequest):
 
 @app.post("/api/sidebar/refresh")
 async def sidebar_refresh(req: SidebarRefreshRequest):
-    """Generate all 3 sidebar modules in parallel."""
+    """Generate sidebar modules (status + directions) in parallel."""
     import json
 
     recent_msgs = req.messages[-6:]
     current_messages_text = "\n".join(
         [f"{m.role}: {m.content}" for m in recent_msgs]
     )
-
-    query_text = " ".join([m.content for m in recent_msgs[-3:]])
-
-    # Fast path: rank past chats by embedding similarity
-    ranked_items = []
-    candidates_with_embeddings = [
-        c for c in req.allChatSummaries if c.get("embedding")
-    ]
-    if candidates_with_embeddings and query_text.strip():
-        try:
-            query_embedding = await embedder.embed_text(query_text)
-            ranked_items = rank_by_similarity(query_embedding, candidates_with_embeddings)
-            ranked_items = ranked_items[:8]
-        except Exception:
-            ranked_items = req.allChatSummaries[:5]
-    else:
-        ranked_items = req.allChatSummaries[:5]
-
-    # Strip embeddings before passing to LLM (saves tokens)
-    combined_ranked = []
-    for item in ranked_items[:5]:
-        combined_ranked.append({
-            k: v for k, v in item.items() if k != "embedding"
-        })
-    for concept in req.allConcepts[:3]:
-        combined_ranked.append(
-            {
-                "type": "concept",
-                "id": concept.get("id", ""),
-                "title": concept.get("title", ""),
-                "preview": concept.get("preview", ""),
-            }
-        )
 
     # Serialize structured status to string for prompts
     topic_status_str = req.topicStatus
@@ -240,14 +325,6 @@ async def sidebar_refresh(req: SidebarRefreshRequest):
             level = item.get("level", "") if isinstance(item, dict) else ""
             parts.append(f"- {text} ({level})" if level else f"- {text}")
         topic_status_str = "\n".join(parts) if parts else ""
-
-    # Parallel LLM calls for bridge questions, new directions, and status update
-    bridge_prompt = SIDEBAR_BRIDGE_QUESTIONS_PROMPT.format(
-        current_messages=current_messages_text,
-        topic_name=req.topicName,
-        topic_status=topic_status_str or "No status yet.",
-        ranked_items_json=json.dumps(combined_ranked[:5], indent=2),
-    )
 
     covered_concepts = "\n".join(
         [f"- {c.get('title', '')}: {c.get('preview', '')}" for c in req.allConcepts]
@@ -274,12 +351,6 @@ async def sidebar_refresh(req: SidebarRefreshRequest):
         recent_summaries=recent_summaries_text,
     )
 
-    bridge_task = llm.chat(
-        [{"role": "user", "content": "Generate related cards."}],
-        bridge_prompt,
-        json_mode=True,
-        model=req.model,
-    )
     directions_task = llm.chat(
         [{"role": "user", "content": "Suggest new directions."}],
         directions_prompt,
@@ -293,15 +364,9 @@ async def sidebar_refresh(req: SidebarRefreshRequest):
         model=req.model,
     )
 
-    bridge_result, directions_result, status_result = await asyncio.gather(
-        bridge_task, directions_task, status_task, return_exceptions=True
+    directions_result, status_result = await asyncio.gather(
+        directions_task, status_task, return_exceptions=True
     )
-
-    related_cards = []
-    if isinstance(bridge_result, dict):
-        related_cards = bridge_result.get("relatedCards", [])
-    elif isinstance(bridge_result, Exception):
-        print(f"[sidebar] bridge LLM failed: {bridge_result}")
 
     new_directions = []
     if isinstance(directions_result, dict):
@@ -315,7 +380,6 @@ async def sidebar_refresh(req: SidebarRefreshRequest):
             status_update = status_result.get("status")
 
     return {
-        "relatedCards": related_cards,
         "newDirections": new_directions,
         "statusUpdate": status_update,
     }
@@ -368,6 +432,7 @@ async def update_topic_status(req: StatusUpdateRequest):
     system_prompt = STATUS_UPDATE_PROMPT.format(
         topic_name=req.topicName,
         current_status=current or "(empty - create fresh)",
+        current_messages="(none)",
         recent_summaries=recent_text,
     )
     result = await llm.chat(

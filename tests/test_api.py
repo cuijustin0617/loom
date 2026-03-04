@@ -184,43 +184,38 @@ class TestChatValidation:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestSidebarRefreshBasic:
-    def _mock_calls(self, bridge=None, directions=None, status=None):
-        bridge = bridge or {"relatedCards": []}
+    def _mock_calls(self, directions=None, status=None):
         directions = directions or {"newDirections": []}
         status = status or {"status": "Updated"}
 
         async def side_effect(*args, **kwargs):
             msg = args[0][0]["content"] if args[0] else ""
-            if "related" in msg.lower() or "Generate" in msg:
-                return bridge
-            elif "direction" in msg.lower() or "Suggest" in msg:
+            if "direction" in msg.lower() or "Suggest" in msg:
                 return directions
             elif "status" in msg.lower() or "Update" in msg:
                 return status
-            return bridge
+            return directions
 
         return side_effect
 
-    def test_returns_all_three_modules(self):
-        bridge = {"relatedCards": [{"sourceType": "chat", "sourceId": "c1", "sourceTitle": "SVM", "bridgeQuestion": "How?"}]}
+    def test_returns_directions_and_status(self):
         directions = {"newDirections": [{"title": "Kernels", "question": "What?"}]}
         status = {"status": "Learning ML."}
 
         with patch("main.llm") as m, patch("main.embedder") as emb:
-            m.chat = AsyncMock(side_effect=self._mock_calls(bridge, directions, status))
+            m.chat = AsyncMock(side_effect=self._mock_calls(directions, status))
             emb.embed_text = AsyncMock(return_value=[0.1] * 10)
             data = _get_client().post("/api/sidebar/refresh", json={
                 "chatId": "c1", "messages": [{"role": "user", "content": "What is backprop?"}],
                 "topicId": "t1", "topicName": "ML", "topicStatus": "Learning",
                 "allChatSummaries": [], "allConcepts": [],
             }).json()
-            assert "relatedCards" in data
             assert "newDirections" in data
             assert "statusUpdate" in data
 
     def test_with_embedding_ranking(self):
         with patch("main.llm") as m, patch("main.embedder") as emb:
-            m.chat = AsyncMock(return_value={"relatedCards": []})
+            m.chat = AsyncMock(return_value={"newDirections": []})
             emb.embed_text = AsyncMock(return_value=[0.5] * 10)
             resp = _get_client().post("/api/sidebar/refresh", json={
                 "chatId": "c1", "messages": [{"role": "user", "content": "test"}],
@@ -239,12 +234,11 @@ class TestSidebarRefreshBasic:
                 "topicId": "t1", "topicName": "ML", "topicStatus": "status",
                 "allChatSummaries": [], "allConcepts": [],
             }).json()
-            assert data["relatedCards"] == []
             assert data["newDirections"] == []
 
     def test_empty_topic_status(self):
         with patch("main.llm") as m, patch("main.embedder") as emb:
-            m.chat = AsyncMock(return_value={"relatedCards": [], "newDirections": [], "status": "Fresh"})
+            m.chat = AsyncMock(return_value={"newDirections": [], "status": "Fresh"})
             emb.embed_text = AsyncMock(return_value=[0.1] * 10)
             resp = _get_client().post("/api/sidebar/refresh", json={
                 "chatId": "c1", "messages": [{"role": "user", "content": "test"}],
@@ -255,7 +249,7 @@ class TestSidebarRefreshBasic:
 
     def test_with_concepts(self):
         with patch("main.llm") as m, patch("main.embedder") as emb:
-            m.chat = AsyncMock(return_value={"relatedCards": []})
+            m.chat = AsyncMock(return_value={"newDirections": []})
             emb.embed_text = AsyncMock(return_value=[0.1] * 10)
             resp = _get_client().post("/api/sidebar/refresh", json={
                 "chatId": "c1", "messages": [{"role": "user", "content": "test"}],
@@ -271,7 +265,7 @@ class TestSidebarRefreshBasic:
     def test_many_messages_truncated(self):
         msgs = [{"role": "user", "content": f"msg {i}"} for i in range(20)]
         with patch("main.llm") as m, patch("main.embedder") as emb:
-            m.chat = AsyncMock(return_value={"relatedCards": []})
+            m.chat = AsyncMock(return_value={"newDirections": []})
             emb.embed_text = AsyncMock(return_value=[0.1] * 10)
             resp = _get_client().post("/api/sidebar/refresh", json={
                 "chatId": "c1", "messages": msgs,
@@ -282,7 +276,7 @@ class TestSidebarRefreshBasic:
 
     def test_embedding_failure_falls_back(self):
         with patch("main.llm") as m, patch("main.embedder") as emb:
-            m.chat = AsyncMock(return_value={"relatedCards": []})
+            m.chat = AsyncMock(return_value={"newDirections": []})
             emb.embed_text = AsyncMock(side_effect=Exception("embed fail"))
             resp = _get_client().post("/api/sidebar/refresh", json={
                 "chatId": "c1", "messages": [{"role": "user", "content": "test"}],
@@ -292,10 +286,10 @@ class TestSidebarRefreshBasic:
             })
             assert resp.status_code == 200
 
-    def test_strips_embeddings_from_bridge_prompt(self):
+    def test_strips_embeddings_from_prompts(self):
         """Embeddings should not be passed to the LLM prompt."""
         with patch("main.llm") as m, patch("main.embedder") as emb:
-            m.chat = AsyncMock(return_value={"relatedCards": []})
+            m.chat = AsyncMock(return_value={"newDirections": []})
             emb.embed_text = AsyncMock(return_value=[0.5] * 10)
             _get_client().post("/api/sidebar/refresh", json={
                 "chatId": "c1", "messages": [{"role": "user", "content": "test"}],
@@ -303,15 +297,14 @@ class TestSidebarRefreshBasic:
                 "allChatSummaries": [{"id": "c2", "title": "X", "summary": "Y", "embedding": [0.5] * 1536}],
                 "allConcepts": [],
             })
-            # The system prompt passed to bridge call should not contain "embedding"
-            first_call = m.chat.call_args_list[0]
-            system_prompt = first_call[0][1] if len(first_call[0]) > 1 else first_call[1].get("system_prompt", "")
-            assert "[0.5" not in system_prompt[:5000]
+            for call in m.chat.call_args_list:
+                system_prompt = call[0][1] if len(call[0]) > 1 else call[1].get("system_prompt", "")
+                assert "[0.5" not in system_prompt[:5000]
 
     def test_with_many_chat_summaries(self):
         summaries = [{"id": f"c{i}", "title": f"Chat {i}", "summary": f"Summary {i}", "embedding": [float(i) * 0.1] * 10} for i in range(20)]
         with patch("main.llm") as m, patch("main.embedder") as emb:
-            m.chat = AsyncMock(return_value={"relatedCards": []})
+            m.chat = AsyncMock(return_value={"newDirections": []})
             emb.embed_text = AsyncMock(return_value=[0.5] * 10)
             resp = _get_client().post("/api/sidebar/refresh", json={
                 "chatId": "c1", "messages": [{"role": "user", "content": "test"}],
@@ -321,17 +314,15 @@ class TestSidebarRefreshBasic:
             assert resp.status_code == 200
 
     def test_partial_llm_failure(self):
-        """If one of the parallel LLM calls fails, others should still return."""
+        """If one of the parallel LLM calls fails, the other should still return."""
         call_count = 0
         async def partial_fail(*args, **kwargs):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                return {"relatedCards": [{"sourceType": "chat", "sourceId": "c1", "sourceTitle": "X", "bridgeQuestion": "Q"}]}
-            elif call_count == 2:
-                raise Exception("fail")
+                return {"newDirections": [{"title": "X", "question": "Q"}]}
             else:
-                return {"status": "ok"}
+                raise Exception("fail")
 
         with patch("main.llm") as m, patch("main.embedder") as emb:
             m.chat = AsyncMock(side_effect=partial_fail)
@@ -341,8 +332,7 @@ class TestSidebarRefreshBasic:
                 "topicId": "t1", "topicName": "ML", "topicStatus": "s",
                 "allChatSummaries": [], "allConcepts": [],
             }).json()
-            assert isinstance(data["relatedCards"], list)
-            assert isinstance(data["statusUpdate"], str)
+            assert isinstance(data["newDirections"], list)
 
 
 class TestSidebarRefreshValidation:
@@ -802,8 +792,7 @@ class TestIntegrationFlows:
             assert rank_data["ranked"][0]["id"] == "c1"
 
     def test_full_sidebar_refresh_with_ranking(self):
-        """Full flow: embed query, rank candidates, generate all 3 modules."""
-        bridge = {"relatedCards": [{"sourceType": "chat", "sourceId": "c2", "sourceTitle": "SVM", "bridgeQuestion": "How do SVMs relate?"}]}
+        """Full flow: generate directions + status (Module 2 removed)."""
         directions = {"newDirections": [{"title": "Regularization", "question": "What about regularization?"}]}
         status = {"status": "Learning ML fundamentals."}
 
@@ -812,8 +801,6 @@ class TestIntegrationFlows:
             nonlocal call_idx
             call_idx += 1
             if call_idx == 1:
-                return bridge
-            elif call_idx == 2:
                 return directions
             else:
                 return status
@@ -838,8 +825,6 @@ class TestIntegrationFlows:
                 "allConcepts": [{"id": "con1", "title": "Gradient Descent", "preview": "Optimization method"}],
             }).json()
 
-            assert len(data["relatedCards"]) == 1
-            assert data["relatedCards"][0]["sourceTitle"] == "SVM"
             assert len(data["newDirections"]) == 1
             assert isinstance(data["statusUpdate"], str)
 
@@ -972,18 +957,18 @@ class TestChatEdgeCases:
 class TestSidebarEdgeCases:
     def test_no_summaries_no_concepts(self):
         with patch("main.llm") as m, patch("main.embedder") as emb:
-            m.chat = AsyncMock(return_value={"relatedCards": [], "newDirections": [], "status": "Fresh"})
+            m.chat = AsyncMock(return_value={"newDirections": [], "status": "Fresh"})
             emb.embed_text = AsyncMock(return_value=[0.1] * 10)
             data = _get_client().post("/api/sidebar/refresh", json={
                 "chatId": "c1", "messages": [{"role": "user", "content": "first message"}],
                 "topicId": "t1", "topicName": "ML", "topicStatus": "",
                 "allChatSummaries": [], "allConcepts": [],
             }).json()
-            assert data["relatedCards"] == []
+            assert data["newDirections"] == []
 
     def test_single_message_sidebar(self):
         with patch("main.llm") as m, patch("main.embedder") as emb:
-            m.chat = AsyncMock(return_value={"relatedCards": []})
+            m.chat = AsyncMock(return_value={"newDirections": []})
             emb.embed_text = AsyncMock(return_value=[0.1] * 10)
             resp = _get_client().post("/api/sidebar/refresh", json={
                 "chatId": "c1", "messages": [{"role": "user", "content": "hello"}],
@@ -994,7 +979,7 @@ class TestSidebarEdgeCases:
 
     def test_summaries_without_embeddings(self):
         with patch("main.llm") as m, patch("main.embedder") as emb:
-            m.chat = AsyncMock(return_value={"relatedCards": []})
+            m.chat = AsyncMock(return_value={"newDirections": []})
             emb.embed_text = AsyncMock(return_value=[0.1] * 10)
             resp = _get_client().post("/api/sidebar/refresh", json={
                 "chatId": "c1", "messages": [{"role": "user", "content": "test"}],
@@ -1162,13 +1147,13 @@ class TestModelPassthroughChat:
 
 
 class TestModelPassthroughSidebar:
-    """Test that /api/sidebar/refresh passes the model field to all 3 parallel LLM calls."""
+    """Test that /api/sidebar/refresh passes the model field to both parallel LLM calls."""
 
-    def test_model_forwarded_to_all_three_calls(self):
+    def test_model_forwarded_to_both_calls(self):
         call_models = []
         async def capture_model(*args, **kwargs):
             call_models.append(kwargs.get("model"))
-            return {"relatedCards": [], "newDirections": [], "status": "ok"}
+            return {"newDirections": [], "status": "ok"}
 
         with patch("main.llm") as m, patch("main.embedder") as emb:
             m.chat = AsyncMock(side_effect=capture_model)
@@ -1179,14 +1164,14 @@ class TestModelPassthroughSidebar:
                 "allChatSummaries": [], "allConcepts": [],
                 "model": "gpt-5-nano-2025-08-07",
             })
-            assert len(call_models) == 3
+            assert len(call_models) == 2
             assert all(m == "gpt-5-nano-2025-08-07" for m in call_models)
 
     def test_no_model_passes_none_to_all_calls(self):
         call_models = []
         async def capture_model(*args, **kwargs):
             call_models.append(kwargs.get("model"))
-            return {"relatedCards": [], "newDirections": [], "status": "ok"}
+            return {"newDirections": [], "status": "ok"}
 
         with patch("main.llm") as m, patch("main.embedder") as emb:
             m.chat = AsyncMock(side_effect=capture_model)
@@ -1196,14 +1181,14 @@ class TestModelPassthroughSidebar:
                 "topicId": "t1", "topicName": "ML", "topicStatus": "",
                 "allChatSummaries": [], "allConcepts": [],
             })
-            assert len(call_models) == 3
+            assert len(call_models) == 2
             assert all(m is None for m in call_models)
 
     def test_gemini_model_forwarded(self):
         call_models = []
         async def capture_model(*args, **kwargs):
             call_models.append(kwargs.get("model"))
-            return {"relatedCards": [], "newDirections": [], "status": "ok"}
+            return {"newDirections": [], "status": "ok"}
 
         with patch("main.llm") as m, patch("main.embedder") as emb:
             m.chat = AsyncMock(side_effect=capture_model)
@@ -1743,7 +1728,7 @@ class TestFrontendDragWholePanel:
 class TestFrontendContextOnlySend:
     def test_app_js_context_only_message(self):
         js = _get_client().get("/static/app.js").text
-        assert "Please continue based on this context" in js
+        assert "Please continue building on this previous conversation" in js
 
 
 class TestFrontendFileUploadJS:
@@ -2116,16 +2101,19 @@ class TestTopicSelectorInInputBar:
         assert "style.display = 'none'" in send_body
 
 
-class TestModule2Rename:
-    """Module 2 renamed from 'Related to this chat' to 'Linked past chats'."""
+class TestModule2InlineAnnotations:
+    """Module 2: inline annotations in chat + sidebar connection cards."""
 
-    def test_module_2_new_name_in_html(self):
+    def test_module_2_sidebar_section_exists(self):
         html = _get_client().get("/").text
         assert 'Linked past chats' in html
+        assert 'moduleConnections' in html
+        assert 'connectionSidebarCards' in html
 
-    def test_module_2_old_name_removed(self):
-        html = _get_client().get("/").text
-        assert 'Related to this chat' not in html
+    def test_conn_marker_css_exists(self):
+        css = _get_client().get("/static/styles.css").text
+        assert '.conn-marker' in css
+        assert '.conn-card' in css
 
 
 class TestModelSelectorCentering:

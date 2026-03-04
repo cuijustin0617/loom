@@ -32,6 +32,47 @@ Rules:
 
 CHAT_STREAM_SYSTEM_PROMPT = """You are a helpful AI assistant. Respond naturally and helpfully to the user's message. Be clear and conversational."""
 
+CHAT_STREAM_MEMORY_PROMPT = """You are a helpful AI assistant. Respond naturally and helpfully to the user's message. Be clear and conversational.
+
+You have access to the user's past conversations within this topic. Each past chat has a structured summary showing what the user asked and what they learned. When a phrase in your response connects meaningfully to something from the user's past, you may annotate it with a connection marker.
+
+Rules:
+- Answer the user's question DIRECTLY and naturally. Do NOT say things like "since you previously asked", "based on your past chat", or "as you mentioned before".
+- If a phrase in your response genuinely connects to the user's past knowledge, place a {{~N}} marker (where N is 1, 2, 3...) IMMEDIATELY after that phrase — no space before the marker.
+- After your full response, append a connections block with details for each marker.
+- Use at most 3 markers per response. Only mark genuinely useful connections; do NOT force them.
+- If none of the past conversations are relevant, respond normally with NO markers at all.
+- A good connection helps the user recall what they learned before and see how it builds on the current topic.
+
+Connection block format — place this AFTER your response, separated by a blank line:
+
+{{~CONNECTIONS~}}
+[
+  {{"id": 1, "chatId": "the_chat_id", "chatTitle": "Title of Past Chat", "userAsked": "what the user asked in that past chat", "aiCovered": "what the AI taught or addressed", "text": "1-2 sentence insight connecting the past chat to the current phrase — explain the relationship and how the user could build on it."}}
+]
+{{~END~}}
+
+Here is a complete example:
+
+---
+User's past conversations:
+[{{"chatId": "chat_abc", "title": "Cooking Basics", "userAsked": "How to properly use a chef's knife and organize prep work", "aiCovered": "Taught knife techniques (rocking motion, claw grip) and mise en place for efficient cooking"}}]
+
+User asks: "What's the best way to prep vegetables quickly?"
+
+Your response:
+A sharp chef's knife and proper cutting technique{{~1}} will save you the most time. Group similar vegetables and prep them in batches — this is essentially mise en place applied to your workflow.
+
+{{~CONNECTIONS~}}
+[{{"id": 1, "chatId": "chat_abc", "chatTitle": "Cooking Basics", "userAsked": "How to properly use a chef's knife and organize prep work", "aiCovered": "Taught knife techniques (rocking motion, claw grip) and mise en place for efficient cooking", "text": "You practiced knife techniques and mise en place before — applying the rocking motion you learned to julienne and dice will make this significantly faster."}}]
+{{~END~}}
+---
+
+User's past conversations:
+{past_chats_json}
+
+Now respond to the user's message."""
+
 CHAT_METADATA_PROMPT = """Analyze this conversation and extract topic classification and key concepts.
 
 Existing topics the user has:
@@ -147,13 +188,22 @@ Return JSON:
   ]
 }}"""
 
-CHAT_SUMMARIZE_PROMPT = """Summarize this conversation in 1-2 concise sentences capturing the main question asked and key takeaway. Also generate a short title (3-6 words).
+CHAT_SUMMARIZE_PROMPT = """Summarize this conversation as a structured card. Generate:
+1. A short title (3-6 words)
+2. A 1-2 sentence overall summary
+3. What the user asked about or provided as context (their side)
+4. What the AI addressed, taught, or recommended (the takeaway)
 
 Conversation:
 {messages}
 
 Return JSON:
-{{ "title": "Short Title Here", "summary": "1-2 sentence summary of the conversation." }}"""
+{{
+  "title": "Short Title Here",
+  "summary": "1-2 sentence summary of the conversation.",
+  "userAsked": "Concise description of what the user wanted to know, their question, or context they provided (1-2 sentences)",
+  "aiCovered": "Key points the AI addressed, taught, or recommended — what the user could take away (1-2 sentences)"
+}}"""
 
 TOPIC_AUTO_DETECT_PROMPT = """Analyze these recent chat summaries and identify recurring topic clusters. A topic must have at least 2 chats that clearly belong to the same domain.
 

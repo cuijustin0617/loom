@@ -18,7 +18,6 @@ const Sidebar = {
     this.currentTopicId = topicId;
     document.getElementById('sidebarEmpty').style.display = 'none';
     document.getElementById('moduleStatus').style.display = 'block';
-    document.getElementById('moduleRelated').style.display = 'block';
     document.getElementById('moduleDirections').style.display = 'block';
     document.getElementById('sidebarRefreshBtn').style.display = 'flex';
 
@@ -45,7 +44,7 @@ const Sidebar = {
     this.currentTopicId = null;
     document.getElementById('sidebarEmpty').style.display = 'block';
     document.getElementById('moduleStatus').style.display = 'none';
-    document.getElementById('moduleRelated').style.display = 'none';
+    document.getElementById('moduleConnections').style.display = 'none';
     document.getElementById('moduleDirections').style.display = 'none';
     document.getElementById('sidebarRefreshBtn').style.display = 'none';
     document.getElementById('topicBadge').style.display = 'none';
@@ -115,30 +114,6 @@ const Sidebar = {
     }
     this._renderStatus(statusData);
 
-    // Module 2: Related cards (with fallback to raw past chats)
-    const relatedContainer = document.getElementById('relatedCards');
-    relatedContainer.innerHTML = '';
-    let cards = data.relatedCards || [];
-    if (cards.length === 0 && topic) {
-      const currentChatId = Storage.getCurrentChatId();
-      const pastChats = Storage.getAllChatSummariesForTopic(topic.id)
-        .filter(c => c.id !== currentChatId)
-        .slice(0, 4);
-      cards = pastChats.map(c => ({
-        sourceType: 'chat',
-        sourceId: c.id,
-        sourceTitle: c.title,
-        sourceSummary: c.summary || '',
-        bridgeQuestion: '',
-      }));
-    }
-    if (cards.length === 0) {
-      relatedContainer.innerHTML = '<p style="font-size:12px;color:var(--text-muted);">No related content yet.</p>';
-    }
-    cards.forEach(card => {
-      relatedContainer.appendChild(this._createRelatedCard(card));
-    });
-
     // Module 3: Directions
     const dirContainer = document.getElementById('directionCards');
     dirContainer.innerHTML = '';
@@ -149,39 +124,6 @@ const Sidebar = {
     dirs.forEach(dir => {
       dirContainer.appendChild(this._createDirectionCard(dir));
     });
-  },
-
-  _createRelatedCard(card) {
-    const el = document.createElement('div');
-    el.className = 'related-card';
-    el.draggable = true;
-    const isChat = card.sourceType === 'chat';
-    el.innerHTML = `
-      <div class="card-header">
-        <span class="card-type-icon ${isChat ? 'chat-icon' : 'concept-icon'}">${isChat ? '💬' : '💡'}</span>
-        <span class="card-title">${Utils.escapeHtml(card.sourceTitle || '')}</span>
-        ${!isChat && card.sourceId ? `<button class="card-remove-btn" data-concept-id="${Utils.escapeHtml(card.sourceId)}" title="Remove concept">&times;</button>` : ''}
-      </div>
-      ${card.sourceSummary ? `<div class="card-meta">${Utils.escapeHtml(Utils.truncate(card.sourceSummary, 60))}</div>` : ''}
-      <div class="card-question">${Utils.escapeHtml(card.bridgeQuestion || '')}</div>
-      <div class="card-drag-hint">⟶ Drag to chat</div>
-    `;
-
-    const removeBtn = el.querySelector('.card-remove-btn');
-    if (removeBtn) {
-      removeBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const conceptId = removeBtn.dataset.conceptId;
-        Storage.deleteConcept(conceptId);
-        el.style.opacity = '0';
-        el.style.transform = 'translateX(20px)';
-        setTimeout(() => el.remove(), 200);
-        Utils.showToast('Concept removed', 'info');
-      });
-    }
-
-    this._setupDrag(el, card.bridgeQuestion || '', card.sourceTitle || '');
-    return el;
   },
 
   _createDirectionCard(dir) {
@@ -223,10 +165,6 @@ const Sidebar = {
     if (sc) sc.innerHTML = `
       <div class="skeleton skeleton-line" style="width:90%"></div>
       <div class="skeleton skeleton-line" style="width:70%"></div>
-    `;
-    document.getElementById('relatedCards').innerHTML = `
-      <div class="skeleton skeleton-card"></div>
-      <div class="skeleton skeleton-card"></div>
     `;
     document.getElementById('directionCards').innerHTML = `
       <div class="skeleton skeleton-card"></div>
@@ -432,6 +370,78 @@ const Sidebar = {
       btn.textContent = 'Update';
       btn.disabled = false;
     });
+  },
+
+  showConnections(connectionsJson) {
+    const module = document.getElementById('moduleConnections');
+    const container = document.getElementById('connectionSidebarCards');
+    if (!connectionsJson || connectionsJson.length === 0) {
+      module.style.display = 'none';
+      container.innerHTML = '';
+      return;
+    }
+    module.style.display = 'block';
+    container.innerHTML = '';
+    connectionsJson.forEach(conn => {
+      const card = document.createElement('div');
+      card.className = 'conn-sidebar-card';
+      card.dataset.connId = conn.id;
+      const title = Utils.escapeHtml(conn.chatTitle || 'Past chat');
+      const userAsked = conn.userAsked ? Utils.escapeHtml(conn.userAsked) : '';
+      const aiCovered = conn.aiCovered ? Utils.escapeHtml(conn.aiCovered) : '';
+      const insight = Utils.escapeHtml(conn.text || '');
+      let summaryHtml = '';
+      if (userAsked) summaryHtml += `<div class="conn-sb-row"><span class="conn-sb-label">Asked</span><span class="conn-sb-value">${userAsked}</span></div>`;
+      if (aiCovered) summaryHtml += `<div class="conn-sb-row"><span class="conn-sb-label">Learned</span><span class="conn-sb-value">${aiCovered}</span></div>`;
+      card.innerHTML = `
+        <div class="conn-sb-header">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+          </svg>
+          <span class="conn-sb-title">${title}</span>
+        </div>
+        ${summaryHtml ? `<div class="conn-sb-summary">${summaryHtml}</div>` : ''}
+        <div class="conn-sb-insight">${insight}</div>
+      `;
+
+      card.addEventListener('mouseenter', () => {
+        this._highlightMarker(conn.id, true);
+      });
+      card.addEventListener('mouseleave', () => {
+        this._highlightMarker(conn.id, false);
+      });
+      card.addEventListener('click', () => {
+        const marker = document.querySelector(`.conn-marker.resolved[data-conn-id="${conn.id}"]`);
+        if (marker) {
+          marker.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          App._showConnCard(marker);
+        }
+      });
+
+      container.appendChild(card);
+    });
+  },
+
+  clearConnections() {
+    const module = document.getElementById('moduleConnections');
+    if (module) module.style.display = 'none';
+    const container = document.getElementById('connectionSidebarCards');
+    if (container) container.innerHTML = '';
+  },
+
+  _highlightMarker(connId, active) {
+    const marker = document.querySelector(`.conn-marker.resolved[data-conn-id="${connId}"]`);
+    if (marker) {
+      marker.classList.toggle('highlighted', active);
+    }
+  },
+
+  highlightSidebarCard(connId, active) {
+    const card = document.querySelector(`.conn-sidebar-card[data-conn-id="${connId}"]`);
+    if (card) {
+      card.classList.toggle('highlighted', active);
+    }
   },
 
   _initMergeDialog() {

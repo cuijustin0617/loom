@@ -20,6 +20,9 @@ const App = {
     // Inactivity timer for summarization
     this.inactivityTimer = new InactivityTimer(() => this._onInactive(), 120000);
     this.inactivityTimer.start();
+
+    // Migrate legacy summaries to structured format (background, non-blocking)
+    this._migrateStructuredSummaries();
   },
 
   _bindEvents() {
@@ -240,9 +243,13 @@ const App = {
       const fullText = document.getElementById('contextFullText').value.trim();
       if (fullText) {
         contextBlock = fullText;
+        const isLinkedChat = fullText.includes('--- Previous chat history ---');
+        const wrapper = isLinkedChat
+          ? `[The user is building on a previous conversation they had. Here is that conversation and how it connects:\n${fullText}]`
+          : `[Context from my knowledge map: ${fullText}]`;
         content = content
-          ? `[Context from my knowledge map: ${fullText}]\n\n${content}`
-          : `[Context from my knowledge map: ${fullText}]\n\nPlease continue based on this context.`;
+          ? `${wrapper}\n\n${content}`
+          : `${wrapper}\n\nPlease continue building on this previous conversation.`;
       }
       this.clearContextBlock();
     }
@@ -311,6 +318,19 @@ const App = {
     }));
     const topics = Storage.getTopics().map(t => ({ id: t.id, name: t.name }));
 
+    // Only send same-topic past chats for connections (avoid cross-topic contamination)
+    const currentChat = Storage.getChat(this.currentChatId);
+    const currentTopicId = currentChat?.topicId || this.selectedTopicId;
+    const sameTopicSummaries = currentTopicId
+      ? Storage.getChats()
+          .filter(c => c.id !== this.currentChatId && c.summary && c.topicId === currentTopicId)
+          .map(c => ({
+            id: c.id, title: c.title, summary: c.summary,
+            userAsked: c.userAsked || '', aiCovered: c.aiCovered || '',
+            embedding: c.embedding, topicId: c.topicId,
+          }))
+      : [];
+
     const reqBody = {
       chatId: this.currentChatId,
       messages,
@@ -320,6 +340,7 @@ const App = {
       })),
       model: Storage.getChatModel(),
       useSearch: this.useSearch,
+      allChatSummaries: sameTopicSummaries,
     };
     if (this.pendingAttachments.length > 0) {
       reqBody.attachments = this.pendingAttachments.map(a => ({
@@ -346,6 +367,57 @@ const App = {
       let buffer = '';
       let fullResponse = '';
 
+      const _processSSELine = async (line) => {
+        if (!line.startsWith('data: ')) return;
+        try {
+          const evt = JSON.parse(line.slice(6));
+          if (evt.type === 'chunk') {
+            fullResponse += evt.text;
+            this._updateStreamingMessage(assistantEl, fullResponse);
+          } else if (evt.type === 'done') {
+            fullResponse = evt.response || fullResponse;
+            console.log('[Module2] done event received, response length:', fullResponse.length);
+            console.log('[Module2] has markers:', /\{~\d+\}/.test(fullResponse));
+            console.log('[Module2] has conn block:', fullResponse.includes('{~CONNECTIONS~}'));
+
+            this._finalizeStreamingMessage(assistantEl, fullResponse);
+
+            const { mainText: cleanContent, connectionsJson: savedConns } = this._stripConnectionBlock(fullResponse);
+            console.log('[Module2] connections parsed:', savedConns?.length || 0);
+            const cleanText = cleanContent.replace(/\{~\d+\}/g, '');
+            const assistantMsg = {
+              id: 'msg_' + Utils.generateId(),
+              chatId: this.currentChatId,
+              role: 'assistant',
+              content: cleanText,
+              rawContent: cleanContent,
+              connections: savedConns || null,
+              contextBlock: null,
+              timestamp: Utils.timestamp(),
+            };
+            Storage.addMessage(this.currentChatId, assistantMsg);
+
+            if (evt.topic && evt.topic.confidence > 0.6) {
+              await this._handleTopicDetection(evt.topic);
+            }
+            if (evt.concepts && evt.concepts.length > 0) {
+              this._handleConcepts(evt.concepts);
+            }
+
+            // Push connections to sidebar AFTER topic detection (which calls Sidebar.show)
+            if (savedConns && savedConns.length > 0) {
+              Sidebar.showConnections(savedConns);
+            } else {
+              Sidebar.clearConnections();
+            }
+          } else if (evt.type === 'error') {
+            this._finalizeStreamingMessage(assistantEl, evt.message || 'Error from server.');
+          }
+        } catch (parseErr) {
+          console.warn('[Module2] SSE parse error:', parseErr, 'line length:', line.length, 'line start:', line.slice(0, 100));
+        }
+      };
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -355,37 +427,15 @@ const App = {
         buffer = lines.pop() || '';
 
         for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          try {
-            const evt = JSON.parse(line.slice(6));
-            if (evt.type === 'chunk') {
-              fullResponse += evt.text;
-              this._updateStreamingMessage(assistantEl, fullResponse);
-            } else if (evt.type === 'done') {
-              fullResponse = evt.response || fullResponse;
-              this._finalizeStreamingMessage(assistantEl, fullResponse);
+          await _processSSELine(line);
+        }
+      }
 
-              // Save assistant message
-              const assistantMsg = {
-                id: 'msg_' + Utils.generateId(),
-                chatId: this.currentChatId,
-                role: 'assistant',
-                content: fullResponse,
-                contextBlock: null,
-                timestamp: Utils.timestamp(),
-              };
-              Storage.addMessage(this.currentChatId, assistantMsg);
-
-              if (evt.topic && evt.topic.confidence > 0.6) {
-                await this._handleTopicDetection(evt.topic);
-              }
-              if (evt.concepts && evt.concepts.length > 0) {
-                this._handleConcepts(evt.concepts);
-              }
-            } else if (evt.type === 'error') {
-              this._finalizeStreamingMessage(assistantEl, evt.message || 'Error from server.');
-            }
-          } catch (_) { /* skip malformed SSE lines */ }
+      // Process any remaining data left in buffer after stream closes
+      if (buffer.trim()) {
+        console.log('[Module2] Processing remaining buffer after stream close, length:', buffer.length);
+        for (const line of buffer.split('\n')) {
+          await _processSSELine(line);
         }
       }
 
@@ -424,14 +474,247 @@ const App = {
     return el;
   },
 
+  _parseConnectionMarkers(html) {
+    // Wrap the preceding word(s) before {~N} so the marker has visible text to underline
+    return html.replace(/((?:\S+\s+){0,2}\S+)\{~(\d+)\}/g,
+      '<span class="conn-marker loading" data-conn-id="$2">$1<span class="conn-dots"></span></span>');
+  },
+
+  _stripConnectionBlock(text) {
+    const connStart = text.indexOf('{~CONNECTIONS~}');
+    if (connStart === -1) return { mainText: text, connectionsJson: null };
+    const mainText = text.substring(0, connStart).trimEnd();
+    const connEnd = text.indexOf('{~END~}', connStart);
+    if (connEnd === -1) return { mainText, connectionsJson: null };
+    const jsonStr = text.substring(connStart + '{~CONNECTIONS~}'.length, connEnd).trim();
+    try {
+      const connections = JSON.parse(jsonStr);
+      return { mainText, connectionsJson: Array.isArray(connections) ? connections : null };
+    } catch {
+      return { mainText, connectionsJson: null };
+    }
+  },
+
   _updateStreamingMessage(el, text) {
     const contentEl = el.querySelector('.message-content');
-    contentEl.innerHTML = Utils.renderMarkdown(text) + '<span class="streaming-cursor"></span>';
+    const { mainText } = this._stripConnectionBlock(text);
+    const rendered = Utils.renderMarkdown(mainText);
+    const withMarkers = this._parseConnectionMarkers(rendered);
+    contentEl.innerHTML = withMarkers + '<span class="streaming-cursor"></span>';
   },
 
   _finalizeStreamingMessage(el, text) {
     const contentEl = el.querySelector('.message-content');
-    contentEl.innerHTML = Utils.renderMarkdown(text);
+    const { mainText, connectionsJson } = this._stripConnectionBlock(text);
+    const markersInMainText = mainText.match(/\{~\d+\}/g);
+    console.log('[Module2 finalize] mainText markers:', markersInMainText);
+    console.log('[Module2 finalize] connectionsJson:', connectionsJson?.length || 0);
+
+    const rendered = Utils.renderMarkdown(mainText);
+    const markersAfterMd = rendered.match(/\{~\d+\}/g);
+    console.log('[Module2 finalize] markers surviving markdown:', markersAfterMd);
+
+    const withMarkers = this._parseConnectionMarkers(rendered);
+    const spanCount = (withMarkers.match(/conn-marker/g) || []).length;
+    console.log('[Module2 finalize] conn-marker spans created:', spanCount);
+    contentEl.innerHTML = withMarkers;
+
+    if (connectionsJson && connectionsJson.length > 0) {
+      this._resolveConnectionMarkers(contentEl, connectionsJson);
+      const resolved = contentEl.querySelectorAll('.conn-marker.resolved').length;
+      console.log('[Module2 finalize] resolved markers:', resolved);
+    } else {
+      contentEl.querySelectorAll('.conn-marker').forEach(m => m.remove());
+      console.log('[Module2 finalize] no connections — removed orphan markers');
+    }
+  },
+
+  _resolveConnectionMarkers(contentEl, connectionsJson) {
+    contentEl.querySelectorAll('.conn-marker').forEach(marker => {
+      const id = parseInt(marker.dataset.connId, 10);
+      const conn = connectionsJson.find(c => c.id === id);
+      if (conn) {
+        marker.classList.remove('loading');
+        marker.classList.add('resolved');
+        marker.dataset.connText = conn.text || '';
+        marker.dataset.connChatId = conn.chatId || '';
+        marker.dataset.connChatTitle = conn.chatTitle || '';
+        marker.dataset.connUserAsked = conn.userAsked || '';
+        marker.dataset.connAiCovered = conn.aiCovered || '';
+        const dots = marker.querySelector('.conn-dots');
+        if (dots) {
+          dots.className = 'conn-icon';
+          dots.textContent = '';
+          dots.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>';
+        }
+      } else {
+        marker.remove();
+      }
+    });
+    this._bindConnectionCards(contentEl);
+  },
+
+  _connCardEl: null,
+
+  _getConnCard() {
+    if (!this._connCardEl) {
+      const card = document.createElement('div');
+      card.className = 'conn-card';
+      card.innerHTML = `
+        <div class="conn-card-header">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+          </svg>
+          <span class="conn-card-title"></span>
+          <button class="conn-card-close">&times;</button>
+        </div>
+        <div class="conn-card-summary">
+          <div class="conn-card-row">
+            <span class="conn-card-label">You asked</span>
+            <span class="conn-card-value conn-card-user-asked"></span>
+          </div>
+          <div class="conn-card-row">
+            <span class="conn-card-label">You learned</span>
+            <span class="conn-card-value conn-card-ai-covered"></span>
+          </div>
+        </div>
+        <div class="conn-card-insight"></div>
+        <div class="conn-card-actions">
+          <button class="conn-card-build">Build on this</button>
+          <a class="conn-card-goto" href="#">Go to chat</a>
+        </div>
+      `;
+      document.body.appendChild(card);
+
+      card.querySelector('.conn-card-close').addEventListener('click', () => this._hideConnCard());
+
+      card.querySelector('.conn-card-goto').addEventListener('click', (e) => {
+        e.preventDefault();
+        const chatId = card.dataset.targetChatId;
+        if (chatId) {
+          this._hideConnCard();
+          const chat = Storage.getChat(chatId);
+          if (chat) {
+            this._summarizeCurrentChat();
+            this.msgCountSinceRefresh = 0;
+            this._renderChat(chatId);
+            this._renderChatList();
+          }
+        }
+      });
+
+      card.querySelector('.conn-card-build').addEventListener('click', () => {
+        const chatId = card.dataset.targetChatId || '';
+        const insight = card.dataset.insight || '';
+        const title = card.dataset.title || '';
+
+        const parts = [];
+        if (insight) parts.push(`Connection to "${title}": ${insight}`);
+
+        // Include the full past chat history for rich context
+        if (chatId) {
+          const pastMessages = Storage.getMessages(chatId);
+          if (pastMessages.length > 0) {
+            parts.push('\n--- Previous chat history ---');
+            pastMessages.forEach(m => {
+              const role = m.role === 'user' ? 'User' : 'AI';
+              const text = (m.content || '').slice(0, 800);
+              parts.push(`${role}: ${text}${m.content?.length > 800 ? '...' : ''}`);
+            });
+            parts.push('--- End of previous chat ---');
+          }
+        }
+        const contextText = parts.join('\n');
+
+        this._hideConnCard();
+        if (contextText) {
+          this.setContextBlock(contextText, title);
+          document.getElementById('chatInput').focus();
+        }
+      });
+
+      document.addEventListener('click', (e) => {
+        if (card.classList.contains('visible') && !card.contains(e.target) && !e.target.closest('.conn-marker')) {
+          this._hideConnCard();
+        }
+      });
+
+      this._connCardEl = card;
+    }
+    return this._connCardEl;
+  },
+
+  _showConnCard(marker) {
+    const card = this._getConnCard();
+
+    const title = marker.dataset.connChatTitle || 'Past chat';
+    const userAsked = marker.dataset.connUserAsked || '';
+    const aiCovered = marker.dataset.connAiCovered || '';
+    const insight = marker.dataset.connText || '';
+    const chatId = marker.dataset.connChatId || '';
+
+    card.querySelector('.conn-card-title').textContent = title;
+    card.querySelector('.conn-card-insight').textContent = insight;
+
+    const summaryEl = card.querySelector('.conn-card-summary');
+    const userRow = card.querySelector('.conn-card-row:first-child');
+    const aiRow = card.querySelector('.conn-card-row:last-child');
+
+    if (userAsked || aiCovered) {
+      summaryEl.style.display = '';
+      card.querySelector('.conn-card-user-asked').textContent = userAsked || '—';
+      card.querySelector('.conn-card-ai-covered').textContent = aiCovered || '—';
+      userRow.style.display = userAsked ? '' : 'none';
+      aiRow.style.display = aiCovered ? '' : 'none';
+    } else {
+      summaryEl.style.display = 'none';
+    }
+
+    card.dataset.targetChatId = chatId;
+    card.dataset.userAsked = userAsked;
+    card.dataset.aiCovered = aiCovered;
+    card.dataset.insight = insight;
+    card.dataset.title = title;
+
+    const gotoLink = card.querySelector('.conn-card-goto');
+    gotoLink.style.display = chatId ? '' : 'none';
+
+    card.classList.add('visible');
+
+    // Position anchored to marker
+    requestAnimationFrame(() => {
+      const rect = marker.getBoundingClientRect();
+      const cardRect = card.getBoundingClientRect();
+      let top = rect.bottom + 8;
+      if (top + cardRect.height > window.innerHeight - 16) {
+        top = rect.top - cardRect.height - 8;
+      }
+      let left = rect.left + rect.width / 2 - cardRect.width / 2;
+      left = Math.max(12, Math.min(left, window.innerWidth - cardRect.width - 12));
+      card.style.top = top + 'px';
+      card.style.left = left + 'px';
+    });
+  },
+
+  _hideConnCard() {
+    if (this._connCardEl) this._connCardEl.classList.remove('visible');
+  },
+
+  _bindConnectionCards(container) {
+    container.querySelectorAll('.conn-marker.resolved').forEach(marker => {
+      marker.style.cursor = 'pointer';
+      marker.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._showConnCard(marker);
+      });
+      marker.addEventListener('mouseenter', () => {
+        Sidebar.highlightSidebarCard(marker.dataset.connId, true);
+      });
+      marker.addEventListener('mouseleave', () => {
+        Sidebar.highlightSidebarCard(marker.dataset.connId, false);
+      });
+    });
   },
 
   async _handleTopicDetection(topicData) {
@@ -524,6 +807,8 @@ const App = {
 
       chat.title = data.title || chat.title;
       chat.summary = data.summary || '';
+      chat.userAsked = data.userAsked || '';
+      chat.aiCovered = data.aiCovered || '';
       chat.summarized = true;
       chat.lastActive = Utils.timestamp();
       Storage.saveChat(chat);
@@ -553,6 +838,37 @@ const App = {
     } catch (err) {
       console.warn('Summarization failed:', err);
     }
+  },
+
+  async _migrateStructuredSummaries() {
+    const chats = Storage.getChats().filter(c => c.summarized && c.summary && !c.userAsked);
+    if (chats.length === 0) return;
+    console.log(`[Migration] Re-summarizing ${chats.length} legacy chat(s) for structured fields...`);
+    for (const chat of chats) {
+      try {
+        const messages = Storage.getMessages(chat.id);
+        if (messages.length < 2) continue;
+        const resp = await fetch(`${API_BASE}/api/chat/summarize`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: messages.map(m => ({ role: m.role, content: m.content })),
+            model: Storage.getChatModel(),
+          }),
+        });
+        const data = await resp.json();
+        chat.title = data.title || chat.title;
+        chat.summary = data.summary || chat.summary;
+        chat.userAsked = data.userAsked || '';
+        chat.aiCovered = data.aiCovered || '';
+        Storage.saveChat(chat);
+        console.log(`[Migration] ✅ ${chat.id.slice(0, 12)} "${chat.title?.slice(0, 30)}"`);
+      } catch (err) {
+        console.warn(`[Migration] ❌ ${chat.id}:`, err);
+      }
+    }
+    console.log('[Migration] Structured summary migration complete.');
+    this._renderChatList();
   },
 
   async _autoDetectTopics() {
@@ -713,6 +1029,14 @@ const App = {
       Sidebar.hide();
     }
 
+    // Restore sidebar connection cards from the last assistant message
+    const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant' && m.connections?.length > 0);
+    if (lastAssistant) {
+      Sidebar.showConnections(lastAssistant.connections);
+    } else {
+      Sidebar.clearConnections();
+    }
+
     this._highlightActiveChat(chatId);
   },
 
@@ -842,9 +1166,21 @@ const App = {
       attachHtml = `<div class="message-attachments">${thumbs}</div>`;
     }
 
-    const rendered = msg.role === 'assistant' ? Utils.renderMarkdown(msg.content) : Utils.escapeHtml(msg.content);
-    el.innerHTML = `${contextHtml}${attachHtml}<div class="message-content">${rendered}</div>`;
+    // For assistant messages with stored connections, render with markers
+    let renderedContent;
+    if (msg.role === 'assistant' && msg.connections && msg.connections.length > 0 && msg.rawContent) {
+      renderedContent = this._parseConnectionMarkers(Utils.renderMarkdown(msg.rawContent));
+    } else {
+      renderedContent = msg.role === 'assistant' ? Utils.renderMarkdown(msg.content) : Utils.escapeHtml(msg.content);
+    }
+    el.innerHTML = `${contextHtml}${attachHtml}<div class="message-content">${renderedContent}</div>`;
     container.appendChild(el);
+
+    if (msg.role === 'assistant' && msg.connections && msg.connections.length > 0) {
+      const contentEl = el.querySelector('.message-content');
+      this._resolveConnectionMarkers(contentEl, msg.connections);
+    }
+
     container.scrollTop = container.scrollHeight;
   },
 

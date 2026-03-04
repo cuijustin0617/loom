@@ -134,7 +134,7 @@ class TestStatusUpdatePrompt:
     def test_formats_all_fields(self):
         result = STATUS_UPDATE_PROMPT.format(
             topic_name="ML", current_status="3rd year CS",
-            recent_summaries="- Learned neural nets",
+            current_messages="user: test", recent_summaries="- Learned neural nets",
         )
         assert "ML" in result
         assert "3rd year" in result
@@ -142,13 +142,14 @@ class TestStatusUpdatePrompt:
     def test_empty_status(self):
         result = STATUS_UPDATE_PROMPT.format(
             topic_name="ML", current_status="(empty - create fresh)",
-            recent_summaries="- First chat",
+            current_messages="(none)", recent_summaries="- First chat",
         )
         assert "empty" in result
 
     def test_contains_structured_output(self):
         result = STATUS_UPDATE_PROMPT.format(
-            topic_name="T", current_status="S", recent_summaries="test",
+            topic_name="T", current_status="S",
+            current_messages="(none)", recent_summaries="test",
         )
         assert '"overview"' in result
         assert '"specifics"' in result
@@ -156,7 +157,8 @@ class TestStatusUpdatePrompt:
 
     def test_mentions_incremental_rules(self):
         result = STATUS_UPDATE_PROMPT.format(
-            topic_name="T", current_status="S", recent_summaries="test",
+            topic_name="T", current_status="S",
+            current_messages="(none)", recent_summaries="test",
         )
         assert "ADD" in result
 

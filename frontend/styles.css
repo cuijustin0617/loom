@@ -566,6 +566,237 @@ body {
 }
 @keyframes blink { 50% { opacity: 0; } }
 
+/* ── Connection Markers (Module 2 inline annotations) ──────────────────── */
+.conn-marker {
+  position: relative;
+  display: inline;
+  cursor: default;
+}
+.conn-marker.loading .conn-dots::after {
+  content: '\b7\b7\b7';
+  font-size: 0.85em;
+  color: var(--accent-purple);
+  opacity: 0.5;
+  animation: connDots 1.2s steps(1) infinite;
+}
+@keyframes connDots {
+  0%   { content: '\b7'; }
+  33%  { content: '\b7\b7'; }
+  66%  { content: '\b7\b7\b7'; }
+}
+.conn-marker.resolved {
+  border-bottom: 2px dotted rgba(139, 92, 246, 0.55);
+  padding-bottom: 1px;
+  background: rgba(139, 92, 246, 0.04);
+  border-radius: 2px;
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+  cursor: pointer;
+}
+.conn-marker.resolved:hover,
+.conn-marker.resolved.highlighted {
+  border-bottom: 2px solid rgba(139, 92, 246, 0.85);
+  background: rgba(139, 92, 246, 0.10);
+  box-shadow: 0 1px 4px rgba(139, 92, 246, 0.15);
+}
+.conn-icon {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 3px;
+  vertical-align: middle;
+  color: var(--accent-purple);
+  opacity: 0.55;
+  transition: opacity 0.15s;
+}
+.conn-marker.resolved:hover .conn-icon,
+.conn-marker.resolved.highlighted .conn-icon { opacity: 1; }
+
+/* ── Sidebar Connection Cards (Module 2) ─────────────────────────────── */
+.module-connections .module-header .connections-icon { color: var(--accent-purple); }
+.conn-sidebar-card {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent-purple);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+.conn-sidebar-card:hover,
+.conn-sidebar-card.highlighted {
+  background: rgba(139, 92, 246, 0.06);
+  border-color: rgba(139, 92, 246, 0.4);
+  border-left-color: var(--accent-purple);
+  box-shadow: 0 2px 8px rgba(139, 92, 246, 0.10);
+}
+.conn-sb-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  color: var(--accent-purple);
+}
+.conn-sb-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.conn-sb-summary { margin-bottom: 6px; }
+.conn-sb-row {
+  display: flex;
+  gap: 6px;
+  padding: 3px 0;
+  align-items: baseline;
+}
+.conn-sb-row + .conn-sb-row { border-top: 1px solid rgba(0,0,0,0.04); }
+.conn-sb-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  min-width: 48px;
+}
+.conn-sb-value {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.conn-sb-insight {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  font-style: italic;
+  padding: 5px 8px;
+  background: rgba(139, 92, 246, 0.04);
+  border-radius: 4px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+/* ── Connection Card (Module 2 rich popover) ───────────────────────────── */
+.conn-card {
+  position: fixed;
+  z-index: 1500;
+  width: 340px;
+  background: white;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent-purple);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06);
+  opacity: 0;
+  transform: translateY(6px);
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.conn-card.visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+.conn-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px 8px;
+  color: var(--accent-purple);
+}
+.conn-card-header svg { flex-shrink: 0; color: var(--accent-purple); }
+.conn-card-title {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.conn-card-close {
+  width: 22px; height: 22px;
+  border: none; background: transparent;
+  border-radius: 5px; cursor: pointer;
+  font-size: 16px; line-height: 1;
+  color: var(--text-muted);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; transition: background 0.15s, color 0.15s;
+}
+.conn-card-close:hover { background: rgba(0,0,0,0.06); color: var(--text-primary); }
+
+.conn-card-summary {
+  padding: 0 14px;
+  margin-bottom: 8px;
+}
+.conn-card-row {
+  display: flex;
+  gap: 8px;
+  padding: 5px 0;
+  align-items: baseline;
+}
+.conn-card-row + .conn-card-row { border-top: 1px solid rgba(0,0,0,0.04); }
+.conn-card-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--accent-purple);
+  flex-shrink: 0;
+  width: 72px;
+}
+.conn-card-value {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.conn-card-insight {
+  padding: 8px 14px;
+  margin: 0 14px 10px;
+  background: var(--accent-purple-light);
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.conn-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px 12px;
+}
+.conn-card-build {
+  padding: 6px 14px;
+  background: var(--accent-purple);
+  color: white;
+  border: none;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, transform 0.1s;
+}
+.conn-card-build:hover { background: #7c4fe0; transform: scale(1.02); }
+.conn-card-build:active { transform: scale(0.98); }
+.conn-card-goto {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+.conn-card-goto:hover { color: var(--accent-purple); }
+
 /* ── Markdown in messages ──────────────────────────────────────────────── */
 .message-content pre.code-block {
   background: #1e1e2e; color: #cdd6f4; border-radius: 8px;
