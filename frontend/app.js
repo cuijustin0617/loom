@@ -1141,7 +1141,9 @@ const App = {
       if (topicSel) topicSel.style.display = 'none';
     }
 
-    if (chat?.topicId) {
+    if (STUDY_CONDITION === 'baseline') {
+      Sidebar.showBaseline();
+    } else if (chat?.topicId) {
       Sidebar.show(chat.topicId);
       this.msgCountSinceRefresh = 0;
     } else {
@@ -1647,6 +1649,7 @@ const App = {
       if (data.details && Array.isArray(data.details)) {
         Storage.setPersonalDetails(data.details);
         this._renderBaselineDetails(data.details);
+        Sidebar.showBaseline();
         StudyLog.event('baseline_details_shown', { count: data.details.length });
       }
     } catch (err) {

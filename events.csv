@@ -1,0 +1,29 @@
+id,user_id,condition,event_type,event_data,timestamp
+1,test-loom,loom,session_start,{},2026-03-10T16:01:28.563Z
+2,test-loom,loom,query_sent,"{""chatId"": ""chat_mmkss647689ube"", ""topicId"": null, ""hasContext"": false}",2026-03-10T16:02:02.478Z
+3,test-loom,loom,topic_created,"{""topicId"": ""topic_mmkst3pp5k6u6m"", ""topicName"": ""Machine Learning"", ""isAutoDetected"": true}",2026-03-10T16:02:12.109Z
+4,test-loom,loom,topic_assigned,"{""chatId"": ""chat_mmkss647689ube"", ""topicId"": ""topic_mmkst3pp5k6u6m"", ""isAutoDetected"": true}",2026-03-10T16:02:12.110Z
+5,test-loom,loom,module1_viewed,"{""topicId"": ""topic_mmkst3pp5k6u6m""}",2026-03-10T16:02:12.111Z
+6,test-loom,loom,module3_direction_clicked,"{""topicId"": ""topic_mmkst3pp5k6u6m"", ""directionTitle"": ""Fixing Memory with LSTMs""}",2026-03-10T16:04:02.736Z
+7,test-loom,loom,context_block_added,"{""chatId"": ""chat_mmkss647689ube"", ""sourceType"": ""direction"", ""label"": ""Fixing Memory with LSTMs""}",2026-03-10T16:04:02.738Z
+8,test-loom,loom,query_sent,"{""chatId"": ""chat_mmkss647689ube"", ""topicId"": ""topic_mmkst3pp5k6u6m"", ""hasContext"": true}",2026-03-10T16:04:06.156Z
+9,test-loom,loom,topic_assigned,"{""chatId"": ""chat_mmkss647689ube"", ""topicId"": ""topic_mmkst3pp5k6u6m"", ""isAutoDetected"": true}",2026-03-10T16:04:14.402Z
+10,test-loom,loom,module1_viewed,"{""topicId"": ""topic_mmkst3pp5k6u6m""}",2026-03-10T16:04:14.403Z
+11,test-loom,loom,session_end,{},2026-03-10T16:18:07.602Z
+12,baselineJustin,baseline,session_start,"{""isNew"": true}",2026-03-10T16:26:48.488Z
+13,baselineJustin,baseline,query_sent,"{""chatId"": ""chat_mmktoqwc082089"", ""topicId"": null, ""hasContext"": false}",2026-03-10T16:27:11.686Z
+14,baselineJustin,baseline,baseline_details_shown,"{""count"": 3}",2026-03-10T16:27:22.407Z
+15,baselineJustin,baseline,query_sent,"{""chatId"": ""chat_mmktoqwc082089"", ""topicId"": null, ""hasContext"": false}",2026-03-10T16:31:09.740Z
+16,baselineJustin,baseline,baseline_details_shown,"{""count"": 5}",2026-03-10T16:31:19.327Z
+17,baselineJustin,baseline,chat_created,"{""chatId"": ""chat_mmktv2u3sgusfh""}",2026-03-10T16:31:43.906Z
+18,baselineJustin,baseline,query_sent,"{""chatId"": ""chat_mmktv2u3sgusfh"", ""topicId"": null, ""hasContext"": false}",2026-03-10T16:33:00.452Z
+19,baselineJustin,baseline,baseline_details_shown,"{""count"": 10}",2026-03-10T16:33:20.065Z
+20,baselineJustin,baseline,query_sent,"{""chatId"": ""chat_mmktv2u3sgusfh"", ""topicId"": null, ""hasContext"": false}",2026-03-10T16:35:56.893Z
+21,baselineJustin,baseline,baseline_details_shown,"{""count"": 14}",2026-03-10T16:36:15.347Z
+22,baselineJustin,baseline,chat_created,"{""chatId"": ""chat_mmku2a0wnq0u0r""}",2026-03-10T16:37:19.820Z
+23,baselineJustin,baseline,query_sent,"{""chatId"": ""chat_mmku2a0wnq0u0r"", ""topicId"": null, ""hasContext"": false}",2026-03-10T16:37:24.621Z
+24,baselineJustin,baseline,baseline_details_shown,"{""count"": 14}",2026-03-10T16:37:39.755Z
+25,baselineJustin,baseline,chat_deleted,"{""chatId"": ""chat_mmku2a0wnq0u0r"", ""topicId"": null}",2026-03-10T16:43:22.193Z
+26,baselineJustin,baseline,chat_created,"{""chatId"": ""chat_mmkua22d6qrmph""}",2026-03-10T16:43:22.748Z
+27,baselineJustin,baseline,query_sent,"{""chatId"": ""chat_mmkua22d6qrmph"", ""topicId"": null, ""hasContext"": false}",2026-03-10T16:43:23.390Z
+28,baselineJustin,baseline,baseline_details_shown,"{""count"": 15}",2026-03-10T16:43:35.282Z

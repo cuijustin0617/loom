@@ -56,14 +56,20 @@ const Sidebar = {
 
   hide() {
     this.currentTopicId = null;
-    document.getElementById('sidebarEmpty').style.display = 'block';
     document.getElementById('moduleStatus').style.display = 'none';
     document.getElementById('moduleConnections').style.display = 'none';
     document.getElementById('moduleDirections').style.display = 'none';
     document.getElementById('sidebarRefreshBtn').style.display = 'none';
     document.getElementById('topicBadge').style.display = 'none';
-    const baselineModule = document.getElementById('moduleBaseline');
-    if (baselineModule) baselineModule.style.display = 'none';
+
+    if (STUDY_CONDITION === 'baseline') {
+      document.getElementById('sidebarEmpty').style.display = 'none';
+      this.showBaseline();
+    } else {
+      document.getElementById('sidebarEmpty').style.display = 'block';
+      const baselineModule = document.getElementById('moduleBaseline');
+      if (baselineModule) baselineModule.style.display = 'none';
+    }
   },
 
   async refresh() {
