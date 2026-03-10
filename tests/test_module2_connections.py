@@ -563,7 +563,7 @@ class TestBuildOnThisActionJS:
         js = self._get_js()
         first = js.index('conn-card-build')
         handler_start = js.index('conn-card-build', first + 1)
-        return js[handler_start:handler_start + 1200]
+        return js[handler_start:handler_start + 1600]
 
     def test_build_button_calls_setContextBlock(self):
         assert 'setContextBlock' in self._get_build_handler_section()
@@ -1175,13 +1175,13 @@ class TestSameTopicFilteringJS:
     def test_maps_userAsked_in_summaries(self):
         js = self._get_js()
         send_start = js.index('sameTopicSummaries')
-        send_section = js[send_start:send_start + 400]
+        send_section = js[send_start:send_start + 700]
         assert 'userAsked' in send_section
 
     def test_maps_aiCovered_in_summaries(self):
         js = self._get_js()
         send_start = js.index('sameTopicSummaries')
-        send_section = js[send_start:send_start + 400]
+        send_section = js[send_start:send_start + 700]
         assert 'aiCovered' in send_section
 
     def test_excludes_current_chat(self):

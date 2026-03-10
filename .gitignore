@@ -41,3 +41,4 @@ TODO.md
 *.sw?
 *.pem
 .eslintcache
+backend/data/
