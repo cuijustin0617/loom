@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: loom
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: LLM_PROVIDER
+        value: gemini
+      - key: EMBEDDING_PROVIDER
+        value: gemini
+      - key: LOOM_DATA_DIR
+        value: /var/data/loom
+    disk:
+      name: loom-data
+      mountPath: /var/data/loom
+      sizeGB: 1
