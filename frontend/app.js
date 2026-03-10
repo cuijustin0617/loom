@@ -2,6 +2,9 @@
 
 const API_BASE = '';  // same origin
 
+// Global condition flag set after login
+let STUDY_CONDITION = 'loom';
+
 const App = {
   msgCountSinceRefresh: 0,
   currentChatId: null,
@@ -12,17 +15,67 @@ const App = {
   selectedTopicId: null,
 
   async init() {
+    if (Storage.restoreSession()) {
+      this._enterApp();
+    } else {
+      this._showLogin();
+    }
+  },
+
+  _showLogin() {
+    document.getElementById('loginOverlay').style.display = 'flex';
+    document.getElementById('appContainer').style.display = 'none';
+    const input = document.getElementById('loginIdInput');
+    const btn = document.getElementById('loginBtn');
+    input.focus();
+    const doLogin = () => {
+      const id = input.value.trim();
+      if (!id) { input.classList.add('shake'); setTimeout(() => input.classList.remove('shake'), 400); return; }
+      Storage.setUser(id);
+      StudyLog.event('session_start');
+      this._enterApp();
+    };
+    btn.addEventListener('click', doLogin);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+  },
+
+  _enterApp() {
+    STUDY_CONDITION = Storage.getCondition();
+    document.getElementById('loginOverlay').style.display = 'none';
+    document.getElementById('appContainer').style.display = 'flex';
+
+    // Update sidebar footer with user info
+    const userId = Storage.getUserId();
+    document.getElementById('userName').textContent = userId;
+    document.getElementById('userAvatar').textContent = userId.charAt(0).toUpperCase();
+    document.getElementById('userCondition').textContent = STUDY_CONDITION === 'baseline' ? 'Baseline' : 'Loom';
+
+    // Apply condition-specific UI
+    if (STUDY_CONDITION === 'baseline') {
+      document.body.classList.add('baseline-mode');
+      // Show baseline panel in right sidebar
+      setTimeout(() => Sidebar.showBaseline(), 0);
+    } else {
+      document.body.classList.remove('baseline-mode');
+    }
+
     Storage.migrateTopicColors();
     Sidebar.init();
     this._bindEvents();
     this._loadState();
 
-    // Inactivity timer for summarization
     this.inactivityTimer = new InactivityTimer(() => this._onInactive(), 120000);
     this.inactivityTimer.start();
 
-    // Migrate legacy summaries to structured format (background, non-blocking)
-    this._migrateStructuredSummaries();
+    if (STUDY_CONDITION === 'loom') {
+      this._migrateStructuredSummaries();
+    }
+
+    // Try restoring from server backup if localStorage is empty
+    const chats = Storage.getChats();
+    if (chats.length === 0) {
+      Storage.pullSync();
+    }
   },
 
   _bindEvents() {
@@ -102,8 +155,19 @@ const App = {
       searchBtn.title = this.useSearch ? 'Google Search ON' : 'Google Search grounding';
     });
 
+    // Logout
+    document.getElementById('logoutBtn').addEventListener('click', () => {
+      StudyLog.event('session_end');
+      this._summarizeCurrentChat();
+      Storage.logout();
+      location.reload();
+    });
+
     // Summarize on tab leave
-    window.addEventListener('beforeunload', () => this._summarizeCurrentChat());
+    window.addEventListener('beforeunload', () => {
+      StudyLog.event('session_end');
+      this._summarizeCurrentChat();
+    });
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) this._summarizeCurrentChat();
     });
@@ -230,6 +294,7 @@ const App = {
     this._renderChat(chat.id);
     this._renderChatList();
     document.getElementById('chatInput').focus();
+    StudyLog.event('chat_created', { chatId: chat.id });
   },
 
   async sendMessage() {
@@ -300,6 +365,12 @@ const App = {
     Storage.addMessage(this.currentChatId, userMsg);
     this._appendMessage(userMsg);
     this.pendingSummarize = true;
+    const currentChat = Storage.getChat(this.currentChatId);
+    StudyLog.event('query_sent', {
+      chatId: this.currentChatId,
+      topicId: currentChat?.topicId || this.selectedTopicId || null,
+      hasContext: !!contextBlock,
+    });
 
     // Exit welcome mode and hide topic selector
     const mainContent = document.getElementById('mainContent');
@@ -318,26 +389,29 @@ const App = {
     }));
     const topics = Storage.getTopics().map(t => ({ id: t.id, name: t.name }));
 
-    // Only send same-topic past chats for connections (avoid cross-topic contamination)
-    const currentChat = Storage.getChat(this.currentChatId);
-    const currentTopicId = currentChat?.topicId || this.selectedTopicId;
-    const sameTopicSummaries = currentTopicId
-      ? Storage.getChats()
-          .filter(c => c.id !== this.currentChatId && c.summary && c.topicId === currentTopicId)
-          .map(c => ({
-            id: c.id, title: c.title, summary: c.summary,
-            userAsked: c.userAsked || '', aiCovered: c.aiCovered || '',
-            embedding: c.embedding, topicId: c.topicId,
-          }))
-      : [];
+    // Only send same-topic past chats for connections in Loom mode
+    let sameTopicSummaries = [];
+    if (STUDY_CONDITION === 'loom') {
+      const currentChat2 = Storage.getChat(this.currentChatId);
+      const currentTopicId = currentChat2?.topicId || this.selectedTopicId;
+      sameTopicSummaries = currentTopicId
+        ? Storage.getChats()
+            .filter(c => c.id !== this.currentChatId && c.summary && c.topicId === currentTopicId)
+            .map(c => ({
+              id: c.id, title: c.title, summary: c.summary,
+              userAsked: c.userAsked || '', aiCovered: c.aiCovered || '',
+              embedding: c.embedding, topicId: c.topicId,
+            }))
+        : [];
+    }
 
     const reqBody = {
       chatId: this.currentChatId,
       messages,
-      existingTopics: topics,
-      existingConcepts: Storage.getConcepts().map(c => ({
+      existingTopics: STUDY_CONDITION === 'loom' ? topics : [],
+      existingConcepts: STUDY_CONDITION === 'loom' ? Storage.getConcepts().map(c => ({
         id: c.id, topicId: c.topicId, title: c.title, preview: c.preview,
-      })),
+      })) : [],
       model: Storage.getChatModel(),
       useSearch: this.useSearch,
       allChatSummaries: sameTopicSummaries,
@@ -397,18 +471,18 @@ const App = {
             };
             Storage.addMessage(this.currentChatId, assistantMsg);
 
-            if (evt.topic && evt.topic.confidence > 0.6) {
-              await this._handleTopicDetection(evt.topic);
-            }
-            if (evt.concepts && evt.concepts.length > 0) {
-              this._handleConcepts(evt.concepts);
-            }
-
-            // Push connections to sidebar AFTER topic detection (which calls Sidebar.show)
-            if (savedConns && savedConns.length > 0) {
-              Sidebar.showConnections(savedConns);
-            } else {
-              Sidebar.clearConnections();
+            if (STUDY_CONDITION === 'loom') {
+              if (evt.topic && evt.topic.confidence > 0.6) {
+                await this._handleTopicDetection(evt.topic);
+              }
+              if (evt.concepts && evt.concepts.length > 0) {
+                this._handleConcepts(evt.concepts);
+              }
+              if (savedConns && savedConns.length > 0) {
+                Sidebar.showConnections(savedConns);
+              } else {
+                Sidebar.clearConnections();
+              }
             }
           } else if (evt.type === 'error') {
             this._finalizeStreamingMessage(assistantEl, evt.message || 'Error from server.');
@@ -449,10 +523,14 @@ const App = {
         this._renderChatList();
       }
 
-      // Sidebar refresh logic
+      // Sidebar refresh logic (Loom only) or baseline details extraction
       this.msgCountSinceRefresh++;
-      if (this.msgCountSinceRefresh === 1 || this.msgCountSinceRefresh % 3 === 0) {
-        Sidebar.refresh();
+      if (STUDY_CONDITION === 'loom') {
+        if (this.msgCountSinceRefresh === 1 || this.msgCountSinceRefresh % 3 === 0) {
+          Sidebar.refresh();
+        }
+      } else {
+        this._extractBaselineDetails();
       }
 
     } catch (err) {
@@ -593,6 +671,7 @@ const App = {
         e.preventDefault();
         const chatId = card.dataset.targetChatId;
         if (chatId) {
+          StudyLog.event('module2_connection_clicked', { chatId: this.currentChatId, connectionChatId: chatId, action: 'view' });
           this._hideConnCard();
           const chat = Storage.getChat(chatId);
           if (chat) {
@@ -627,6 +706,7 @@ const App = {
         }
         const contextText = parts.join('\n');
 
+        StudyLog.event('module2_connection_clicked', { chatId: this.currentChatId, connectionChatId: chatId, action: 'build' });
         this._hideConnCard();
         if (contextText) {
           this.setContextBlock(contextText, title);
@@ -719,9 +799,9 @@ const App = {
 
   async _handleTopicDetection(topicData) {
     let topicId = topicData.matchedExistingId;
+    let isNew = false;
 
     if (!topicId && topicData.name) {
-      // Check if there are 2+ chats that could form this topic, or auto-create
       const existing = Storage.getTopics().find(
         t => t.name.toLowerCase() === topicData.name.toLowerCase()
       );
@@ -730,6 +810,8 @@ const App = {
       } else {
         const topic = Storage.createTopic(topicData.name);
         topicId = topic.id;
+        isNew = true;
+        StudyLog.event('topic_created', { topicId, topicName: topicData.name, isAutoDetected: true });
       }
     }
 
@@ -739,6 +821,7 @@ const App = {
         chat.topicId = topicId;
         chat.lastActive = Utils.timestamp();
         Storage.saveChat(chat);
+        StudyLog.event('topic_assigned', { chatId: this.currentChatId, topicId, isAutoDetected: true });
       }
 
       const topic = Storage.getTopic(topicId);
@@ -978,6 +1061,8 @@ const App = {
     fullDiv.style.display = 'none';
     document.getElementById('contextToggleBtn').textContent = 'Expand';
     block.style.display = 'block';
+    const sourceType = fullText.includes('--- Previous chat history ---') ? 'connection' : label === 'Status Summary' ? 'status' : 'direction';
+    StudyLog.event('context_block_added', { chatId: this.currentChatId, sourceType, label });
   },
 
   clearContextBlock() {
@@ -1043,7 +1128,7 @@ const App = {
   _renderWelcome(container) {
     const suggestions = this._getSuggestionCards();
     let suggestionsHtml = '';
-    if (suggestions.length > 0) {
+    if (suggestions.length > 0 && STUDY_CONDITION === 'loom') {
       const cardsHtml = suggestions.map((s, i) => {
         const tc = Utils.getTopicColor(s.topicColorObj);
         return `<div class="welcome-suggestion-card" data-suggestion-idx="${i}">
@@ -1054,7 +1139,15 @@ const App = {
           <div class="welcome-card-question">${Utils.escapeHtml(s.question)}</div>
         </div>`;
       }).join('');
-      suggestionsHtml = `<div class="welcome-suggestions" id="welcomeSuggestions">${cardsHtml}</div>`;
+      const shuffleBtnHtml = `<button class="welcome-shuffle-btn" id="welcomeShuffleBtn" title="Shuffle suggestions">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+          <polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/>
+          <polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/>
+          <line x1="4" y1="4" x2="9" y2="9"/>
+        </svg>
+        Shuffle
+      </button>`;
+      suggestionsHtml = `<div class="welcome-suggestions" id="welcomeSuggestions">${cardsHtml}${shuffleBtnHtml}</div>`;
     }
 
     container.innerHTML = `
@@ -1070,8 +1163,24 @@ const App = {
       </div>
       ${suggestionsHtml}`;
 
-    if (suggestions.length > 0) {
+    if (suggestions.length > 0 && STUDY_CONDITION === 'loom') {
       this._bindSuggestionCards(suggestions);
+      const shuffleBtn = document.getElementById('welcomeShuffleBtn');
+      if (shuffleBtn) {
+        shuffleBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          StudyLog.event('module3_shuffled', { location: 'welcome', topicId: null });
+          // Re-render welcome with refreshed suggestions (triggers sidebar.shuffleDirections for each topic)
+          const firstTopic = suggestions[0];
+          if (firstTopic) {
+            Sidebar.currentTopicId = firstTopic.topicId;
+            Sidebar.shuffleDirections('welcome').then(() => {
+              const msgContainer = document.getElementById('chatMessages');
+              this._renderWelcome(msgContainer);
+            });
+          }
+        });
+      }
     }
   },
 
@@ -1291,12 +1400,21 @@ const App = {
     const topic = chat.topicId ? Storage.getTopic(chat.topicId) : null;
     const tc = topic ? Utils.getTopicColor(topic) : { color: '#ccc' };
 
+    const unassignBtn = chat.topicId && STUDY_CONDITION === 'loom'
+      ? `<button class="chat-unassign-btn" title="Remove from topic">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
+            <path d="M18 6L6 18"/><path d="M6 6l12 12"/>
+          </svg>
+        </button>`
+      : '';
+
     el.innerHTML = `
       <span class="topic-dot" style="background:${tc.color}"></span>
       <div class="chat-item-info">
         <div class="chat-item-title">${Utils.escapeHtml(chat.title)}</div>
         ${chat.summary ? `<div class="chat-item-summary">${Utils.escapeHtml(Utils.truncate(chat.summary, 50))}</div>` : ''}
       </div>
+      ${unassignBtn}
       <button class="chat-delete-btn" title="Delete chat">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
           <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
@@ -1304,6 +1422,14 @@ const App = {
         </svg>
       </button>
     `;
+
+    const unassignEl = el.querySelector('.chat-unassign-btn');
+    if (unassignEl) {
+      unassignEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._unassignChat(chat.id, chat.topicId);
+      });
+    }
 
     const deleteBtn = el.querySelector('.chat-delete-btn');
     deleteBtn.addEventListener('click', (e) => {
@@ -1320,7 +1446,30 @@ const App = {
     return el;
   },
 
+  _unassignChat(chatId, topicId) {
+    const chat = Storage.getChat(chatId);
+    if (!chat) return;
+    chat.topicId = null;
+    Storage.saveChat(chat);
+
+    if (topicId) {
+      const remaining = Storage.getChatsByTopic(topicId);
+      if (remaining.length === 0) {
+        Storage.deleteTopic(topicId);
+      }
+    }
+
+    if (chatId === this.currentChatId) {
+      Sidebar.hide();
+    }
+
+    this._renderChatList();
+    StudyLog.event('chat_unassigned', { chatId, topicId });
+    Utils.showToast('Chat removed from topic', 'info');
+  },
+
   _deleteChat(chatId, topicId) {
+    StudyLog.event('chat_deleted', { chatId, topicId });
     Storage.deleteChat(chatId);
 
     if (topicId) {
@@ -1437,9 +1586,49 @@ const App = {
     const name = document.getElementById('topicNameInput').value.trim();
     if (!name) return;
     const desc = document.getElementById('topicDescInput').value.trim();
-    Storage.createTopic(name, desc);
+    const topic = Storage.createTopic(name, desc);
+    StudyLog.event('topic_created', { topicId: topic.id, topicName: name, isAutoDetected: false });
     this._hideTopicDialog();
     this._renderChatList();
+  },
+
+  // ── Baseline Personal Details ──────────────────────────────────────────
+
+  async _extractBaselineDetails() {
+    if (STUDY_CONDITION !== 'baseline') return;
+    const messages = Storage.getMessages(this.currentChatId);
+    if (messages.length < 2) return;
+
+    try {
+      const resp = await fetch(`${API_BASE}/api/baseline/extract`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: messages.map(m => ({ role: m.role, content: m.content })),
+          existingDetails: Storage.getPersonalDetails(),
+          model: Storage.getChatModel(),
+        }),
+      });
+      const data = await resp.json();
+      if (data.details && Array.isArray(data.details)) {
+        Storage.setPersonalDetails(data.details);
+        this._renderBaselineDetails(data.details);
+        StudyLog.event('baseline_details_shown', { count: data.details.length });
+      }
+    } catch (err) {
+      console.warn('Baseline extraction failed:', err);
+    }
+  },
+
+  _renderBaselineDetails(details) {
+    const container = document.getElementById('baselineDetailsContent');
+    if (!container) return;
+    if (!details || details.length === 0) {
+      container.innerHTML = '<p class="baseline-details-empty">Start chatting and I\'ll learn about you.</p>';
+      return;
+    }
+    const items = details.map(d => `<li>${Utils.escapeHtml(d)}</li>`).join('');
+    container.innerHTML = `<ul class="baseline-details-list">${items}</ul>`;
   },
 };
 

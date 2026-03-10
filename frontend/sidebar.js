@@ -6,16 +6,20 @@ const Sidebar = {
 
   init() {
     document.getElementById('sidebarRefreshBtn').addEventListener('click', () => {
+      StudyLog.event('sidebar_refreshed', { topicId: this.currentTopicId, trigger: 'manual' });
       this.refresh();
     });
     this._initStatusEdit();
     this._initStatusDrag();
     this._initStatusUpdate();
     this._initMergeDialog();
+    this._initShuffle();
   },
 
   show(topicId) {
+    if (STUDY_CONDITION === 'baseline') return;
     this.currentTopicId = topicId;
+    StudyLog.event('module1_viewed', { topicId });
     document.getElementById('sidebarEmpty').style.display = 'none';
     document.getElementById('moduleStatus').style.display = 'block';
     document.getElementById('moduleDirections').style.display = 'block';
@@ -40,6 +44,16 @@ const Sidebar = {
     this._showLoading();
   },
 
+  showBaseline() {
+    document.getElementById('sidebarEmpty').style.display = 'none';
+    const baselineModule = document.getElementById('moduleBaseline');
+    if (baselineModule) baselineModule.style.display = 'block';
+    const details = Storage.getPersonalDetails();
+    if (details.length > 0) {
+      App._renderBaselineDetails(details);
+    }
+  },
+
   hide() {
     this.currentTopicId = null;
     document.getElementById('sidebarEmpty').style.display = 'block';
@@ -48,6 +62,8 @@ const Sidebar = {
     document.getElementById('moduleDirections').style.display = 'none';
     document.getElementById('sidebarRefreshBtn').style.display = 'none';
     document.getElementById('topicBadge').style.display = 'none';
+    const baselineModule = document.getElementById('moduleBaseline');
+    if (baselineModule) baselineModule.style.display = 'none';
   },
 
   async refresh() {
@@ -147,11 +163,12 @@ const Sidebar = {
       e.dataTransfer.setData('text/plain', fullText);
       e.dataTransfer.setData('application/loom-label', label);
       el.classList.add('dragging');
+      StudyLog.event('module3_direction_dragged', { topicId: this.currentTopicId, directionTitle: label });
     });
     el.addEventListener('dragend', () => el.classList.remove('dragging'));
 
-    // Also allow click-to-add
     el.addEventListener('click', () => {
+      StudyLog.event('module3_direction_clicked', { topicId: this.currentTopicId, directionTitle: label });
       App.setContextBlock(fullText, label);
     });
   },
@@ -277,10 +294,12 @@ const Sidebar = {
     if (!topic || typeof topic.statusSummary !== 'object') return;
     const arr = topic.statusSummary[section];
     if (!arr || idx < 0 || idx >= arr.length) return;
+    const oldValue = typeof arr[idx] === 'object' ? arr[idx].text : arr[idx];
     arr.splice(idx, 1);
     topic.statusLastUpdated = Utils.timestamp();
     Storage.saveTopic(topic);
     this._renderStatus(topic.statusSummary);
+    StudyLog.event('summary_edited', { topicId: this.currentTopicId, section, editType: 'delete', oldValue });
   },
 
   _editStatusItem(section, idx, newText) {
@@ -288,6 +307,7 @@ const Sidebar = {
     if (!topic || typeof topic.statusSummary !== 'object') return;
     const arr = topic.statusSummary[section];
     if (!arr || idx < 0 || idx >= arr.length) return;
+    const oldValue = typeof arr[idx] === 'object' ? arr[idx].text : arr[idx];
     if (section === 'overview') {
       arr[idx] = newText;
     } else {
@@ -297,6 +317,7 @@ const Sidebar = {
     topic.statusLastUpdated = Utils.timestamp();
     Storage.saveTopic(topic);
     this._renderStatus(topic.statusSummary);
+    StudyLog.event('summary_edited', { topicId: this.currentTopicId, section, editType: 'edit', oldValue, newValue: newText });
   },
 
   _serializeStatus(statusSummary) {
@@ -363,6 +384,7 @@ const Sidebar = {
         Storage.saveTopic(topic);
         this._renderStatus(newStatus);
         Utils.showToast('Status updated', 'success');
+        StudyLog.event('summary_updated', { topicId: this.currentTopicId, trigger: 'manual' });
       } catch (err) {
         console.error('Status update failed:', err);
         Utils.showToast('Status update failed', 'error');
@@ -382,7 +404,9 @@ const Sidebar = {
     }
     module.style.display = 'block';
     container.innerHTML = '';
+    const chatId = Storage.getCurrentChatId();
     connectionsJson.forEach(conn => {
+      StudyLog.event('module2_connection_shown', { chatId, connectionChatId: conn.chatId });
       const card = document.createElement('div');
       card.className = 'conn-sidebar-card';
       card.dataset.connId = conn.id;
@@ -442,6 +466,76 @@ const Sidebar = {
     if (card) {
       card.classList.toggle('highlighted', active);
     }
+  },
+
+  _initShuffle() {
+    const btn = document.getElementById('shuffleDirectionsBtn');
+    if (!btn) return;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.shuffleDirections('sidebar');
+    });
+  },
+
+  async shuffleDirections(location = 'sidebar') {
+    if (!this.currentTopicId) return;
+    const topic = Storage.getTopic(this.currentTopicId);
+    if (!topic) return;
+
+    const btn = document.getElementById('shuffleDirectionsBtn');
+    if (btn) btn.classList.add('loading');
+
+    const oldDirs = (this.currentData?.newDirections || []).map(d => d.title);
+
+    const chatId = Storage.getCurrentChatId();
+    const messages = Storage.getMessages(chatId);
+    const currentSummary = messages.slice(-4).map(m => `${m.role}: ${m.content}`).join('\n');
+
+    try {
+      const resp = await fetch('/api/sidebar/directions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topicName: topic.name,
+          topicStatus: this._serializeStatus(topic.statusSummary),
+          allConcepts: Storage.getConceptsByTopic(topic.id).map(c => ({
+            id: c.id, title: c.title, preview: c.preview,
+          })),
+          currentSummary,
+          model: Storage.getSidebarModel(),
+        }),
+      });
+      const data = await resp.json();
+      const newDirs = data.newDirections || [];
+
+      // Update UI
+      const dirContainer = document.getElementById('directionCards');
+      dirContainer.innerHTML = '';
+      if (newDirs.length === 0) {
+        dirContainer.innerHTML = '<p style="font-size:12px;color:var(--text-muted);">Keep chatting for suggestions.</p>';
+      }
+      newDirs.forEach(dir => dirContainer.appendChild(this._createDirectionCard(dir)));
+
+      // Update cache
+      if (this.currentData) this.currentData.newDirections = newDirs;
+      const freshTopic = Storage.getTopic(topic.id);
+      if (freshTopic && freshTopic.sidebarCache) {
+        freshTopic.sidebarCache.newDirections = newDirs;
+        Storage.saveTopic(freshTopic);
+      }
+
+      StudyLog.event('module3_shuffled', {
+        topicId: this.currentTopicId,
+        location,
+        oldDirections: oldDirs,
+        newDirections: newDirs.map(d => d.title),
+      });
+    } catch (err) {
+      console.error('Shuffle directions failed:', err);
+      Utils.showToast('Failed to shuffle suggestions', 'error');
+    }
+
+    if (btn) btn.classList.remove('loading');
   },
 
   _initMergeDialog() {

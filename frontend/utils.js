@@ -192,6 +192,27 @@ const Utils = {
   },
 };
 
+/* ── Study Logging ─────────────────────────────────────────────────────── */
+const StudyLog = {
+  event(eventType, data = {}) {
+    const userId = Storage?.getUserId?.() || null;
+    if (!userId) return;
+    const payload = {
+      userId,
+      condition: Storage.getCondition(),
+      eventType,
+      data,
+      timestamp: new Date().toISOString(),
+    };
+    // Fire-and-forget; don't block the UI
+    fetch('/api/log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).catch(() => {});
+  },
+};
+
 /* Inactivity timer for chat summarization */
 class InactivityTimer {
   constructor(callback, timeoutMs = 120000) {

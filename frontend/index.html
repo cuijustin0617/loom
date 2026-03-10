@@ -8,7 +8,24 @@
   <link rel="stylesheet" href="/static/styles.css?v=__CACHE_VERSION__">
 </head>
 <body>
-  <div class="app-container">
+  <!-- Login Overlay -->
+  <div class="login-overlay" id="loginOverlay">
+    <div class="login-card">
+      <div class="login-logo">
+        <svg viewBox="0 0 24 24" fill="none" width="40" height="40">
+          <path d="M12 2C12 2 6 8 6 14C6 17.5 8.5 20 12 22C15.5 20 18 17.5 18 14C18 8 12 2 12 2Z" fill="var(--primary)" opacity="0.9"/>
+          <ellipse cx="12" cy="14" rx="2" ry="3" fill="var(--primary)" opacity="0.5"/>
+        </svg>
+      </div>
+      <h2>Welcome to Loom</h2>
+      <p class="login-subtitle">Enter your participant ID to continue</p>
+      <input type="text" id="loginIdInput" placeholder="e.g., P01-loom or P01-baseline" autocomplete="off" spellcheck="false">
+      <button class="login-btn" id="loginBtn">Continue</button>
+      <p class="login-hint">Your ID determines your study condition.</p>
+    </div>
+  </div>
+
+  <div class="app-container" id="appContainer" style="display:none;">
     <!-- Left Sidebar -->
     <aside class="left-sidebar" id="leftSidebar">
       <div class="sidebar-header">
@@ -47,11 +64,16 @@
 
       <div class="sidebar-footer">
         <div class="user-profile">
-          <div class="user-avatar">U</div>
+          <div class="user-avatar" id="userAvatar">U</div>
           <div>
-            <div class="user-name">User</div>
-            <div class="user-role">Learner</div>
+            <div class="user-name" id="userName">User</div>
+            <div class="user-role" id="userCondition">Learner</div>
           </div>
+          <button class="logout-btn" id="logoutBtn" title="Switch user">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+            </svg>
+          </button>
         </div>
       </div>
     </aside>
@@ -218,8 +240,31 @@
               </svg>
             </span>
             <span class="module-title">Explore next</span>
+            <button class="shuffle-btn" id="shuffleDirectionsBtn" title="Shuffle suggestions">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                <polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/>
+                <polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/>
+                <line x1="4" y1="4" x2="9" y2="9"/>
+              </svg>
+            </button>
           </div>
           <div class="direction-cards" id="directionCards"></div>
+        </div>
+
+        <!-- Baseline: What I know about you -->
+        <div class="sidebar-module baseline-details" id="moduleBaseline" style="display:none;">
+          <div class="module-header">
+            <span class="module-icon status-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                <circle cx="12" cy="7" r="4"/>
+              </svg>
+            </span>
+            <span class="module-title">What I know about you</span>
+          </div>
+          <div id="baselineDetailsContent">
+            <p class="baseline-details-empty">Start chatting and I'll learn about you.</p>
+          </div>
         </div>
 
         <!-- Refresh button -->

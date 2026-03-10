@@ -1,12 +1,15 @@
 """Loom Knowledge Sidebar - FastAPI Backend."""
 
 import os
+import re
 import time
+import json
+import sqlite3
 import asyncio
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
@@ -24,6 +27,7 @@ from prompts import (
     STATUS_UPDATE_PROMPT,
     CHAT_SUMMARIZE_PROMPT,
     TOPIC_AUTO_DETECT_PROMPT,
+    BASELINE_PERSONAL_DETAILS_PROMPT,
 )
 
 load_dotenv()
@@ -40,8 +44,49 @@ app.add_middleware(
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 STATIC_VERSION = str(int(time.time()))
 
+# Persistent data directory (configurable for Render persistent disk)
+DATA_DIR = Path(os.environ.get("LOOM_DATA_DIR", Path(__file__).parent / "data"))
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+DB_PATH = DATA_DIR / "loom_study.db"
+
 llm = LLMRouter()
 embedder = EmbeddingService()
+
+
+# ── SQLite Setup ──────────────────────────────────────────────────────────────
+
+def _get_db():
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.execute("PRAGMA journal_mode=WAL")
+    return conn
+
+
+def _init_db():
+    conn = _get_db()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            condition TEXT NOT NULL DEFAULT 'loom',
+            event_type TEXT NOT NULL,
+            event_data TEXT NOT NULL DEFAULT '{}',
+            timestamp TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_data (
+            user_id TEXT PRIMARY KEY,
+            data TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_events_user ON events(user_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type)")
+    conn.commit()
+    conn.close()
+
+
+_init_db()
 
 
 # ── Pydantic Models ──────────────────────────────────────────────────────────
@@ -116,14 +161,39 @@ class TopicDetectRequest(BaseModel):
     existingTopics: list[TopicItem] = []
 
 
+class DirectionsRequest(BaseModel):
+    topicName: str
+    topicStatus: Union[str, dict] = ""
+    allConcepts: list[dict] = []
+    currentSummary: str = ""
+    model: str | None = None
+
+
+class LogEvent(BaseModel):
+    userId: str
+    condition: str = "loom"
+    eventType: str
+    data: dict = {}
+    timestamp: str = ""
+
+
+class SyncRequest(BaseModel):
+    userId: str
+    data: dict
+
+
+class BaselineExtractRequest(BaseModel):
+    messages: list[MessageItem]
+    existingDetails: list[str] = []
+    model: str | None = None
+
+
 # ── API Endpoints ────────────────────────────────────────────────────────────
 
 
 @app.post("/api/chat")
 async def chat_endpoint(req: ChatRequest):
     """Primary chat: get AI response + topic detection + concept extraction."""
-    import json
-
     topics_json = json.dumps(
         [{"id": t.id, "name": t.name} for t in req.existingTopics], indent=2
     )
@@ -141,12 +211,10 @@ async def chat_endpoint(req: ChatRequest):
 @app.post("/api/chat/stream")
 async def chat_stream_endpoint(req: ChatRequest):
     """Stream chat response via SSE, then send metadata as final event."""
-    import json as _json
-
-    topics_json = _json.dumps(
+    topics_json = json.dumps(
         [{"id": t.id, "name": t.name} for t in req.existingTopics], indent=2
     )
-    attachments = [{"mimeType": a.mimeType, "data": a.data} for a in req.attachments] if req.attachments else None
+    attachments_data = [{"mimeType": a.mimeType, "data": a.data} for a in req.attachments] if req.attachments else None
 
     # ── Module 2 Debug ───────────────────────────────────────────────────
     print("\n" + "=" * 70)
@@ -209,7 +277,7 @@ async def chat_stream_endpoint(req: ChatRequest):
     if past_chats_for_prompt:
         prompt_mode = "MEMORY prompt (with connections)"
         system_prompt = CHAT_STREAM_MEMORY_PROMPT.format(
-            past_chats_json=_json.dumps(past_chats_for_prompt, indent=2)
+            past_chats_json=json.dumps(past_chats_for_prompt, indent=2)
         )
         for pc in past_chats_for_prompt:
             print(f"   • {pc['chatId'][:12]}  \"{pc['title'][:35]}\"")
@@ -230,20 +298,19 @@ async def chat_stream_endpoint(req: ChatRequest):
                 messages=[{"role": m.role, "content": m.content} for m in req.messages],
                 system_prompt=system_prompt,
                 model=req.model,
-                attachments=attachments,
+                attachments=attachments_data,
                 use_search=req.useSearch,
             ):
                 full_response_parts.append(chunk)
-                yield f"data: {_json.dumps({'type': 'chunk', 'text': chunk})}\n\n"
+                yield f"data: {json.dumps({'type': 'chunk', 'text': chunk})}\n\n"
         except Exception as e:
-            yield f"data: {_json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
             return
 
         full_response = "".join(full_response_parts)
 
         # ── Module 2 Response Debug ──────────────────────────────────────
-        import re as _re
-        _markers = _re.findall(r'\{~(\d+)\}', full_response)
+        _markers = re.findall(r'\{~(\d+)\}', full_response)
         _has_conn_block = '{~CONNECTIONS~}' in full_response and '{~END~}' in full_response
         print("\n" + "-" * 70)
         print("🤖 MODULE 2 LLM RESPONSE DEBUG")
@@ -256,7 +323,7 @@ async def chat_stream_endpoint(req: ChatRequest):
             _conn_end = full_response.index('{~END~}')
             _conn_json_str = full_response[_conn_start + len('{~CONNECTIONS~}'):_conn_end].strip()
             try:
-                _conn_data = _json.loads(_conn_json_str)
+                _conn_data = json.loads(_conn_json_str)
                 print(f"📋 Connections parsed: {len(_conn_data)} items")
                 for _c in _conn_data:
                     print(f"   • id={_c.get('id')}  chatId={_c.get('chatId','?')[:12]}  "
@@ -265,7 +332,7 @@ async def chat_stream_endpoint(req: ChatRequest):
                         print(f"     userAsked: {_c['userAsked'][:60]}")
                     if _c.get('text'):
                         print(f"     insight: {_c['text'][:60]}")
-            except _json.JSONDecodeError as _e:
+            except json.JSONDecodeError as _e:
                 print(f"   ⚠️  Connection JSON parse error: {_e}")
                 print(f"   Raw: {_conn_json_str[:200]}")
         elif _markers:
@@ -283,7 +350,6 @@ async def chat_stream_endpoint(req: ChatRequest):
             conn_start = clean_response.find("{~CONNECTIONS~}")
             if conn_start != -1:
                 clean_response = clean_response[:conn_start].strip()
-            import re
             clean_response = re.sub(r'\{~\d+\}', '', clean_response)
 
             messages_for_meta = [{"role": m.role, "content": m.content} for m in req.messages]
@@ -299,7 +365,7 @@ async def chat_stream_endpoint(req: ChatRequest):
         if not isinstance(metadata, dict):
             metadata = {}
 
-        yield f"data: {_json.dumps({'type': 'done', 'response': full_response, 'topic': metadata.get('topic', {}), 'concepts': metadata.get('concepts', [])})}\n\n"
+        yield f"data: {json.dumps({'type': 'done', 'response': full_response, 'topic': metadata.get('topic', {}), 'concepts': metadata.get('concepts', [])})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -307,8 +373,6 @@ async def chat_stream_endpoint(req: ChatRequest):
 @app.post("/api/sidebar/refresh")
 async def sidebar_refresh(req: SidebarRefreshRequest):
     """Generate sidebar modules (status + directions) in parallel."""
-    import json
-
     recent_msgs = req.messages[-6:]
     current_messages_text = "\n".join(
         [f"{m.role}: {m.content}" for m in recent_msgs]
@@ -447,8 +511,6 @@ async def update_topic_status(req: StatusUpdateRequest):
 @app.post("/api/topic/detect")
 async def detect_topics(req: TopicDetectRequest):
     """Auto-detect topic clusters from unassigned chats."""
-    import json
-
     summaries_json = json.dumps(req.chatSummaries, indent=2)
     existing_topics = json.dumps(
         [{"id": t.id, "name": t.name} for t in req.existingTopics], indent=2
@@ -463,6 +525,148 @@ async def detect_topics(req: TopicDetectRequest):
         json_mode=True,
     )
     return result
+
+
+# ── Study Logging ─────────────────────────────────────────────────────────────
+
+
+@app.post("/api/log")
+async def log_event(req: LogEvent):
+    """Record a study interaction event."""
+    ts = req.timestamp or time.strftime("%Y-%m-%dT%H:%M:%S")
+    conn = _get_db()
+    conn.execute(
+        "INSERT INTO events (user_id, condition, event_type, event_data, timestamp) VALUES (?,?,?,?,?)",
+        (req.userId, req.condition, req.eventType, json.dumps(req.data), ts),
+    )
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# ── Data Sync ─────────────────────────────────────────────────────────────────
+
+
+@app.post("/api/sync")
+async def sync_push(req: SyncRequest):
+    """Store a full loom_data blob for a user."""
+    conn = _get_db()
+    conn.execute(
+        "INSERT OR REPLACE INTO user_data (user_id, data, updated_at) VALUES (?,?,?)",
+        (req.userId, json.dumps(req.data), time.strftime("%Y-%m-%dT%H:%M:%S")),
+    )
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.get("/api/sync")
+async def sync_pull(userId: str = Query(...)):
+    """Retrieve stored loom_data blob for a user."""
+    conn = _get_db()
+    row = conn.execute("SELECT data FROM user_data WHERE user_id = ?", (userId,)).fetchone()
+    conn.close()
+    if row:
+        return {"data": json.loads(row[0])}
+    return {"data": None}
+
+
+# ── Directions-Only Endpoint (for shuffle) ────────────────────────────────────
+
+
+@app.post("/api/sidebar/directions")
+async def sidebar_directions(req: DirectionsRequest):
+    """Generate only new direction suggestions (for Module 3 shuffle)."""
+    topic_status_str = req.topicStatus
+    if isinstance(topic_status_str, dict):
+        parts = []
+        for pt in topic_status_str.get("overview", []):
+            parts.append(f"- {pt}")
+        for item in topic_status_str.get("specifics", []):
+            text = item.get("text", item) if isinstance(item, dict) else str(item)
+            level = item.get("level", "") if isinstance(item, dict) else ""
+            parts.append(f"- {text} ({level})" if level else f"- {text}")
+        topic_status_str = "\n".join(parts) if parts else ""
+
+    covered_concepts = "\n".join(
+        [f"- {c.get('title', '')}: {c.get('preview', '')}" for c in req.allConcepts]
+    ) or "None yet."
+
+    directions_prompt = SIDEBAR_NEW_DIRECTIONS_PROMPT.format(
+        topic_name=req.topicName,
+        topic_status=topic_status_str or "No status yet.",
+        covered_concepts=covered_concepts,
+        current_summary=req.currentSummary[:500],
+    )
+
+    result = await llm.chat(
+        [{"role": "user", "content": "Suggest new directions."}],
+        directions_prompt,
+        json_mode=True,
+        model=req.model,
+    )
+    new_directions = []
+    if isinstance(result, dict):
+        new_directions = result.get("newDirections", [])
+    return {"newDirections": new_directions}
+
+
+# ── Baseline Personal Details Extraction ──────────────────────────────────────
+
+
+@app.post("/api/baseline/extract")
+async def baseline_extract(req: BaselineExtractRequest):
+    """Extract personal details from conversation for baseline condition."""
+    existing = "\n".join(f"- {d}" for d in req.existingDetails) or "None yet."
+    messages_text = "\n".join(f"{m.role}: {m.content}" for m in req.messages[-6:])
+    prompt = BASELINE_PERSONAL_DETAILS_PROMPT.format(
+        existing_details=existing,
+        messages=messages_text,
+    )
+    result = await llm.chat(
+        [{"role": "user", "content": "Extract personal details."}],
+        prompt,
+        json_mode=True,
+        model=req.model,
+    )
+    details = []
+    if isinstance(result, dict):
+        details = result.get("details", [])
+    return {"details": details}
+
+
+# ── Admin / Data Export ───────────────────────────────────────────────────────
+
+
+@app.get("/api/admin/events")
+async def admin_events(userId: str = Query(None)):
+    """Export logged events (optionally filtered by user)."""
+    conn = _get_db()
+    if userId:
+        rows = conn.execute(
+            "SELECT user_id, condition, event_type, event_data, timestamp FROM events WHERE user_id = ? ORDER BY id",
+            (userId,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT user_id, condition, event_type, event_data, timestamp FROM events ORDER BY id"
+        ).fetchall()
+    conn.close()
+    return [
+        {"userId": r[0], "condition": r[1], "eventType": r[2], "data": json.loads(r[3]), "timestamp": r[4]}
+        for r in rows
+    ]
+
+
+@app.get("/api/admin/users")
+async def admin_users():
+    """List all users who have logged events."""
+    conn = _get_db()
+    rows = conn.execute(
+        "SELECT DISTINCT user_id, condition FROM events ORDER BY user_id"
+    ).fetchall()
+    conn.close()
+    return [{"userId": r[0], "condition": r[1]} for r in rows]
 
 
 # Serve frontend

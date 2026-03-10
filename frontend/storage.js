@@ -1,7 +1,40 @@
-/* localStorage persistence layer for Loom */
+/* localStorage persistence layer for Loom — per-user keying */
 
 const Storage = {
-  _KEY: 'loom_data',
+  _userId: null,
+  _condition: null,
+
+  // ── User Session ─────────────────────────────────────────────────────
+
+  get _KEY() {
+    return this._userId ? `loom_data_${this._userId}` : 'loom_data';
+  },
+
+  setUser(userId) {
+    this._userId = userId;
+    this._condition = userId.endsWith('-baseline') ? 'baseline' : 'loom';
+    localStorage.setItem('loom_currentUser', userId);
+  },
+
+  getUserId() { return this._userId; },
+  getCondition() { return this._condition || 'loom'; },
+
+  restoreSession() {
+    const saved = localStorage.getItem('loom_currentUser');
+    if (saved) {
+      this.setUser(saved);
+      return true;
+    }
+    return false;
+  },
+
+  logout() {
+    this._userId = null;
+    this._condition = null;
+    localStorage.removeItem('loom_currentUser');
+  },
+
+  // ── Core Data ────────────────────────────────────────────────────────
 
   _getAll() {
     try {
@@ -14,6 +47,7 @@ const Storage = {
 
   _saveAll(data) {
     localStorage.setItem(this._KEY, JSON.stringify(data));
+    this._scheduleSync();
   },
 
   _defaultData() {
@@ -23,7 +57,49 @@ const Storage = {
       messages: {},
       concepts: [],
       currentChatId: null,
+      personalDetails: [],
     };
+  },
+
+  // ── Server Sync (debounced) ──────────────────────────────────────────
+
+  _syncTimer: null,
+  _scheduleSync() {
+    if (!this._userId) return;
+    clearTimeout(this._syncTimer);
+    this._syncTimer = setTimeout(() => this._pushSync(), 3000);
+  },
+
+  async _pushSync() {
+    if (!this._userId) return;
+    try {
+      await fetch('/api/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: this._userId,
+          data: this._getAll(),
+        }),
+      });
+    } catch (e) {
+      console.warn('Sync push failed:', e);
+    }
+  },
+
+  async pullSync() {
+    if (!this._userId) return false;
+    try {
+      const resp = await fetch(`/api/sync?userId=${encodeURIComponent(this._userId)}`);
+      if (!resp.ok) return false;
+      const result = await resp.json();
+      if (result.data) {
+        localStorage.setItem(this._KEY, JSON.stringify(result.data));
+        return true;
+      }
+    } catch (e) {
+      console.warn('Sync pull failed:', e);
+    }
+    return false;
   },
 
   // ── Topics ──────────────────────────────────────────────────────────────
@@ -191,6 +267,18 @@ const Storage = {
       data.concepts = data.concepts.filter(c => c.id !== id);
       this._saveAll(data);
     }
+  },
+
+  // ── Personal Details (baseline condition) ──────────────────────────────
+
+  getPersonalDetails() {
+    return this._getAll().personalDetails || [];
+  },
+
+  setPersonalDetails(details) {
+    const data = this._getAll();
+    data.personalDetails = details;
+    this._saveAll(data);
   },
 
   // ── Bulk helpers ────────────────────────────────────────────────────────

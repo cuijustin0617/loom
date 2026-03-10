@@ -828,3 +828,89 @@ body {
   padding: 7px 12px; border-bottom: 1px solid var(--border);
 }
 .message-content .md-table tbody tr:hover { background: var(--bg-secondary); }
+
+/* ── Login Overlay ────────────────────────────────────────────────────── */
+.login-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  background: var(--main-bg);
+  display: flex; align-items: center; justify-content: center;
+}
+.login-card {
+  text-align: center; max-width: 360px; width: 100%; padding: 40px;
+}
+.login-logo { margin-bottom: 16px; }
+.login-card h2 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+.login-subtitle { font-size: 14px; color: var(--text-secondary); margin-bottom: 24px; }
+.login-card input {
+  width: 100%; padding: 12px 16px; border: 1px solid var(--border);
+  border-radius: 10px; font-size: 15px; font-family: inherit;
+  outline: none; transition: border-color 0.15s;
+}
+.login-card input:focus { border-color: var(--primary); }
+.login-card input.shake { animation: shake 0.3s ease; }
+@keyframes shake { 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
+.login-btn {
+  width: 100%; margin-top: 12px; padding: 12px; border: none;
+  border-radius: 10px; background: var(--primary); color: white;
+  font-size: 15px; font-weight: 600; cursor: pointer; font-family: inherit;
+  transition: background 0.15s;
+}
+.login-btn:hover { background: var(--primary-dark); }
+.login-hint { font-size: 12px; color: var(--text-muted); margin-top: 14px; }
+
+/* ── Logout Button ────────────────────────────────────────────────────── */
+.logout-btn {
+  margin-left: auto; background: none; border: none; cursor: pointer;
+  color: var(--text-muted); padding: 4px; border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+.logout-btn:hover { color: var(--danger); background: rgba(239,68,68,0.08); }
+.user-profile { display: flex; align-items: center; gap: 10px; width: 100%; }
+
+/* ── Baseline Mode ────────────────────────────────────────────────────── */
+body.baseline-mode .module-status,
+body.baseline-mode .module-connections,
+body.baseline-mode .module-directions,
+body.baseline-mode #sidebarRefreshBtn,
+body.baseline-mode .new-topic-btn,
+body.baseline-mode .view-toggle,
+body.baseline-mode .input-topic-select { display: none !important; }
+
+/* Baseline personal details panel */
+.baseline-details { padding: 0; }
+.baseline-details .module-header { margin-bottom: 8px; }
+.baseline-details-list {
+  list-style: disc; padding-left: 20px; font-size: 13px;
+  color: var(--text-primary); line-height: 1.6;
+}
+.baseline-details-list li { margin-bottom: 4px; }
+.baseline-details-empty {
+  font-size: 12px; color: var(--text-muted); font-style: italic;
+}
+
+/* ── Shuffle Button (Module 3) ────────────────────────────────────────── */
+.shuffle-btn {
+  margin-left: auto; background: none; border: none; cursor: pointer;
+  color: var(--text-muted); padding: 3px; border-radius: 4px;
+  transition: color 0.15s, transform 0.2s;
+}
+.shuffle-btn:hover { color: var(--accent-purple); transform: rotate(45deg); }
+.shuffle-btn.loading { pointer-events: none; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Unassign chat from topic */
+.chat-unassign-btn {
+  background: none; border: none; cursor: pointer; padding: 2px;
+  color: var(--text-muted); opacity: 0; transition: opacity 0.15s, color 0.15s;
+}
+.chat-item:hover .chat-unassign-btn { opacity: 1; }
+.chat-unassign-btn:hover { color: var(--accent-amber); }
+
+/* Welcome page shuffle button */
+.welcome-shuffle-btn {
+  display: flex; align-items: center; gap: 6px; margin: 12px auto 0;
+  background: none; border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 16px; cursor: pointer; font-size: 13px; font-family: inherit;
+  color: var(--text-secondary); transition: all 0.15s;
+}
+.welcome-shuffle-btn:hover { border-color: var(--accent-purple); color: var(--accent-purple); }

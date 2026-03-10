@@ -221,3 +221,30 @@ Return JSON:
 }}
 
 If no new topics are detected, return {{ "newTopics": [] }}"""
+
+BASELINE_PERSONAL_DETAILS_PROMPT = """You are a helpful system that extracts personal details about the user from their conversations. Your goal is to maintain a running bullet-point list of what the system knows about the user.
+
+Existing details already known:
+{existing_details}
+
+Recent conversation:
+{messages}
+
+Based on this conversation, update the list of personal details. Include:
+- Background info (education, job, location, etc.)
+- Interests and hobbies
+- Skill levels mentioned
+- Goals and preferences
+- Any personal facts shared
+
+Rules:
+- Keep existing details unless clearly contradicted
+- Add new details discovered in this conversation
+- Merge duplicates; keep the most specific version
+- Each detail should be a concise bullet point (1 short sentence)
+- Return 0-20 total details
+
+Return JSON:
+{{
+  "details": ["detail 1", "detail 2", "detail 3"]
+}}"""
