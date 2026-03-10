@@ -32,6 +32,13 @@ Rules:
 
 CHAT_STREAM_SYSTEM_PROMPT = """You are a helpful AI assistant. Respond naturally and helpfully to the user's message. Be clear and conversational."""
 
+CHAT_STREAM_BASELINE_PROMPT = """You are a helpful AI assistant. Respond naturally and helpfully to the user's message. Be clear and conversational.
+
+Here is what you know about this user from previous conversations. Use this context when it's genuinely relevant to give a more personalized and helpful answer — but do NOT mention the profile explicitly or say things like "based on your profile". Just let it naturally inform your response when appropriate.
+
+User profile:
+{personal_details}"""
+
 CHAT_STREAM_MEMORY_PROMPT = """You are a helpful AI assistant. Respond naturally and helpfully to the user's message. Be clear and conversational.
 
 You have access to the user's past conversations within this topic. Each past chat has a structured summary showing what the user asked and what they learned. When a phrase in your response connects meaningfully to something from the user's past, you may annotate it with a connection marker.

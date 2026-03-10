@@ -45,6 +45,7 @@ class TestDatabaseInit:
         conn.close()
         assert "events" in tables
         assert "user_data" in tables
+        assert "users" in tables
 
     def test_events_columns(self, isolate_db):
         conn = sqlite3.connect(str(isolate_db))
@@ -1014,3 +1015,189 @@ class TestEdgeCases:
             })
         events = client.get("/api/admin/events", params={"userId": "P-bulk"}).json()
         assert len(events) == 100
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# POST /api/auth/login — Password Authentication
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestAuthLogin:
+    def test_first_login_creates_account(self, isolate_db):
+        resp = _client().post("/api/auth/login", json={
+            "userId": "loom01", "password": "secret123",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["isNew"] is True
+        assert data["condition"] == "loom"
+
+    def test_first_login_baseline_condition(self, isolate_db):
+        resp = _client().post("/api/auth/login", json={
+            "userId": "baseline01", "password": "pw",
+        })
+        data = resp.json()
+        assert data["condition"] == "baseline"
+        assert data["isNew"] is True
+
+    def test_second_login_correct_password(self, isolate_db):
+        client = _client()
+        client.post("/api/auth/login", json={"userId": "loom01", "password": "mypass"})
+        resp = client.post("/api/auth/login", json={"userId": "loom01", "password": "mypass"})
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["isNew"] is False
+
+    def test_second_login_wrong_password(self, isolate_db):
+        client = _client()
+        client.post("/api/auth/login", json={"userId": "loom02", "password": "correct"})
+        resp = client.post("/api/auth/login", json={"userId": "loom02", "password": "wrong"})
+        assert resp.status_code == 401
+
+    def test_wrong_password_error_detail(self, isolate_db):
+        client = _client()
+        client.post("/api/auth/login", json={"userId": "loom03", "password": "abc"})
+        resp = client.post("/api/auth/login", json={"userId": "loom03", "password": "xyz"})
+        assert resp.status_code == 401
+        assert "Incorrect password" in resp.json()["detail"]
+
+    def test_empty_userId_rejected(self):
+        resp = _client().post("/api/auth/login", json={
+            "userId": "", "password": "pw",
+        })
+        assert resp.status_code == 400
+
+    def test_empty_password_rejected(self):
+        resp = _client().post("/api/auth/login", json={
+            "userId": "loom01", "password": "",
+        })
+        assert resp.status_code == 400
+
+    def test_whitespace_only_rejected(self):
+        resp = _client().post("/api/auth/login", json={
+            "userId": "   ", "password": "  ",
+        })
+        assert resp.status_code == 400
+
+    def test_missing_fields(self):
+        resp = _client().post("/api/auth/login", json={"userId": "loom01"})
+        assert resp.status_code == 422
+
+    # ── Condition detection (prefix-based) ──────────────────────────────
+
+    def test_condition_loom_prefix(self, isolate_db):
+        resp = _client().post("/api/auth/login", json={"userId": "loom05", "password": "pw"})
+        assert resp.json()["condition"] == "loom"
+
+    def test_condition_loom_mixed_case(self, isolate_db):
+        resp = _client().post("/api/auth/login", json={"userId": "Loom05", "password": "pw"})
+        assert resp.json()["condition"] == "loom"
+
+    def test_condition_baseline_prefix(self, isolate_db):
+        resp = _client().post("/api/auth/login", json={"userId": "baseline05", "password": "pw"})
+        assert resp.json()["condition"] == "baseline"
+
+    def test_condition_baseline_mixed_case(self, isolate_db):
+        resp = _client().post("/api/auth/login", json={"userId": "Baseline05", "password": "pw"})
+        assert resp.json()["condition"] == "baseline"
+
+    def test_condition_unknown_prefix_defaults_loom(self, isolate_db):
+        resp = _client().post("/api/auth/login", json={"userId": "P01", "password": "pw"})
+        assert resp.json()["condition"] == "loom"
+
+    # ── User isolation ──────────────────────────────────────────────────
+
+    def test_different_users_different_passwords(self, isolate_db):
+        client = _client()
+        client.post("/api/auth/login", json={"userId": "loom01", "password": "pass_a"})
+        client.post("/api/auth/login", json={"userId": "loom02", "password": "pass_b"})
+
+        resp_a = client.post("/api/auth/login", json={"userId": "loom01", "password": "pass_a"})
+        resp_b = client.post("/api/auth/login", json={"userId": "loom02", "password": "pass_b"})
+        assert resp_a.status_code == 200
+        assert resp_b.status_code == 200
+
+        resp_cross = client.post("/api/auth/login", json={"userId": "loom01", "password": "pass_b"})
+        assert resp_cross.status_code == 401
+
+    def test_same_person_loom_and_baseline_separate(self, isolate_db):
+        client = _client()
+        r1 = client.post("/api/auth/login", json={"userId": "loom01", "password": "pw1"})
+        r2 = client.post("/api/auth/login", json={"userId": "baseline01", "password": "pw2"})
+        assert r1.json()["condition"] == "loom"
+        assert r2.json()["condition"] == "baseline"
+
+        # Each has its own password
+        assert client.post("/api/auth/login", json={"userId": "loom01", "password": "pw2"}).status_code == 401
+        assert client.post("/api/auth/login", json={"userId": "baseline01", "password": "pw1"}).status_code == 401
+
+    # ── Persistence check ───────────────────────────────────────────────
+
+    def test_user_stored_in_db(self, isolate_db):
+        _client().post("/api/auth/login", json={"userId": "loom07", "password": "p"})
+        conn = sqlite3.connect(str(isolate_db))
+        row = conn.execute("SELECT user_id, condition FROM users WHERE user_id = 'loom07'").fetchone()
+        conn.close()
+        assert row is not None
+        assert row[0] == "loom07"
+        assert row[1] == "loom"
+
+    def test_password_stored_as_hash_not_plaintext(self, isolate_db):
+        _client().post("/api/auth/login", json={"userId": "loom08", "password": "mysecret"})
+        conn = sqlite3.connect(str(isolate_db))
+        row = conn.execute("SELECT password_hash FROM users WHERE user_id = 'loom08'").fetchone()
+        conn.close()
+        assert row[0] != "mysecret"
+        assert len(row[0]) == 64  # SHA-256 hex digest
+
+    def test_twelve_users_all_register(self, isolate_db):
+        client = _client()
+        for i in range(1, 13):
+            resp = client.post("/api/auth/login", json={
+                "userId": f"loom{i:02d}", "password": f"pw_{i}",
+            })
+            assert resp.status_code == 200
+            assert resp.json()["isNew"] is True
+
+        conn = sqlite3.connect(str(isolate_db))
+        count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        conn.close()
+        assert count == 12
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Helper Function Unit Tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestHelperFunctions:
+    def test_parse_condition_loom(self):
+        from main import _parse_condition
+        assert _parse_condition("loom01") == "loom"
+        assert _parse_condition("Loom05") == "loom"
+        assert _parse_condition("LOOM99") == "loom"
+
+    def test_parse_condition_baseline(self):
+        from main import _parse_condition
+        assert _parse_condition("baseline01") == "baseline"
+        assert _parse_condition("Baseline05") == "baseline"
+        assert _parse_condition("BASELINE99") == "baseline"
+
+    def test_parse_condition_unknown_defaults_loom(self):
+        from main import _parse_condition
+        assert _parse_condition("P01") == "loom"
+        assert _parse_condition("test") == "loom"
+        assert _parse_condition("user123") == "loom"
+
+    def test_hash_password_deterministic(self):
+        from main import _hash_password
+        h1 = _hash_password("hello")
+        h2 = _hash_password("hello")
+        assert h1 == h2
+
+    def test_hash_password_different_inputs(self):
+        from main import _hash_password
+        assert _hash_password("abc") != _hash_password("def")
+
+    def test_hash_password_length(self):
+        from main import _hash_password
+        assert len(_hash_password("test")) == 64

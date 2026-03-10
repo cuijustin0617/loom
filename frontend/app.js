@@ -25,18 +25,50 @@ const App = {
   _showLogin() {
     document.getElementById('loginOverlay').style.display = 'flex';
     document.getElementById('appContainer').style.display = 'none';
-    const input = document.getElementById('loginIdInput');
+    const idInput = document.getElementById('loginIdInput');
+    const pwInput = document.getElementById('loginPasswordInput');
     const btn = document.getElementById('loginBtn');
-    input.focus();
-    const doLogin = () => {
-      const id = input.value.trim();
-      if (!id) { input.classList.add('shake'); setTimeout(() => input.classList.remove('shake'), 400); return; }
-      Storage.setUser(id);
-      StudyLog.event('session_start');
-      this._enterApp();
+    const errorEl = document.getElementById('loginError');
+    idInput.focus();
+
+    const doLogin = async () => {
+      const id = idInput.value.trim();
+      const pw = pwInput.value;
+      errorEl.textContent = '';
+      if (!id || !pw) {
+        errorEl.textContent = 'Please enter both ID and password.';
+        (id ? pwInput : idInput).classList.add('shake');
+        setTimeout(() => { idInput.classList.remove('shake'); pwInput.classList.remove('shake'); }, 400);
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = 'Logging in…';
+      try {
+        const resp = await fetch(`${API_BASE}/api/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: id, password: pw }),
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          errorEl.textContent = err.detail || 'Login failed.';
+          btn.disabled = false;
+          btn.textContent = 'Continue';
+          return;
+        }
+        const data = await resp.json();
+        Storage.setUser(id, data.condition);
+        StudyLog.event('session_start', { isNew: data.isNew });
+        this._enterApp();
+      } catch (e) {
+        errorEl.textContent = 'Connection error. Is the server running?';
+        btn.disabled = false;
+        btn.textContent = 'Continue';
+      }
     };
     btn.addEventListener('click', doLogin);
-    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+    pwInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+    idInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') pwInput.focus(); });
   },
 
   _enterApp() {
@@ -415,6 +447,8 @@ const App = {
       model: Storage.getChatModel(),
       useSearch: this.useSearch,
       allChatSummaries: sameTopicSummaries,
+      condition: STUDY_CONDITION,
+      personalDetails: STUDY_CONDITION === 'baseline' ? Storage.getPersonalDetails() : [],
     };
     if (this.pendingAttachments.length > 0) {
       reqBody.attachments = this.pendingAttachments.map(a => ({

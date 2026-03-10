@@ -4,6 +4,7 @@ import os
 import re
 import time
 import json
+import hashlib
 import sqlite3
 import asyncio
 from pathlib import Path
@@ -21,6 +22,7 @@ from embeddings import EmbeddingService, cosine_similarity, rank_by_similarity
 from prompts import (
     CHAT_RESPONSE_PROMPT,
     CHAT_STREAM_SYSTEM_PROMPT,
+    CHAT_STREAM_BASELINE_PROMPT,
     CHAT_STREAM_MEMORY_PROMPT,
     CHAT_METADATA_PROMPT,
     SIDEBAR_NEW_DIRECTIONS_PROMPT,
@@ -80,6 +82,14 @@ def _init_db():
             updated_at TEXT NOT NULL
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id TEXT PRIMARY KEY,
+            password_hash TEXT NOT NULL,
+            condition TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_events_user ON events(user_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type)")
     conn.commit()
@@ -122,6 +132,8 @@ class ChatRequest(BaseModel):
     attachments: list[AttachmentItem] = []
     useSearch: bool = False
     allChatSummaries: list[dict] = []
+    condition: str = "loom"
+    personalDetails: list[str] = []
 
 
 class SidebarRefreshRequest(BaseModel):
@@ -188,7 +200,50 @@ class BaselineExtractRequest(BaseModel):
     model: str | None = None
 
 
+class AuthRequest(BaseModel):
+    userId: str
+    password: str
+
+
+def _hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
+def _parse_condition(user_id: str) -> str:
+    lower = user_id.lower()
+    if lower.startswith("baseline"):
+        return "baseline"
+    return "loom"
+
+
 # ── API Endpoints ────────────────────────────────────────────────────────────
+
+
+@app.post("/api/auth/login")
+async def auth_login(req: AuthRequest):
+    """First login sets password; subsequent logins verify it."""
+    uid = req.userId.strip()
+    if not uid or not req.password.strip():
+        raise HTTPException(400, "User ID and password are required.")
+
+    pw_hash = _hash_password(req.password)
+    condition = _parse_condition(uid)
+    conn = _get_db()
+    row = conn.execute("SELECT password_hash FROM users WHERE user_id = ?", (uid,)).fetchone()
+
+    if row is None:
+        conn.execute(
+            "INSERT INTO users (user_id, password_hash, condition, created_at) VALUES (?,?,?,?)",
+            (uid, pw_hash, condition, time.strftime("%Y-%m-%dT%H:%M:%S")),
+        )
+        conn.commit()
+        conn.close()
+        return {"ok": True, "condition": condition, "isNew": True}
+
+    conn.close()
+    if row[0] != pw_hash:
+        raise HTTPException(401, "Incorrect password.")
+    return {"ok": True, "condition": condition, "isNew": False}
 
 
 @app.post("/api/chat")
@@ -274,7 +329,15 @@ async def chat_stream_endpoint(req: ChatRequest):
                 print(f"❌ EMBEDDING ERROR (silently caught): {type(e).__name__}: {e}")
 
     print(f"\n🧠 Past chats injected into prompt: {len(past_chats_for_prompt)}")
-    if past_chats_for_prompt:
+    if req.condition == "baseline" and req.personalDetails:
+        details_str = "\n".join(f"- {d}" for d in req.personalDetails)
+        prompt_mode = "BASELINE prompt (with user profile)"
+        system_prompt = CHAT_STREAM_BASELINE_PROMPT.format(personal_details=details_str)
+        print(f"   📋 Baseline profile: {len(req.personalDetails)} details")
+    elif req.condition == "baseline":
+        prompt_mode = "BASELINE prompt (no profile yet)"
+        system_prompt = CHAT_STREAM_SYSTEM_PROMPT
+    elif past_chats_for_prompt:
         prompt_mode = "MEMORY prompt (with connections)"
         system_prompt = CHAT_STREAM_MEMORY_PROMPT.format(
             past_chats_json=json.dumps(past_chats_for_prompt, indent=2)

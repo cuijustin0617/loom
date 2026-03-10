@@ -10,10 +10,11 @@ const Storage = {
     return this._userId ? `loom_data_${this._userId}` : 'loom_data';
   },
 
-  setUser(userId) {
+  setUser(userId, condition) {
     this._userId = userId;
-    this._condition = userId.endsWith('-baseline') ? 'baseline' : 'loom';
+    this._condition = condition || (userId.toLowerCase().startsWith('baseline') ? 'baseline' : 'loom');
     localStorage.setItem('loom_currentUser', userId);
+    localStorage.setItem('loom_currentCondition', this._condition);
   },
 
   getUserId() { return this._userId; },
@@ -22,7 +23,8 @@ const Storage = {
   restoreSession() {
     const saved = localStorage.getItem('loom_currentUser');
     if (saved) {
-      this.setUser(saved);
+      const cond = localStorage.getItem('loom_currentCondition');
+      this.setUser(saved, cond);
       return true;
     }
     return false;
@@ -32,6 +34,7 @@ const Storage = {
     this._userId = null;
     this._condition = null;
     localStorage.removeItem('loom_currentUser');
+    localStorage.removeItem('loom_currentCondition');
   },
 
   // ── Core Data ────────────────────────────────────────────────────────

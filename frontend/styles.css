@@ -846,8 +846,13 @@ body {
   border-radius: 10px; font-size: 15px; font-family: inherit;
   outline: none; transition: border-color 0.15s;
 }
+.login-card input + input { margin-top: 10px; }
 .login-card input:focus { border-color: var(--primary); }
 .login-card input.shake { animation: shake 0.3s ease; }
+.login-error {
+  font-size: 13px; color: var(--danger); min-height: 20px;
+  margin-top: 8px; margin-bottom: 0;
+}
 @keyframes shake { 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
 .login-btn {
   width: 100%; margin-top: 12px; padding: 12px; border: none;

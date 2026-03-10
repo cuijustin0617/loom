@@ -18,10 +18,12 @@
         </svg>
       </div>
       <h2>Welcome to Loom</h2>
-      <p class="login-subtitle">Enter your participant ID to continue</p>
-      <input type="text" id="loginIdInput" placeholder="e.g., P01-loom or P01-baseline" autocomplete="off" spellcheck="false">
+      <p class="login-subtitle">Enter your participant ID and set a password</p>
+      <input type="text" id="loginIdInput" placeholder="e.g., loom01 or baseline01" autocomplete="off" spellcheck="false">
+      <input type="password" id="loginPasswordInput" placeholder="Password" autocomplete="off">
+      <p class="login-error" id="loginError"></p>
       <button class="login-btn" id="loginBtn">Continue</button>
-      <p class="login-hint">Your ID determines your study condition.</p>
+      <p class="login-hint">First login creates your account. Use the same password to return.</p>
     </div>
   </div>
 
