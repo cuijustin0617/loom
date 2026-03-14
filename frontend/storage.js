@@ -42,7 +42,16 @@ const Storage = {
   _getAll() {
     try {
       const raw = localStorage.getItem(this._KEY);
-      return raw ? JSON.parse(raw) : this._defaultData();
+      if (!raw) return this._defaultData();
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return this._defaultData();
+      }
+      const defaults = this._defaultData();
+      for (const key of Object.keys(defaults)) {
+        if (!(key in parsed)) parsed[key] = defaults[key];
+      }
+      return parsed;
     } catch {
       return this._defaultData();
     }
@@ -152,6 +161,7 @@ const Storage = {
 
   migrateTopicColors() {
     const data = this._getAll();
+    if (!data || !Array.isArray(data.topics)) return;
     const topics = data.topics;
     if (!topics || topics.length === 0) return;
     const needsMigration = topics.some(t => t.colorHue === undefined || t.colorHue === null);
@@ -302,6 +312,7 @@ const Storage = {
 
   async reEmbedChats() {
     const data = this._getAll();
+    if (!data || !Array.isArray(data.chats)) return;
     const chats = data.chats.filter(c => c.summary && c.summary.trim());
     if (!chats.length) return;
 

@@ -91,8 +91,8 @@ const App = {
       document.body.classList.remove('baseline-mode');
     }
 
-    Storage.migrateTopicColors();
-    Storage.reEmbedChats();
+    try { Storage.migrateTopicColors(); } catch (e) { console.warn('migrateTopicColors failed:', e); }
+    try { Storage.reEmbedChats(); } catch (e) { console.warn('reEmbedChats failed:', e); }
     Sidebar.init();
     this._bindEvents();
     this._loadState();
@@ -101,11 +101,10 @@ const App = {
     this.inactivityTimer.start();
 
     if (STUDY_CONDITION === 'loom') {
-      this._migrateStructuredSummaries();
-      this._migrateStatusToThreads();
+      try { this._migrateStructuredSummaries(); } catch (e) { console.warn('migrateStructuredSummaries failed:', e); }
+      try { this._migrateStatusToThreads(); } catch (e) { console.warn('migrateStatusToThreads failed:', e); }
     }
 
-    // Try restoring from server backup if localStorage is empty
     const chats = Storage.getChats();
     if (chats.length === 0) {
       Storage.pullSync();
@@ -254,7 +253,7 @@ const App = {
       if (rafId) cancelAnimationFrame(rafId);
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
-      
+
       // Delay removing the drag-moved flag slightly so click events can see it
       setTimeout(() => {
         handle.dataset.dragMoved = 'false';
@@ -288,7 +287,7 @@ const App = {
       if (handle && handle.dataset.dragMoved === 'true') {
         return; // Ignore click if it was a drag
       }
-      
+
       const collapsed = sidebar.classList.toggle('collapsed');
       const svg = btn.querySelector('svg');
       if (side === 'left') {
