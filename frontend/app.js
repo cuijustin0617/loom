@@ -1558,6 +1558,26 @@ const App = {
         question: dirs[0].question || '',
       });
     }
+    // Ensure at least 2 cards by pulling extra directions from existing topics
+    if (cards.length < 2) {
+      for (const topic of topics) {
+        if (cards.length >= 2) break;
+        if (!topic.sidebarCache) continue;
+        const dirs = topic.sidebarCache.newDirections || [];
+        for (let i = 1; i < dirs.length && cards.length < 2; i++) {
+          const already = cards.some(c => c.topicId === topic.id && c.question === dirs[i].question);
+          if (already) continue;
+          cards.push({
+            topicId: topic.id,
+            topicName: topic.name,
+            topicColorObj: topic,
+            statusSummary: Sidebar._serializeStatus(topic.statusSummary) || '',
+            title: dirs[i].title || '',
+            question: dirs[i].question || '',
+          });
+        }
+      }
+    }
     return cards;
   },
 
