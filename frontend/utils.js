@@ -108,6 +108,10 @@ const Utils = {
 
     // Use marked.js for proper markdown parsing
     const renderer = new marked.Renderer();
+    renderer.link = ({ href, text }) => {
+      const escaped = this.escapeHtml(href || '');
+      return `<a href="${escaped}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+    };
     renderer.code = ({ text: code, lang }) => {
       const label = (lang || 'code').charAt(0).toUpperCase() + (lang || 'code').slice(1);
       return `<div class="code-block-wrapper"><div class="code-block-header"><span class="code-lang-label">${this.escapeHtml(label)}</span><button class="code-copy-btn" onclick="navigator.clipboard.writeText(this.closest('.code-block-wrapper').querySelector('code').textContent).then(()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='\\u29C9',1500)})">⧉</button></div><pre class="code-block"><code>${this.escapeHtml(code)}</code></pre></div>`;

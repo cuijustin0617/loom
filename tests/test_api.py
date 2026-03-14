@@ -2958,3 +2958,140 @@ class TestBug4StatusPromptNotes:
     def test_prompt_mentions_stated_expertise(self):
         from prompts import STATUS_UPDATE_PROMPT
         assert "stated expertise" in STATUS_UPDATE_PROMPT
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# POST /api/topic/status/ai-edit
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestAiOverviewEdit:
+    def test_basic_ai_edit(self):
+        mock_result = {"overview": ["Knows Python", "Interested in ML"]}
+        with patch("main.llm") as m:
+            m.chat = AsyncMock(return_value=mock_result)
+            data = _get_client().post("/api/topic/status/ai-edit", json={
+                "topicName": "ML",
+                "overview": ["Interested in ML"],
+                "instruction": "Add that I know Python",
+            }).json()
+            assert "overview" in data
+            assert len(data["overview"]) == 2
+
+    def test_add_bullet(self):
+        mock_result = {"overview": ["CS student", "Knows Python"]}
+        with patch("main.llm") as m:
+            m.chat = AsyncMock(return_value=mock_result)
+            _get_client().post("/api/topic/status/ai-edit", json={
+                "topicName": "ML",
+                "overview": ["CS student"],
+                "instruction": "add that I know Python",
+            })
+            system_prompt = m.chat.call_args[0][1]
+            assert "know Python" in system_prompt
+            assert "CS student" in system_prompt
+
+    def test_empty_overview(self):
+        mock_result = {"overview": ["Beginner in ML"]}
+        with patch("main.llm") as m:
+            m.chat = AsyncMock(return_value=mock_result)
+            resp = _get_client().post("/api/topic/status/ai-edit", json={
+                "topicName": "ML",
+                "overview": [],
+                "instruction": "I'm a beginner in ML",
+            })
+            assert resp.status_code == 200
+            assert len(resp.json()["overview"]) == 1
+
+    def test_missing_instruction_returns_422(self):
+        resp = _get_client().post("/api/topic/status/ai-edit", json={
+            "topicName": "ML",
+            "overview": ["test"],
+        })
+        assert resp.status_code == 422
+
+    def test_missing_topicName_returns_422(self):
+        resp = _get_client().post("/api/topic/status/ai-edit", json={
+            "overview": ["test"],
+            "instruction": "change something",
+        })
+        assert resp.status_code == 422
+
+    def test_model_forwarded(self):
+        mock_result = {"overview": ["updated"]}
+        with patch("main.llm") as m:
+            m.chat = AsyncMock(return_value=mock_result)
+            _get_client().post("/api/topic/status/ai-edit", json={
+                "topicName": "ML",
+                "overview": ["old"],
+                "instruction": "update it",
+                "model": "gemini-3.1-pro-preview",
+            })
+            kwargs = m.chat.call_args.kwargs
+            assert kwargs.get("model") == "gemini-3.1-pro-preview"
+
+    def test_model_default_none(self):
+        mock_result = {"overview": ["updated"]}
+        with patch("main.llm") as m:
+            m.chat = AsyncMock(return_value=mock_result)
+            _get_client().post("/api/topic/status/ai-edit", json={
+                "topicName": "ML",
+                "overview": ["old"],
+                "instruction": "update it",
+            })
+            kwargs = m.chat.call_args.kwargs
+            assert kwargs.get("model") is None
+
+    def test_llm_error_returns_500(self):
+        with patch("main.llm") as m:
+            m.chat = AsyncMock(side_effect=Exception("LLM down"))
+            resp = _get_client().post("/api/topic/status/ai-edit", json={
+                "topicName": "ML",
+                "overview": ["old"],
+                "instruction": "update it",
+            })
+            assert resp.status_code == 500
+
+    def test_prompt_contains_overview_and_instruction(self):
+        mock_result = {"overview": ["updated"]}
+        with patch("main.llm") as m:
+            m.chat = AsyncMock(return_value=mock_result)
+            _get_client().post("/api/topic/status/ai-edit", json={
+                "topicName": "Cooking",
+                "overview": ["Enjoys baking", "Vegetarian"],
+                "instruction": "I no longer avoid meat",
+            })
+            system_prompt = m.chat.call_args[0][1]
+            assert "Enjoys baking" in system_prompt
+            assert "Vegetarian" in system_prompt
+            assert "I no longer avoid meat" in system_prompt
+            assert "Cooking" in system_prompt
+
+
+class TestAiOverviewEditPydantic:
+    def test_ai_edit_request_defaults(self):
+        from main import OverviewAiEditRequest
+        r = OverviewAiEditRequest(topicName="ML", instruction="test")
+        assert r.overview == []
+        assert r.model is None
+
+    def test_ai_edit_request_model_field(self):
+        from main import OverviewAiEditRequest
+        r = OverviewAiEditRequest(topicName="ML", instruction="test", model="gemini-3-flash-preview")
+        assert r.model == "gemini-3-flash-preview"
+
+
+class TestFrontendAiOverviewEdit:
+    def test_ai_edit_button_in_sidebar_js(self):
+        js = _get_client().get("/static/sidebar.js").text
+        assert "_showAiEditPrompt" in js
+        assert "_submitAiEdit" in js
+
+    def test_ai_edit_css_classes(self):
+        css = _get_client().get("/static/styles.css").text
+        assert ".overview-ai-edit-btn" in css
+        assert ".overview-ai-prompt" in css
+
+    def test_ai_edit_prompt_import(self):
+        from pathlib import Path
+        main_py = (Path(__file__).parent.parent / "backend" / "main.py").read_text()
+        assert "OVERVIEW_AI_EDIT_PROMPT" in main_py

@@ -218,8 +218,14 @@ class LLMRouter:
         async for chunk in await client.aio.models.generate_content_stream(
             model=model, contents=contents, config=config,
         ):
-            if chunk.text:
-                yield chunk.text
+            text = chunk.text
+            if not text:
+                continue
+            if use_search:
+                text = re.sub(r'google:search\{[^}]*\}', '', text)
+                if not text.strip():
+                    continue
+            yield text
 
     async def _openai_stream(
         self, messages: list[dict], system_prompt: str,

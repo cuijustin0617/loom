@@ -320,3 +320,30 @@ Return JSON:
 {{
   "details": ["detail 1", "detail 2", "detail 3"]
 }}"""
+
+OVERVIEW_AI_EDIT_PROMPT = """You edit a user's learning overview based on their natural-language instruction.
+
+Topic: {topic_name}
+Current overview bullet points:
+{current_overview}
+
+User's instruction: {instruction}
+
+Apply the user's instruction to the overview. You may:
+- Add new bullet points if the user provides new information about themselves
+- Edit existing bullet points to reflect updated goals, focus, or context
+- Remove bullet points the user says are no longer relevant
+- Rephrase or merge bullet points for clarity
+- Reorder if it improves logical flow
+
+Rules:
+- Preserve existing bullets that are NOT affected by the instruction
+- Keep each bullet to 1 short-medium line (same style as the existing ones)
+- Return 1-6 bullet points total
+- Do NOT invent information the user didn't provide or imply
+- If the instruction is unclear, make the most reasonable interpretation
+
+Return JSON:
+{{
+  "overview": ["updated point 1", "updated point 2"]
+}}"""

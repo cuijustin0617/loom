@@ -507,7 +507,7 @@ const App = {
             const assistantMsgId = 'msg_' + Utils.generateId();
             this._finalizeStreamingMessage(assistantEl, fullResponse, assistantMsgId);
 
-            const { mainText: cleanContent, connectionsJson: savedConns } = this._stripConnectionBlock(fullResponse);
+            const { mainText: cleanContent, connectionsJson: savedConns } = this._stripConnectionBlock(this._stripSearchArtifacts(fullResponse));
             console.log('[Module2] connections parsed:', savedConns?.length || 0);
             const cleanText = cleanContent.replace(/\{~\d+\}/g, '');
             const assistantMsg = {
@@ -777,6 +777,10 @@ const App = {
       '<span class="conn-marker loading" data-conn-id="$2">$1<span class="conn-dots"></span></span>');
   },
 
+  _stripSearchArtifacts(text) {
+    return text.replace(/google:search\{[^}]*\}/g, '').replace(/\n{3,}/g, '\n\n');
+  },
+
   _stripConnectionBlock(text) {
     const connStart = text.indexOf('{~CONNECTIONS~}');
     if (connStart === -1) return { mainText: text, connectionsJson: null };
@@ -794,7 +798,7 @@ const App = {
 
   _updateStreamingMessage(el, text) {
     const contentEl = el.querySelector('.message-content');
-    const { mainText } = this._stripConnectionBlock(text);
+    const { mainText } = this._stripConnectionBlock(this._stripSearchArtifacts(text));
     const rendered = Utils.renderMarkdown(mainText);
     const withMarkers = this._parseConnectionMarkers(rendered);
     contentEl.innerHTML = withMarkers + '<span class="streaming-cursor"></span>';
@@ -802,7 +806,7 @@ const App = {
 
   _finalizeStreamingMessage(el, text, msgId) {
     const contentEl = el.querySelector('.message-content');
-    const { mainText, connectionsJson } = this._stripConnectionBlock(text);
+    const { mainText, connectionsJson } = this._stripConnectionBlock(this._stripSearchArtifacts(text));
     const markersInMainText = mainText.match(/\{~\d+\}/g);
     console.log('[Module2 finalize] mainText markers:', markersInMainText);
     console.log('[Module2 finalize] connectionsJson:', connectionsJson?.length || 0);

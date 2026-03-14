@@ -14,6 +14,7 @@ from prompts import (
     STATUS_UPDATE_PROMPT,
     CHAT_SUMMARIZE_PROMPT,
     TOPIC_AUTO_DETECT_PROMPT,
+    OVERVIEW_AI_EDIT_PROMPT,
 )
 
 
@@ -294,3 +295,25 @@ class TestStatusUpdatePromptLabels:
     def test_unlabeled_treated_as_skimmed(self):
         result = self._formatted()
         assert "skimmed" in result.lower() or "briefly" in result.lower()
+
+
+class TestOverviewAiEditPrompt:
+    def test_formats_all_fields(self):
+        result = OVERVIEW_AI_EDIT_PROMPT.format(
+            topic_name="ML",
+            current_overview="- CS student\n- Knows Python",
+            instruction="Add that I'm interested in NLP",
+        )
+        assert "ML" in result
+        assert "CS student" in result
+        assert "NLP" in result
+
+    def test_contains_json_instruction(self):
+        assert '"overview"' in OVERVIEW_AI_EDIT_PROMPT
+        assert "JSON" in OVERVIEW_AI_EDIT_PROMPT or "json" in OVERVIEW_AI_EDIT_PROMPT.lower()
+
+    def test_mentions_add_edit_remove(self):
+        lower = OVERVIEW_AI_EDIT_PROMPT.lower()
+        assert "add" in lower
+        assert "edit" in lower
+        assert "remove" in lower

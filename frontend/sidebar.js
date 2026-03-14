@@ -261,7 +261,7 @@ const Sidebar = {
 
     if (overview.length > 0) {
       const overviewCollapsed = localStorage.getItem('loom_overviewCollapsed') === 'true';
-      html += '<div class="status-section"><div class="status-section-label collapsible' + (overviewCollapsed ? ' section-collapsed' : '') + '" data-section-toggle="overview"><span class="section-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="8" height="8"><polyline points="6 9 12 15 18 9"/></svg></span>Overview</div><div class="status-section-items' + (overviewCollapsed ? ' section-collapsed' : '') + '" data-section-items="overview">';
+      html += '<div class="status-section"><div class="status-section-label collapsible' + (overviewCollapsed ? ' section-collapsed' : '') + '" data-section-toggle="overview"><span class="section-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="8" height="8"><polyline points="6 9 12 15 18 9"/></svg></span>Overview<button class="overview-ai-edit-btn" title="AI edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="10" height="10"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/><path d="M18 14l1 3 3 1-3 1-1 3-1-3-3-1 3-1 1-3z"/></svg></button></div><div class="overview-ai-prompt-slot"></div><div class="status-section-items' + (overviewCollapsed ? ' section-collapsed' : '') + '" data-section-items="overview">';
       overview.forEach((pt, i) => {
         html += `<div class="status-item" data-section="overview" data-idx="${i}">
           <span class="status-item-text">${Utils.escapeHtml(pt)}</span>
@@ -406,6 +406,15 @@ const Sidebar = {
         this._startThreadStepEdit(step, ti, si);
       });
     });
+
+    // AI-edit button for overview
+    container.querySelectorAll('.overview-ai-edit-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        this._showAiEditPrompt();
+      });
+    });
   },
 
   _startInlineEdit(item, section, idx) {
@@ -546,6 +555,83 @@ const Sidebar = {
     Storage.saveTopic(topic);
     this._renderStatus(topic.statusSummary);
     StudyLog.event('summary_edited', { topicId: this.currentTopicId, section: 'threads', editType: 'edit_step', oldValue, newValue: newText });
+  },
+
+  _showAiEditPrompt() {
+    const container = this._getStatusContainer();
+    if (!container) return;
+    const slot = container.querySelector('.overview-ai-prompt-slot');
+    if (!slot) return;
+    const existing = slot.querySelector('.overview-ai-prompt');
+    if (existing) { existing.remove(); return; }
+
+    const row = document.createElement('div');
+    row.className = 'overview-ai-prompt';
+    row.innerHTML = `<textarea class="overview-ai-input" placeholder="Describe a change..." rows="1"></textarea><button class="overview-ai-send" title="Apply"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>`;
+    slot.appendChild(row);
+
+    const input = row.querySelector('.overview-ai-input');
+    const sendBtn = row.querySelector('.overview-ai-send');
+    input.focus();
+    input.addEventListener('input', () => {
+      input.style.height = 'auto';
+      input.style.height = input.scrollHeight + 'px';
+    });
+
+    const submit = () => {
+      const text = input.value.trim();
+      if (!text) return;
+      this._submitAiEdit(text, row, sendBtn);
+    };
+    const dismiss = () => { row.remove(); };
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
+      if (e.key === 'Escape') dismiss();
+    });
+    sendBtn.addEventListener('click', (e) => { e.stopPropagation(); submit(); });
+  },
+
+  async _submitAiEdit(instruction, promptRow, sendBtn) {
+    if (!this.currentTopicId) return;
+    const topic = Storage.getTopic(this.currentTopicId);
+    if (!topic || typeof topic.statusSummary !== 'object') return;
+    const overview = topic.statusSummary.overview || [];
+
+    const input = promptRow.querySelector('.overview-ai-input');
+    input.disabled = true;
+    sendBtn.disabled = true;
+    sendBtn.classList.add('loading');
+
+    try {
+      const resp = await fetch('/api/topic/status/ai-edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topicName: topic.name,
+          overview,
+          instruction,
+          model: Storage.getSidebarModel(),
+        }),
+      });
+      const data = await resp.json();
+      const newOverview = data.overview || overview;
+      topic.statusSummary.overview = newOverview;
+      topic.statusLastUpdated = Utils.timestamp();
+      if (topic.sidebarCache && topic.sidebarCache.statusUpdate) {
+        topic.sidebarCache.statusUpdate.overview = newOverview;
+      }
+      Storage.saveTopic(topic);
+      this._renderStatus(topic.statusSummary);
+      Utils.showToast('Overview updated', 'success');
+      StudyLog.event('summary_ai_edited', { topicId: this.currentTopicId, instruction });
+    } catch (err) {
+      console.error('AI overview edit failed:', err);
+      Utils.showToast('AI edit failed', 'error');
+      input.disabled = false;
+      sendBtn.disabled = false;
+      sendBtn.classList.remove('loading');
+    }
   },
 
   _serializeStatus(statusSummary) {

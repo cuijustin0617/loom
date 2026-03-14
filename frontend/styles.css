@@ -1404,6 +1404,85 @@ body {
   display: none;
 }
 
+/* AI-edit button in overview header */
+.overview-ai-edit-btn {
+  background: none;
+  border: none;
+  padding: 0 2px;
+  margin-left: 4px;
+  cursor: pointer;
+  color: var(--accent-blue);
+  transition: color 0.15s ease;
+  vertical-align: middle;
+  line-height: 1;
+}
+
+/* AI-edit inline prompt */
+.overview-ai-prompt-slot {
+  overflow: hidden;
+}
+
+.overview-ai-prompt {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 4px 0 6px 8px;
+  animation: aiPromptSlideIn 0.15s ease-out;
+}
+
+@keyframes aiPromptSlideIn {
+  from { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; }
+  to { opacity: 1; max-height: 80px; }
+}
+
+.overview-ai-input {
+  flex: 1;
+  font-size: 11px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  outline: none;
+  font-family: inherit;
+  line-height: 1.4;
+  resize: none;
+  overflow: hidden;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  min-height: 24px;
+  transition: border-color 0.15s ease;
+}
+
+.overview-ai-input:focus {
+  border-color: var(--accent-blue);
+}
+
+.overview-ai-send {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 6px;
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: color 0.15s ease, border-color 0.15s ease;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.overview-ai-send:hover {
+  color: var(--accent-blue);
+  border-color: var(--accent-blue);
+}
+
+.overview-ai-send.loading {
+  pointer-events: none;
+  animation: spin 0.8s linear infinite;
+}
+
+.overview-ai-send:disabled {
+  opacity: 0.4;
+}
+
 .status-item {
   display: flex;
   align-items: center;

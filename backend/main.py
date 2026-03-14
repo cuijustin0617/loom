@@ -30,6 +30,7 @@ from prompts import (
     CHAT_SUMMARIZE_PROMPT,
     TOPIC_AUTO_DETECT_PROMPT,
     BASELINE_PERSONAL_DETAILS_PROMPT,
+    OVERVIEW_AI_EDIT_PROMPT,
 )
 
 load_dotenv()
@@ -165,6 +166,13 @@ class StatusUpdateRequest(BaseModel):
     topicName: str
     currentStatus: Union[str, dict] = ""
     recentSummaries: list[str] = []
+    model: str | None = None
+
+
+class OverviewAiEditRequest(BaseModel):
+    topicName: str
+    overview: list[str] = []
+    instruction: str
     model: str | None = None
 
 
@@ -580,6 +588,28 @@ async def update_topic_status(req: StatusUpdateRequest):
         model=req.model,
     )
     return result
+
+
+@app.post("/api/topic/status/ai-edit")
+async def ai_edit_overview(req: OverviewAiEditRequest):
+    """Apply a natural-language edit instruction to the overview bullets."""
+    current_overview = "\n".join(f"- {pt}" for pt in req.overview) if req.overview else "(empty)"
+    system_prompt = OVERVIEW_AI_EDIT_PROMPT.format(
+        topic_name=req.topicName,
+        current_overview=current_overview,
+        instruction=req.instruction,
+    )
+    try:
+        result = await llm.chat(
+            [{"role": "user", "content": "Edit the overview."}],
+            system_prompt,
+            json_mode=True,
+            model=req.model,
+        )
+    except Exception as e:
+        raise HTTPException(500, f"LLM error: {str(e)}")
+    overview = result.get("overview", req.overview)
+    return {"overview": overview}
 
 
 @app.post("/api/topic/detect")
