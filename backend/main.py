@@ -178,6 +178,7 @@ class DirectionsRequest(BaseModel):
     topicStatus: Union[str, dict] = ""
     allConcepts: list[dict] = []
     currentSummary: str = ""
+    previouslySuggested: list[str] = []
     model: str | None = None
 
 
@@ -214,6 +215,33 @@ def _parse_condition(user_id: str) -> str:
     if lower.startswith("baseline"):
         return "baseline"
     return "loom"
+
+
+def _serialize_status_to_str(status) -> str:
+    """Convert structured status (dict with overview + threads/specifics) to a string for prompts."""
+    if isinstance(status, str):
+        return status
+    if not isinstance(status, dict):
+        return str(status) if status else ""
+    parts = []
+    for pt in status.get("overview", []):
+        parts.append(f"- {pt}")
+    # New threads format
+    for thread in status.get("threads", []):
+        label = thread.get("label", "Thread")
+        steps = thread.get("steps", [])
+        step_strs = []
+        for s in steps:
+            text = s.get("text", s) if isinstance(s, dict) else str(s)
+            level = s.get("level", "") if isinstance(s, dict) else ""
+            step_strs.append(f"{text} ({level})" if level else text)
+        parts.append(f"- Thread: {label}: {' → '.join(step_strs)}")
+    # Legacy specifics format
+    for item in status.get("specifics", []):
+        text = item.get("text", item) if isinstance(item, dict) else str(item)
+        level = item.get("level", "") if isinstance(item, dict) else ""
+        parts.append(f"- {text} ({level})" if level else f"- {text}")
+    return "\n".join(parts) if parts else ""
 
 
 # ── API Endpoints ────────────────────────────────────────────────────────────
@@ -442,16 +470,7 @@ async def sidebar_refresh(req: SidebarRefreshRequest):
     )
 
     # Serialize structured status to string for prompts
-    topic_status_str = req.topicStatus
-    if isinstance(topic_status_str, dict):
-        parts = []
-        for pt in topic_status_str.get("overview", []):
-            parts.append(f"- {pt}")
-        for item in topic_status_str.get("specifics", []):
-            text = item.get("text", item) if isinstance(item, dict) else str(item)
-            level = item.get("level", "") if isinstance(item, dict) else ""
-            parts.append(f"- {text} ({level})" if level else f"- {text}")
-        topic_status_str = "\n".join(parts) if parts else ""
+    topic_status_str = _serialize_status_to_str(req.topicStatus)
 
     covered_concepts = "\n".join(
         [f"- {c.get('title', '')}: {c.get('preview', '')}" for c in req.allConcepts]
@@ -462,6 +481,7 @@ async def sidebar_refresh(req: SidebarRefreshRequest):
         topic_status=topic_status_str or "No status yet.",
         covered_concepts=covered_concepts,
         current_summary=current_messages_text[:500],
+        previously_suggested="None",
     )
 
     recent_summaries_text = "\n".join(
@@ -501,7 +521,7 @@ async def sidebar_refresh(req: SidebarRefreshRequest):
 
     status_update = None
     if isinstance(status_result, dict):
-        if "overview" in status_result:
+        if "overview" in status_result or "threads" in status_result:
             status_update = status_result
         elif "status" in status_result:
             status_update = status_result.get("status")
@@ -545,16 +565,7 @@ async def rank_candidates(req: RankRequest):
 @app.post("/api/topic/status/update")
 async def update_topic_status(req: StatusUpdateRequest):
     """Incrementally update topic status summary."""
-    current = req.currentStatus
-    if isinstance(current, dict):
-        parts = []
-        for pt in current.get("overview", []):
-            parts.append(f"- {pt}")
-        for item in current.get("specifics", []):
-            text = item.get("text", item) if isinstance(item, dict) else str(item)
-            level = item.get("level", "") if isinstance(item, dict) else ""
-            parts.append(f"- {text} ({level})" if level else f"- {text}")
-        current = "\n".join(parts) if parts else ""
+    current = _serialize_status_to_str(req.currentStatus)
     recent_text = "\n".join([f"- {s}" for s in req.recentSummaries]) or "No chats yet."
     system_prompt = STATUS_UPDATE_PROMPT.format(
         topic_name=req.topicName,
@@ -640,26 +651,20 @@ async def sync_pull(userId: str = Query(...)):
 @app.post("/api/sidebar/directions")
 async def sidebar_directions(req: DirectionsRequest):
     """Generate only new direction suggestions (for Module 3 shuffle)."""
-    topic_status_str = req.topicStatus
-    if isinstance(topic_status_str, dict):
-        parts = []
-        for pt in topic_status_str.get("overview", []):
-            parts.append(f"- {pt}")
-        for item in topic_status_str.get("specifics", []):
-            text = item.get("text", item) if isinstance(item, dict) else str(item)
-            level = item.get("level", "") if isinstance(item, dict) else ""
-            parts.append(f"- {text} ({level})" if level else f"- {text}")
-        topic_status_str = "\n".join(parts) if parts else ""
+    topic_status_str = _serialize_status_to_str(req.topicStatus)
 
     covered_concepts = "\n".join(
         [f"- {c.get('title', '')}: {c.get('preview', '')}" for c in req.allConcepts]
     ) or "None yet."
+
+    previously_suggested_str = ", ".join(req.previouslySuggested) if req.previouslySuggested else "None"
 
     directions_prompt = SIDEBAR_NEW_DIRECTIONS_PROMPT.format(
         topic_name=req.topicName,
         topic_status=topic_status_str or "No status yet.",
         covered_concepts=covered_concepts,
         current_summary=req.currentSummary[:500],
+        previously_suggested=previously_suggested_str,
     )
 
     result = await llm.chat(

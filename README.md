@@ -65,7 +65,7 @@ loom/
 - **Backend**: Python FastAPI – stateless; all persistence lives in the browser's `localStorage`
 - **Frontend**: Vanilla HTML/CSS/JS – no build step
 - **LLM**: OpenAI GPT or Google Gemini (selectable per-chat in the UI)
-- **Embeddings**: OpenAI `text-embedding-3-small` or Gemini `text-embedding-004`
+- **Embeddings**: OpenAI `text-embedding-3-small` or Gemini `gemini-embedding-001`
 - **Ranking**: Cosine similarity on embeddings for relevance scoring
 
 ## Sidebar Modules

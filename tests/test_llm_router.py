@@ -164,7 +164,7 @@ class TestLLMRouterInit:
         assert router.provider == "openai"
 
     def test_default_model_constant(self):
-        assert DEFAULT_MODEL == "gemini-2.5-flash"
+        assert DEFAULT_MODEL == "gemini-3-flash-preview"
 
 
 # ── LLMRouter.chat with mocked OpenAI ─────────────────────────────────────────
@@ -538,7 +538,7 @@ class TestModelRouting:
         with patch("google.genai.Client", return_value=mock_client):
             result = await router.chat([{"role": "user", "content": "hi"}], "sys")
             call_kwargs = mock_client.aio.models.generate_content.call_args.kwargs
-            assert call_kwargs["model"] == "gemini-2.5-flash"
+            assert call_kwargs["model"] == "gemini-3-flash-preview"
 
     @pytest.mark.asyncio
     async def test_gpt5_nano_routes_to_openai(self):
@@ -609,7 +609,7 @@ class TestModelRouting:
         mock_client = _gemini_mock('{"ok": true}')
         with patch("google.genai.Client", return_value=mock_client):
             await router.chat([{"role": "user", "content": "hi"}], "sys", model=None)
-            assert mock_client.aio.models.generate_content.call_args.kwargs["model"] == "gemini-2.5-flash"
+            assert mock_client.aio.models.generate_content.call_args.kwargs["model"] == "gemini-3-flash-preview"
 
 
 # ── New signature: attachments and use_search params ──────────────────────────

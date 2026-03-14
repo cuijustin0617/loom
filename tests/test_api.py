@@ -1298,29 +1298,22 @@ class TestFrontendNewElements:
     def test_sidebar_model_select_exists(self):
         assert 'id="sidebarModelSelect"' in self._get_html()
 
-    def test_chat_model_select_has_gemini_options(self):
+    def test_chat_model_select_has_gemini_3_flash(self):
         html = self._get_html()
-        assert 'value="gemini-2.5-flash"' in html
-        assert 'value="gemini-2.5-flash-lite"' in html
         assert 'value="gemini-3-flash-preview"' in html
-        assert 'value="gemini-3.1-pro-preview"' in html
 
-    def test_chat_model_select_has_openai_options(self):
+    def test_chat_model_select_only_gemini_3_flash(self):
         html = self._get_html()
-        assert 'value="gpt-5.2-2025-12-11"' in html
-        assert 'value="gpt-5-mini-2025-08-07"' in html
-        assert 'value="gpt-5-nano-2025-08-07"' in html
+        assert 'value="gemini-2.5-flash"' not in html
+        assert 'value="gpt-5' not in html
 
-    def test_sidebar_model_select_has_all_models(self):
+    def test_sidebar_model_select_has_gemini_3_flash(self):
         html = self._get_html()
-        for model in ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3-flash-preview",
-                       "gemini-3.1-pro-preview", "gpt-5.2-2025-12-11", "gpt-5-mini-2025-08-07",
-                       "gpt-5-nano-2025-08-07"]:
-            assert model in html
+        assert 'gemini-3-flash-preview' in html
 
-    def test_gemini_25_flash_is_default_selected(self):
+    def test_gemini_3_flash_is_default_selected(self):
         html = self._get_html()
-        assert 'value="gemini-2.5-flash" selected' in html
+        assert 'value="gemini-3-flash-preview" selected' in html
 
 
 class TestFrontendResizeCSS:
@@ -1360,7 +1353,7 @@ class TestFrontendDeleteCSS:
 
     def test_delete_btn_visible_on_hover(self):
         css = _get_client().get("/static/styles.css").text
-        assert ".chat-item:hover .chat-delete-btn" in css
+        assert ".chat-item:hover .chat-item-actions" in css
 
 
 class TestFrontendModelSelectCSS:
@@ -1974,13 +1967,13 @@ class TestFrontendIntegratedInputBar:
         css = _get_client().get("/static/styles.css").text
         assert ".input-icon" in css
 
-    def test_live_model_option_in_chat_select(self):
+    def test_gemini_3_flash_in_chat_select(self):
         html = _get_client().get("/").text
-        assert 'value="gemini-2.0-flash-live-001"' in html
+        assert 'value="gemini-3-flash-preview"' in html
 
-    def test_live_model_option_in_sidebar_select(self):
+    def test_gemini_3_flash_in_sidebar_select(self):
         html = _get_client().get("/").text
-        assert 'gemini-2.0-flash-live' in html
+        assert 'gemini-3-flash-preview' in html
 
     def test_input_attachments_inside_input_bar(self):
         html = _get_client().get("/").text
@@ -2554,10 +2547,10 @@ class TestStructuredStatus:
 class TestStructuredStatusPrompt:
     """Tests for prompt content and format."""
 
-    def test_prompt_asks_for_overview_and_specifics(self):
+    def test_prompt_asks_for_overview_and_threads(self):
         from prompts import STATUS_UPDATE_PROMPT
         assert "overview" in STATUS_UPDATE_PROMPT.lower()
-        assert "specifics" in STATUS_UPDATE_PROMPT.lower()
+        assert "threads" in STATUS_UPDATE_PROMPT.lower()
         assert '"level"' in STATUS_UPDATE_PROMPT
 
     def test_prompt_mentions_understanding_levels(self):
@@ -2618,10 +2611,26 @@ class TestStructuredStatusUI:
         js = self._read_file("frontend/sidebar.js")
         assert "No status yet" in js
 
-    def test_delete_btn_and_edit_btn_in_render(self):
+    def test_delete_btn_in_render(self):
         js = self._read_file("frontend/sidebar.js")
-        assert "status-item-edit" in js
         assert "status-item-del" in js
+
+    def test_thread_rendering_in_sidebar(self):
+        js = self._read_file("frontend/sidebar.js")
+        assert "thread-row" in js
+        assert "thread-chain" in js
+        assert "thread-dot" in js
+        assert "_deleteThread" in js
+        assert "_editThreadStep" in js
+
+    def test_thread_css_styles(self):
+        css = self._read_file("frontend/styles.css")
+        assert ".thread-row" in css
+        assert ".thread-dot-solid" in css
+        assert ".thread-dot-familiar" in css
+        assert ".thread-dot-brief" in css
+        assert ".thread-connector" in css
+        assert ".thread-steps" in css
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2910,7 +2919,7 @@ class TestBug2ImageFallback:
     def test_missing_data_falls_through_to_filename(self):
         js = _get_client().get("/static/app.js").text
         idx = js.index("_appendMessage(msg) {")
-        block = js[idx:idx+800]
+        block = js[idx:idx+1500]
         assert "att.data" in block
         assert "att.name || 'file'" in block
 
@@ -2918,11 +2927,9 @@ class TestBug2ImageFallback:
 class TestBug3DeleteBtnOverlay:
     """Delete button should overlay text on hover, not take permanent space."""
 
-    def test_chat_delete_btn_is_absolute(self):
+    def test_chat_delete_btn_in_actions_wrapper(self):
         css = _get_client().get("/static/styles.css").text
-        idx = css.index(".chat-delete-btn {")
-        block = css[idx:idx+400]
-        assert "position: absolute" in block
+        assert ".chat-item-actions" in css
 
     def test_chat_item_is_relative(self):
         css = _get_client().get("/static/styles.css").text
@@ -2930,11 +2937,11 @@ class TestBug3DeleteBtnOverlay:
         block = css[idx:idx+300]
         assert "position: relative" in block
 
-    def test_delete_btn_has_gradient_bg(self):
+    def test_delete_btn_has_transparent_bg(self):
         css = _get_client().get("/static/styles.css").text
         idx = css.index(".chat-delete-btn {")
         block = css[idx:idx+400]
-        assert "linear-gradient" in block
+        assert "background: transparent" in block
 
 
 class TestBug4StatusPromptNotes:

@@ -92,6 +92,7 @@ const App = {
     }
 
     Storage.migrateTopicColors();
+    Storage.reEmbedChats();
     Sidebar.init();
     this._bindEvents();
     this._loadState();
@@ -101,6 +102,7 @@ const App = {
 
     if (STUDY_CONDITION === 'loom') {
       this._migrateStructuredSummaries();
+      this._migrateStatusToThreads();
     }
 
     // Try restoring from server backup if localStorage is empty
@@ -212,14 +214,9 @@ const App = {
     this._initCollapseToggle('collapseLeftBtn', 'leftSidebar', 'left');
     this._initCollapseToggle('collapseRightBtn', 'rightSidebar', 'right');
 
-    // Model selectors
-    const chatModelSel = document.getElementById('chatModelSelect');
-    chatModelSel.value = Storage.getChatModel();
-    chatModelSel.addEventListener('change', () => Storage.setChatModel(chatModelSel.value));
-
-    const sidebarModelSel = document.getElementById('sidebarModelSelect');
-    sidebarModelSel.value = Storage.getSidebarModel();
-    sidebarModelSel.addEventListener('change', () => Storage.setSidebarModel(sidebarModelSel.value));
+    // Model is fixed to Gemini 3 Flash (no selector)
+    Storage.setChatModel('gemini-3-flash-preview');
+    Storage.setSidebarModel('gemini-3-flash-preview');
 
     // Topic selector in input bar
     const topicSel = document.getElementById('topicSelect');
@@ -233,31 +230,43 @@ const App = {
     const sidebar = document.getElementById(sidebarId);
     if (!handle || !sidebar) return;
 
-    let startX, startWidth;
+    let startX, startWidth, rafId;
 
     const onMouseMove = (e) => {
-      const delta = side === 'left' ? e.clientX - startX : startX - e.clientX;
-      const newWidth = Math.max(
-        side === 'left' ? 200 : 240,
-        Math.min(side === 'left' ? 400 : 500, startWidth + delta)
-      );
-      sidebar.style.flexBasis = newWidth + 'px';
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        const delta = side === 'left' ? e.clientX - startX : startX - e.clientX;
+        if (Math.abs(e.clientX - startX) > 3) {
+          handle.dataset.dragMoved = 'true';
+        }
+        const newWidth = Math.max(
+          side === 'left' ? 200 : 240,
+          Math.min(side === 'left' ? 400 : 500, startWidth + delta)
+        );
+        sidebar.style.flexBasis = newWidth + 'px';
+      });
     };
 
     const onMouseUp = () => {
       handle.classList.remove('active');
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
+      if (rafId) cancelAnimationFrame(rafId);
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
+      
+      // Delay removing the drag-moved flag slightly so click events can see it
+      setTimeout(() => {
+        handle.dataset.dragMoved = 'false';
+      }, 50);
     };
 
     handle.addEventListener('mousedown', (e) => {
-      if (e.target.closest('.sidebar-collapse-btn')) return;
       e.preventDefault();
       startX = e.clientX;
       startWidth = sidebar.getBoundingClientRect().width;
       handle.classList.add('active');
+      handle.dataset.dragMoved = 'false';
       document.body.style.cursor = 'col-resize';
       document.body.style.userSelect = 'none';
       document.addEventListener('mousemove', onMouseMove);
@@ -275,6 +284,11 @@ const App = {
 
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
+      const handle = btn.closest('.resize-handle');
+      if (handle && handle.dataset.dragMoved === 'true') {
+        return; // Ignore click if it was a drag
+      }
+      
       const collapsed = sidebar.classList.toggle('collapsed');
       const svg = btn.querySelector('svg');
       if (side === 'left') {
@@ -301,7 +315,8 @@ const App = {
     if (!sel) return;
     const prev = sel.value;
     sel.innerHTML = '<option value="">Auto-detect</option>';
-    Storage.getTopics().forEach(t => {
+    const topics = Storage.getTopics().filter(t => t.name !== 'Unassigned');
+    topics.forEach(t => {
       const opt = document.createElement('option');
       opt.value = t.id;
       opt.textContent = t.name;
@@ -373,11 +388,13 @@ const App = {
         if (topic) {
           topic.lastActive = Utils.timestamp();
           Storage.saveTopic(topic);
-          if (topic.statusSummary) {
-            const statusStr = Sidebar._serializeStatus(topic.statusSummary);
-            content = `[My current status in "${topic.name}": ${statusStr}]\n\n${content}`;
+          if (topic.name !== 'Unassigned') {
+            if (topic.statusSummary) {
+              const statusStr = Sidebar._serializeStatus(topic.statusSummary);
+              content = `[My current status in "${topic.name}": ${statusStr}]\n\n${content}`;
+            }
+            Sidebar.show(this.selectedTopicId);
           }
-          Sidebar.show(this.selectedTopicId);
         }
       }
     }
@@ -428,12 +445,12 @@ const App = {
       const currentTopicId = currentChat2?.topicId || this.selectedTopicId;
       sameTopicSummaries = currentTopicId
         ? Storage.getChats()
-            .filter(c => c.id !== this.currentChatId && c.summary && c.topicId === currentTopicId)
-            .map(c => ({
-              id: c.id, title: c.title, summary: c.summary,
-              userAsked: c.userAsked || '', aiCovered: c.aiCovered || '',
-              embedding: c.embedding, topicId: c.topicId,
-            }))
+          .filter(c => c.id !== this.currentChatId && c.summary && c.topicId === currentTopicId)
+          .map(c => ({
+            id: c.id, title: c.title, summary: c.summary,
+            userAsked: c.userAsked || '', aiCovered: c.aiCovered || '',
+            embedding: c.embedding, topicId: c.topicId,
+          }))
         : [];
     }
 
@@ -488,13 +505,14 @@ const App = {
             console.log('[Module2] has markers:', /\{~\d+\}/.test(fullResponse));
             console.log('[Module2] has conn block:', fullResponse.includes('{~CONNECTIONS~}'));
 
-            this._finalizeStreamingMessage(assistantEl, fullResponse);
+            const assistantMsgId = 'msg_' + Utils.generateId();
+            this._finalizeStreamingMessage(assistantEl, fullResponse, assistantMsgId);
 
             const { mainText: cleanContent, connectionsJson: savedConns } = this._stripConnectionBlock(fullResponse);
             console.log('[Module2] connections parsed:', savedConns?.length || 0);
             const cleanText = cleanContent.replace(/\{~\d+\}/g, '');
             const assistantMsg = {
-              id: 'msg_' + Utils.generateId(),
+              id: assistantMsgId,
               chatId: this.currentChatId,
               role: 'assistant',
               content: cleanText,
@@ -512,10 +530,13 @@ const App = {
               if (evt.concepts && evt.concepts.length > 0) {
                 this._handleConcepts(evt.concepts);
               }
-              if (savedConns && savedConns.length > 0) {
-                Sidebar.showConnections(savedConns);
-              } else {
-                Sidebar.clearConnections();
+              const chat = Storage.getChat(this.currentChatId);
+              if (!this._isUnassignedTopic(chat?.topicId)) {
+                if (savedConns && savedConns.length > 0) {
+                  Sidebar.showConnections(savedConns);
+                } else {
+                  Sidebar.clearConnections();
+                }
               }
             }
           } else if (evt.type === 'error') {
@@ -557,13 +578,13 @@ const App = {
         this._renderChatList();
       }
 
-      // Sidebar refresh logic (Loom only) or baseline details extraction
       this.msgCountSinceRefresh++;
-      if (STUDY_CONDITION === 'loom') {
+      const currentChat = Storage.getChat(this.currentChatId);
+      if (STUDY_CONDITION === 'loom' && !this._isUnassignedTopic(currentChat?.topicId)) {
         if (this.msgCountSinceRefresh === 1 || this.msgCountSinceRefresh % 3 === 0) {
           Sidebar.refresh();
         }
-      } else {
+      } else if (STUDY_CONDITION !== 'loom') {
         this._extractBaselineDetails();
       }
 
@@ -574,6 +595,171 @@ const App = {
     }
 
     document.getElementById('sendBtn').disabled = false;
+  },
+
+  // ── Chunk Labeling (Module 1) ────────────────────────────────────────
+
+  _splitIntoChunks(text) {
+    if (!text || !text.trim()) return [];
+    const blocks = text.split(/\n\n+/);
+    const chunks = [];
+    let current = [];
+    let currentLines = 0;
+    const MIN_LINES = 4;
+
+    const countLines = (block) => block.split('\n').length;
+
+    const flushCurrent = () => {
+      if (current.length > 0) {
+        chunks.push(current.join('\n\n'));
+        current = [];
+        currentLines = 0;
+      }
+    };
+
+    for (const block of blocks) {
+      const trimmed = block.trim();
+      if (!trimmed) continue;
+      const isHeader = /^#{1,4}\s/.test(trimmed);
+      const lines = countLines(trimmed);
+
+      if (isHeader && currentLines >= MIN_LINES) {
+        flushCurrent();
+      }
+
+      current.push(trimmed);
+      currentLines += lines;
+
+      if (currentLines >= MIN_LINES && !isHeader) {
+        const nextIdx = blocks.indexOf(block) + 1;
+        const nextBlock = nextIdx < blocks.length ? blocks[nextIdx]?.trim() : '';
+        const nextIsHeader = nextBlock && /^#{1,4}\s/.test(nextBlock);
+        if (nextIsHeader || currentLines >= MIN_LINES + 4) {
+          flushCurrent();
+        }
+      }
+    }
+    flushCurrent();
+
+    if (chunks.length > 1) {
+      const lastLines = countLines(chunks[chunks.length - 1]);
+      if (lastLines < 3) {
+        const merged = chunks[chunks.length - 2] + '\n\n' + chunks[chunks.length - 1];
+        chunks.splice(chunks.length - 2, 2, merged);
+      }
+    }
+
+    return chunks;
+  },
+
+  _injectChunkLabels(content, chunkLabels) {
+    if (!chunkLabels || Object.keys(chunkLabels).length === 0) return content;
+    const chunks = this._splitIntoChunks(content);
+    if (chunks.length === 0) return content;
+
+    const parts = chunks.map((chunk, i) => {
+      const label = chunkLabels[String(i)];
+      if (label === 'understood') return chunk + '\n[USER: understood this section]';
+      if (label === 'unsure') return chunk + '\n[USER: unsure about this section]';
+      return chunk;
+    });
+    return parts.join('\n\n');
+  },
+
+  _renderChunkedContent(text, msgId, chunkLabels) {
+    const chunks = this._splitIntoChunks(text);
+    if (chunks.length <= 1) {
+      return { html: Utils.renderMarkdown(text), chunked: false };
+    }
+
+    const checkSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" width="18" height="18"><polyline points="20 6 9 17 4 12"/></svg>';
+    const questionSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="18" height="18"><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><circle cx="12" cy="17" r="0.5" fill="currentColor"/></svg>';
+
+    const chunksHtml = chunks.map((chunk, i) => {
+      let rendered = Utils.renderMarkdown(chunk);
+      rendered = this._parseConnectionMarkers(rendered);
+      const label = chunkLabels?.[String(i)] || '';
+      const understoodActive = label === 'understood' ? ' active' : '';
+      const unsureActive = label === 'unsure' ? ' active' : '';
+      const labeledClass = label === 'understood' ? ' labeled-understood'
+        : label === 'unsure' ? ' labeled-unsure' : '';
+
+      return `<div class="msg-chunk${labeledClass}" data-chunk-idx="${i}" data-msg-id="${msgId}">
+        <div class="chunk-content">${rendered}</div>
+        <div class="chunk-label-bar">
+          <button class="chunk-label-btn${understoodActive}" data-label="understood" title="I understood this (or double-click chunk)">${checkSvg}</button>
+          <button class="chunk-label-btn${unsureActive}" data-label="unsure" title="I'm unsure about this">${questionSvg}</button>
+        </div>
+      </div>`;
+    }).join('');
+
+    return { html: chunksHtml, chunked: true };
+  },
+
+  _bindChunkLabelHandlers(containerEl) {
+    containerEl.querySelectorAll('.msg-chunk').forEach(chunkEl => {
+      chunkEl.querySelectorAll('.chunk-label-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const msgId = chunkEl.dataset.msgId;
+          const chunkIdx = chunkEl.dataset.chunkIdx;
+          const label = btn.dataset.label;
+          this._toggleChunkLabel(chunkEl, msgId, chunkIdx, label);
+        });
+      });
+      chunkEl.addEventListener('dblclick', (e) => {
+        if (e.target.closest('.chunk-label-btn')) return;
+        const msgId = chunkEl.dataset.msgId;
+        const chunkIdx = chunkEl.dataset.chunkIdx;
+        this._toggleChunkLabel(chunkEl, msgId, chunkIdx, 'understood');
+        const sel = window.getSelection();
+        if (sel) sel.removeAllRanges();
+      });
+    });
+  },
+
+  _toggleChunkLabel(chunkEl, msgId, chunkIdx, label) {
+    const chatId = this.currentChatId;
+    const messages = Storage.getMessages(chatId);
+    const msg = messages.find(m => m.id === msgId);
+    if (!msg) return;
+
+    if (!msg.chunkLabels) msg.chunkLabels = {};
+    const current = msg.chunkLabels[chunkIdx];
+    const newLabel = current === label ? null : label;
+
+    if (newLabel) {
+      msg.chunkLabels[chunkIdx] = newLabel;
+    } else {
+      delete msg.chunkLabels[chunkIdx];
+    }
+
+    const data = Storage._getAll();
+    const msgArr = data.messages[chatId];
+    if (msgArr) {
+      const idx = msgArr.findIndex(m => m.id === msgId);
+      if (idx >= 0) {
+        msgArr[idx] = msg;
+        Storage._saveAll(data);
+      }
+    }
+
+    chunkEl.querySelectorAll('.chunk-label-btn').forEach(b => b.classList.remove('active'));
+    if (newLabel) {
+      chunkEl.querySelector(`.chunk-label-btn[data-label="${newLabel}"]`)?.classList.add('active');
+    }
+
+    chunkEl.classList.remove('labeled-understood', 'labeled-unsure');
+    if (newLabel) {
+      chunkEl.classList.add(`labeled-${newLabel}`);
+    }
+
+    StudyLog.event('chunk_labeled', {
+      chatId,
+      msgId,
+      chunkIdx: parseInt(chunkIdx),
+      label: newLabel || 'removed',
+    });
   },
 
   _createStreamingMessage() {
@@ -615,29 +801,31 @@ const App = {
     contentEl.innerHTML = withMarkers + '<span class="streaming-cursor"></span>';
   },
 
-  _finalizeStreamingMessage(el, text) {
+  _finalizeStreamingMessage(el, text, msgId) {
     const contentEl = el.querySelector('.message-content');
     const { mainText, connectionsJson } = this._stripConnectionBlock(text);
     const markersInMainText = mainText.match(/\{~\d+\}/g);
     console.log('[Module2 finalize] mainText markers:', markersInMainText);
     console.log('[Module2 finalize] connectionsJson:', connectionsJson?.length || 0);
 
-    const rendered = Utils.renderMarkdown(mainText);
-    const markersAfterMd = rendered.match(/\{~\d+\}/g);
-    console.log('[Module2 finalize] markers surviving markdown:', markersAfterMd);
+    const { html: chunkedHtml, chunked } = this._renderChunkedContent(mainText, msgId || '', null);
 
-    const withMarkers = this._parseConnectionMarkers(rendered);
-    const spanCount = (withMarkers.match(/conn-marker/g) || []).length;
-    console.log('[Module2 finalize] conn-marker spans created:', spanCount);
-    contentEl.innerHTML = withMarkers;
+    if (chunked) {
+      contentEl.innerHTML = chunkedHtml;
+    } else {
+      const rendered = Utils.renderMarkdown(mainText);
+      const withMarkers = this._parseConnectionMarkers(rendered);
+      contentEl.innerHTML = withMarkers;
+    }
 
     if (connectionsJson && connectionsJson.length > 0) {
       this._resolveConnectionMarkers(contentEl, connectionsJson);
-      const resolved = contentEl.querySelectorAll('.conn-marker.resolved').length;
-      console.log('[Module2 finalize] resolved markers:', resolved);
     } else {
       contentEl.querySelectorAll('.conn-marker').forEach(m => m.remove());
-      console.log('[Module2 finalize] no connections — removed orphan markers');
+    }
+
+    if (chunked) {
+      this._bindChunkLabelHandlers(contentEl);
     }
   },
 
@@ -667,6 +855,8 @@ const App = {
   },
 
   _connCardEl: null,
+  _connCardMarker: null,
+  _connScrollHandler: null,
 
   _getConnCard() {
     if (!this._connCardEl) {
@@ -795,11 +985,17 @@ const App = {
     gotoLink.style.display = chatId ? '' : 'none';
 
     card.classList.add('visible');
+    this._connCardMarker = marker;
 
     // Position anchored to marker
-    requestAnimationFrame(() => {
+    const positionCard = () => {
       const rect = marker.getBoundingClientRect();
       const cardRect = card.getBoundingClientRect();
+      // Check if marker is still visible in viewport
+      if (rect.bottom < 0 || rect.top > window.innerHeight) {
+        this._hideConnCard();
+        return;
+      }
       let top = rect.bottom + 8;
       if (top + cardRect.height > window.innerHeight - 16) {
         top = rect.top - cardRect.height - 8;
@@ -808,11 +1004,31 @@ const App = {
       left = Math.max(12, Math.min(left, window.innerWidth - cardRect.width - 12));
       card.style.top = top + 'px';
       card.style.left = left + 'px';
-    });
+    };
+
+    requestAnimationFrame(positionCard);
+
+    // Follow scroll and dismiss when marker leaves viewport
+    if (this._connScrollHandler) {
+      const chatMessages = document.getElementById('chatMessages');
+      chatMessages.removeEventListener('scroll', this._connScrollHandler);
+    }
+    this._connScrollHandler = () => {
+      if (!card.classList.contains('visible')) return;
+      requestAnimationFrame(positionCard);
+    };
+    const chatMessages = document.getElementById('chatMessages');
+    chatMessages.addEventListener('scroll', this._connScrollHandler, { passive: true });
   },
 
   _hideConnCard() {
     if (this._connCardEl) this._connCardEl.classList.remove('visible');
+    this._connCardMarker = null;
+    if (this._connScrollHandler) {
+      const chatMessages = document.getElementById('chatMessages');
+      if (chatMessages) chatMessages.removeEventListener('scroll', this._connScrollHandler);
+      this._connScrollHandler = null;
+    }
   },
 
   _bindConnectionCards(container) {
@@ -831,7 +1047,36 @@ const App = {
     });
   },
 
+  _isUnassignedTopic(topicId) {
+    if (!topicId) return false;
+    const topic = Storage.getTopic(topicId);
+    return topic?.name === 'Unassigned';
+  },
+
+  _getOrCreateUnassignedTopic() {
+    const existing = Storage.getTopics().find(t => t.name === 'Unassigned');
+    if (existing) return existing;
+    const topic = Storage.createTopic('Unassigned');
+    topic.userCreated = false;
+    Storage.saveTopic(topic);
+    return topic;
+  },
+
   async _handleTopicDetection(topicData) {
+    // One-off questions go to the "Unassigned" topic
+    if (topicData.isOneOff) {
+      const unassigned = this._getOrCreateUnassignedTopic();
+      const chat = Storage.getChat(this.currentChatId);
+      if (chat && !chat.topicId) {
+        chat.topicId = unassigned.id;
+        chat.lastActive = Utils.timestamp();
+        Storage.saveChat(chat);
+        StudyLog.event('topic_assigned', { chatId: this.currentChatId, topicId: unassigned.id, isAutoDetected: true, isOneOff: true });
+      }
+      this._renderChatList();
+      return;
+    }
+
     let topicId = topicData.matchedExistingId;
     let isNew = false;
 
@@ -864,14 +1109,16 @@ const App = {
         Storage.saveTopic(topic);
       }
 
-      Sidebar.show(topicId);
+      if (!this._isUnassignedTopic(topicId)) {
+        Sidebar.show(topicId);
+      }
       this._renderChatList();
     }
   },
 
   _handleConcepts(concepts) {
     const chat = Storage.getChat(this.currentChatId);
-    if (!chat || !chat.topicId) return;
+    if (!chat || !chat.topicId || this._isUnassignedTopic(chat.topicId)) return;
 
     concepts.forEach(c => {
       const existing = Storage.getConcepts().find(
@@ -988,20 +1235,70 @@ const App = {
     this._renderChatList();
   },
 
+  async _migrateStatusToThreads() {
+    const topics = Storage.getTopics().filter(t => {
+      if (t.name === 'Unassigned') return false;
+      const s = t.statusSummary;
+      if (!s || typeof s !== 'object') return false;
+      // Has old specifics but no threads yet
+      return (s.specifics && s.specifics.length > 0) && (!s.threads || s.threads.length === 0);
+    });
+    if (topics.length === 0) return;
+    console.log(`[Migration] Converting ${topics.length} topic(s) from specifics → threads...`);
+    for (const topic of topics) {
+      try {
+        const summaries = Storage.getAllChatSummariesForTopic(topic.id);
+        const resp = await fetch(`${API_BASE}/api/topic/status/update`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            topicName: topic.name,
+            currentStatus: Sidebar._serializeStatus(topic.statusSummary),
+            recentSummaries: summaries.map(s => s.summary),
+            model: Storage.getSidebarModel(),
+          }),
+        });
+        const data = await resp.json();
+        if (data.overview || data.threads) {
+          topic.statusSummary = { overview: data.overview || [], threads: data.threads || [] };
+        }
+        topic.statusLastUpdated = Utils.timestamp();
+        topic.sidebarCache = null;
+        Storage.saveTopic(topic);
+        console.log(`[Migration] Threads ✅ "${topic.name}"`);
+      } catch (err) {
+        console.warn(`[Migration] Threads ❌ "${topic.name}":`, err);
+      }
+    }
+    console.log('[Migration] Status → threads migration complete.');
+    if (Sidebar.currentTopicId) {
+      const current = Storage.getTopic(Sidebar.currentTopicId);
+      if (current) Sidebar._renderStatus(current.statusSummary);
+    }
+  },
+
   async _autoDetectTopics() {
-    const unassigned = Storage.getChats().filter(c => !c.topicId && c.summary);
-    if (unassigned.length < 2) return;
+    // Include chats from "Unassigned" topic in reclassification
+    const unassignedTopic = Storage.getTopics().find(t => t.name === 'Unassigned');
+    const unassignedTopicId = unassignedTopic?.id;
+    const candidateChats = Storage.getChats().filter(c =>
+      c.summary && (!c.topicId || c.topicId === unassignedTopicId)
+    );
+    if (candidateChats.length < 2) return;
 
     try {
       const resp = await fetch(`${API_BASE}/api/topic/detect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          chatSummaries: unassigned.map(c => ({ id: c.id, summary: c.summary })),
-          existingTopics: Storage.getTopics().map(t => ({ id: t.id, name: t.name })),
+          chatSummaries: candidateChats.map(c => ({ id: c.id, summary: c.summary })),
+          existingTopics: Storage.getTopics()
+            .filter(t => t.name !== 'Unassigned')
+            .map(t => ({ id: t.id, name: t.name })),
         }),
       });
       const data = await resp.json();
+      let changed = false;
 
       if (data.newTopics && data.newTopics.length > 0) {
         for (const topicData of data.newTopics) {
@@ -1012,15 +1309,34 @@ const App = {
 
           for (const chatId of topicData.chatIds) {
             const chat = Storage.getChat(chatId);
-            if (chat && !chat.topicId) {
+            if (chat && (!chat.topicId || chat.topicId === unassignedTopicId)) {
               chat.topicId = topic.id;
               Storage.saveChat(chat);
             }
           }
+          changed = true;
         }
-        this._renderChatList();
         Utils.showToast(`Detected new topic${data.newTopics.length > 1 ? 's' : ''}: ${data.newTopics.map(t => t.name).join(', ')}`);
       }
+
+      // Assign to existing topics
+      if (data.assignToExisting && data.assignToExisting.length > 0) {
+        for (const assignment of data.assignToExisting) {
+          if (!assignment.topicId || !assignment.chatIds) continue;
+          const topic = Storage.getTopic(assignment.topicId);
+          if (!topic) continue;
+          for (const chatId of assignment.chatIds) {
+            const chat = Storage.getChat(chatId);
+            if (chat && (!chat.topicId || chat.topicId === unassignedTopicId)) {
+              chat.topicId = assignment.topicId;
+              Storage.saveChat(chat);
+              changed = true;
+            }
+          }
+        }
+      }
+
+      if (changed) this._renderChatList();
     } catch (err) {
       console.warn('Auto-detect topics failed:', err);
     }
@@ -1143,19 +1459,20 @@ const App = {
 
     if (STUDY_CONDITION === 'baseline') {
       Sidebar.showBaseline();
-    } else if (chat?.topicId) {
+    } else if (chat?.topicId && !this._isUnassignedTopic(chat.topicId)) {
       Sidebar.show(chat.topicId);
       this.msgCountSinceRefresh = 0;
     } else {
       Sidebar.hide();
     }
 
-    // Restore sidebar connection cards from the last assistant message
-    const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant' && m.connections?.length > 0);
-    if (lastAssistant) {
-      Sidebar.showConnections(lastAssistant.connections);
-    } else {
-      Sidebar.clearConnections();
+    if (!this._isUnassignedTopic(chat?.topicId)) {
+      const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant' && m.connections?.length > 0);
+      if (lastAssistant) {
+        Sidebar.showConnections(lastAssistant.connections);
+      } else {
+        Sidebar.clearConnections();
+      }
     }
 
     this._highlightActiveChat(chatId);
@@ -1207,14 +1524,13 @@ const App = {
           e.stopPropagation();
           StudyLog.event('module3_shuffled', { location: 'welcome', topicId: null });
           // Re-render welcome with refreshed suggestions (triggers sidebar.shuffleDirections for each topic)
-          const firstTopic = suggestions[0];
-          if (firstTopic) {
-            Sidebar.currentTopicId = firstTopic.topicId;
-            Sidebar.shuffleDirections('welcome').then(() => {
-              const msgContainer = document.getElementById('chatMessages');
-              this._renderWelcome(msgContainer);
-            });
-          }
+          shuffleBtn.classList.add('loading');
+          const promises = suggestions.map(s => Sidebar.shuffleDirections('welcome', s.topicId));
+          Promise.all(promises).then(() => {
+            shuffleBtn.classList.remove('loading');
+            const msgContainer = document.getElementById('chatMessages');
+            this._renderWelcome(msgContainer);
+          });
         });
       }
     }
@@ -1276,7 +1592,9 @@ const App = {
     if (topic) {
       topic.lastActive = Utils.timestamp();
       Storage.saveTopic(topic);
-      Sidebar.show(suggestion.topicId);
+      if (topic.name !== 'Unassigned') {
+        Sidebar.show(suggestion.topicId);
+      }
     }
 
     let content = suggestion.question;
@@ -1289,15 +1607,118 @@ const App = {
     this.sendMessage();
   },
 
+  _parseUserMessageModules(content) {
+    const modules = [];
+    let remaining = content || '';
+
+    while (remaining.startsWith('[')) {
+      let type, label, body, endIdx;
+
+      if (remaining.startsWith('[My current status in "')) {
+        type = 'status';
+        const prefix = '[My current status in "';
+        const nameEnd = remaining.indexOf('"', prefix.length);
+        if (nameEnd === -1) break;
+        const topicName = remaining.substring(prefix.length, nameEnd);
+        label = `Status: ${topicName}`;
+        const bodyStart = nameEnd + '": '.length;
+        const closeNewline = remaining.indexOf(']\n\n', bodyStart);
+        if (closeNewline !== -1) {
+          body = remaining.substring(bodyStart, closeNewline);
+          endIdx = closeNewline + 3;
+        } else if (remaining.endsWith(']')) {
+          body = remaining.substring(bodyStart, remaining.length - 1);
+          endIdx = remaining.length;
+        } else {
+          break;
+        }
+      } else if (remaining.startsWith('[The user is building on a previous conversation')) {
+        type = 'linked_chat';
+        const connPrefix = 'Connection to "';
+        const connIdx = remaining.indexOf(connPrefix);
+        if (connIdx !== -1) {
+          const connNameEnd = remaining.indexOf('"', connIdx + connPrefix.length);
+          label = connNameEnd !== -1
+            ? `Previous conversation: ${remaining.substring(connIdx + connPrefix.length, connNameEnd)}`
+            : 'Previous conversation';
+        } else {
+          label = 'Previous conversation';
+        }
+        const endMarker = '--- End of previous chat ---]';
+        const markerIdx = remaining.indexOf(endMarker);
+        if (markerIdx !== -1) {
+          body = remaining.substring(1, markerIdx + endMarker.length - 1);
+          endIdx = markerIdx + endMarker.length;
+        } else {
+          const closeNewline = remaining.indexOf(']\n\n');
+          if (closeNewline !== -1) {
+            body = remaining.substring(1, closeNewline);
+            endIdx = closeNewline + 3;
+          } else if (remaining.endsWith(']')) {
+            body = remaining.substring(1, remaining.length - 1);
+            endIdx = remaining.length;
+          } else {
+            break;
+          }
+        }
+        if (remaining[endIdx] === '\n') endIdx++;
+        if (remaining[endIdx] === '\n') endIdx++;
+      } else if (remaining.startsWith('[Context from my knowledge map:')) {
+        type = 'knowledge_context';
+        label = 'Knowledge context';
+        const bodyStart = '[Context from my knowledge map: '.length;
+        const closeNewline = remaining.indexOf(']\n\n', bodyStart);
+        if (closeNewline !== -1) {
+          body = remaining.substring(bodyStart, closeNewline);
+          endIdx = closeNewline + 3;
+        } else if (remaining.endsWith(']')) {
+          body = remaining.substring(bodyStart, remaining.length - 1);
+          endIdx = remaining.length;
+        } else {
+          break;
+        }
+      } else {
+        break;
+      }
+
+      modules.push({ type, label, body });
+      remaining = remaining.substring(endIdx);
+    }
+
+    return { modules, userQuery: remaining.trim() };
+  },
+
+  _renderContextBar(modules) {
+    const statusSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
+    const linkSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>';
+
+    const tags = modules.map((mod, i) => {
+      const isStatus = mod.type === 'status';
+      const icon = isStatus ? statusSvg : linkSvg;
+      const typeClass = isStatus ? 'ctx-status' : 'ctx-linked';
+      return `<span class="ctx-tag ${typeClass}" data-ctx-idx="${i}">${icon} ${Utils.escapeHtml(mod.label)}</span>`;
+    }).join('<span class="ctx-dot">&middot;</span>');
+
+    return `<div class="message-context-bar">${tags}</div><div class="ctx-detail-panel"></div>`;
+  },
+
   _appendMessage(msg) {
     const container = document.getElementById('chatMessages');
 
     const el = document.createElement('div');
     el.className = `message ${msg.role}`;
 
-    let contextHtml = '';
-    if (msg.contextBlock) {
-      contextHtml = `<div class="context-indicator">📎 With added context</div>`;
+    let contextBarHtml = '';
+    let displayContent = msg.content;
+    let visibleModules = [];
+
+    if (msg.role === 'user') {
+      const { modules, userQuery } = this._parseUserMessageModules(msg.content);
+      visibleModules = modules.filter(m => m.type !== 'knowledge_context');
+      if (visibleModules.length > 0) {
+        contextBarHtml = this._renderContextBar(visibleModules);
+      }
+      displayContent = userQuery || msg.content;
     }
 
     let attachHtml = '';
@@ -1311,19 +1732,58 @@ const App = {
       attachHtml = `<div class="message-attachments">${thumbs}</div>`;
     }
 
-    // For assistant messages with stored connections, render with markers
     let renderedContent;
-    if (msg.role === 'assistant' && msg.connections && msg.connections.length > 0 && msg.rawContent) {
-      renderedContent = this._parseConnectionMarkers(Utils.renderMarkdown(msg.rawContent));
+    let isChunked = false;
+    if (msg.role === 'assistant') {
+      const hasConns = msg.connections && msg.connections.length > 0 && msg.rawContent;
+      const rawText = hasConns ? msg.rawContent : msg.content;
+      const { html: chunkedHtml, chunked } = this._renderChunkedContent(rawText, msg.id || '', msg.chunkLabels);
+      if (chunked) {
+        isChunked = true;
+        renderedContent = chunkedHtml;
+      } else if (hasConns) {
+        renderedContent = this._parseConnectionMarkers(Utils.renderMarkdown(msg.rawContent));
+      } else {
+        renderedContent = Utils.renderMarkdown(msg.content);
+      }
     } else {
-      renderedContent = msg.role === 'assistant' ? Utils.renderMarkdown(msg.content) : Utils.escapeHtml(msg.content);
+      renderedContent = Utils.escapeHtml(displayContent);
     }
-    el.innerHTML = `${contextHtml}${attachHtml}<div class="message-content">${renderedContent}</div>`;
+
+    if (contextBarHtml) {
+      el.innerHTML = `${attachHtml}<div class="message-bubble-group">${contextBarHtml}<div class="message-content">${renderedContent}</div></div>`;
+    } else {
+      el.innerHTML = `${attachHtml}<div class="message-content">${renderedContent}</div>`;
+    }
     container.appendChild(el);
+
+    if (visibleModules.length > 0) {
+      el.querySelectorAll('.ctx-tag').forEach(tag => {
+        tag.addEventListener('click', () => {
+          const idx = parseInt(tag.dataset.ctxIdx);
+          const panel = el.querySelector('.ctx-detail-panel');
+          if (panel.classList.contains('visible') && panel.dataset.activeIdx === String(idx)) {
+            panel.classList.remove('visible');
+            tag.classList.remove('active');
+          } else {
+            el.querySelectorAll('.ctx-tag').forEach(t => t.classList.remove('active'));
+            panel.textContent = visibleModules[idx].body;
+            panel.dataset.activeIdx = String(idx);
+            panel.classList.add('visible');
+            tag.classList.add('active');
+          }
+        });
+      });
+    }
 
     if (msg.role === 'assistant' && msg.connections && msg.connections.length > 0) {
       const contentEl = el.querySelector('.message-content');
       this._resolveConnectionMarkers(contentEl, msg.connections);
+    }
+
+    if (isChunked) {
+      const contentEl = el.querySelector('.message-content');
+      this._bindChunkLabelHandlers(contentEl);
     }
 
     container.scrollTop = container.scrollHeight;
@@ -1363,13 +1823,38 @@ const App = {
 
     if (view === 'recent') {
       const sorted = [...chats].sort((a, b) => new Date(b.lastActive) - new Date(a.lastActive));
-      sorted.forEach(chat => container.appendChild(this._createChatItem(chat)));
-    } else {
-      // Group by topic
-      const topics = Storage.getTopics().sort((a, b) => new Date(b.lastActive) - new Date(a.lastActive));
-      const unassigned = chats.filter(c => !c.topicId);
+      const now = new Date();
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const weekStart = new Date(todayStart);
+      weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
-      topics.forEach(topic => {
+      let currentGroup = null;
+      sorted.forEach(chat => {
+        const d = new Date(chat.lastActive);
+        let group;
+        if (d >= todayStart) group = 'Today';
+        else if (d >= weekStart) group = 'This week';
+        else if (d >= monthStart) group = 'This month';
+        else group = 'Older';
+
+        if (group !== currentGroup) {
+          currentGroup = group;
+          const label = document.createElement('div');
+          label.className = 'chat-list-time-label';
+          label.textContent = group;
+          container.appendChild(label);
+        }
+        container.appendChild(this._createChatItem(chat));
+      });
+    } else {
+      // Group by topic: show real topics first, "Unassigned" at the end
+      const allTopics = Storage.getTopics().sort((a, b) => new Date(b.lastActive) - new Date(a.lastActive));
+      const realTopics = allTopics.filter(t => t.name !== 'Unassigned');
+      const unassignedTopic = allTopics.find(t => t.name === 'Unassigned');
+      const noTopicChats = chats.filter(c => !c.topicId);
+
+      realTopics.forEach(topic => {
         const topicChats = chats.filter(c => c.topicId === topic.id)
           .sort((a, b) => new Date(b.lastActive) - new Date(a.lastActive));
         if (topicChats.length === 0) return;
@@ -1378,7 +1863,7 @@ const App = {
         title.className = 'chat-list-group-title';
         title.dataset.topicId = topic.id;
         title.innerHTML = `<span>${Utils.escapeHtml(topic.name)}</span>`;
-        if (topics.length > 1) {
+        if (realTopics.length > 1) {
           title.draggable = true;
           title.addEventListener('dragstart', (e) => {
             e.dataTransfer.setData('text/topic-id', topic.id);
@@ -1418,13 +1903,18 @@ const App = {
         topicChats.forEach(chat => container.appendChild(this._createChatItem(chat)));
       });
 
-      if (unassigned.length > 0) {
+      // Combine "Unassigned" topic chats + truly unassigned (no topicId) under one label
+      const unassignedChats = [
+        ...(unassignedTopic ? chats.filter(c => c.topicId === unassignedTopic.id) : []),
+        ...noTopicChats,
+      ].sort((a, b) => new Date(b.lastActive) - new Date(a.lastActive));
+
+      if (unassignedChats.length > 0) {
         const title = document.createElement('div');
-        title.className = 'chat-list-group-title';
+        title.className = 'chat-list-group-title unassigned-group';
         title.textContent = 'Unassigned';
         container.appendChild(title);
-        unassigned.sort((a, b) => new Date(b.lastActive) - new Date(a.lastActive))
-          .forEach(chat => container.appendChild(this._createChatItem(chat)));
+        unassignedChats.forEach(chat => container.appendChild(this._createChatItem(chat)));
       }
     }
   },
@@ -1434,7 +1924,7 @@ const App = {
     el.className = 'chat-item' + (chat.id === this.currentChatId ? ' active' : '');
 
     const topic = chat.topicId ? Storage.getTopic(chat.topicId) : null;
-    const tc = topic ? Utils.getTopicColor(topic) : { color: '#ccc' };
+    const tc = (topic && topic.name !== 'Unassigned') ? Utils.getTopicColor(topic) : { color: '#ccc' };
 
     const unassignBtn = chat.topicId && STUDY_CONDITION === 'loom'
       ? `<button class="chat-unassign-btn" title="Remove from topic">
@@ -1450,13 +1940,15 @@ const App = {
         <div class="chat-item-title">${Utils.escapeHtml(chat.title)}</div>
         ${chat.summary ? `<div class="chat-item-summary">${Utils.escapeHtml(Utils.truncate(chat.summary, 50))}</div>` : ''}
       </div>
-      ${unassignBtn}
-      <button class="chat-delete-btn" title="Delete chat">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
-          <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
-          <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
-        </svg>
-      </button>
+      <div class="chat-item-actions">
+        ${unassignBtn}
+        <button class="chat-delete-btn" title="Delete chat">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+            <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
+            <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+          </svg>
+        </button>
+      </div>
     `;
 
     const unassignEl = el.querySelector('.chat-unassign-btn');
@@ -1590,7 +2082,11 @@ const App = {
         }),
       });
       const data = await resp.json();
-      keepTopic.statusSummary = data.status || keepTopic.statusSummary;
+      if (data.overview || data.threads) {
+        keepTopic.statusSummary = { overview: data.overview || [], threads: data.threads || [] };
+      } else {
+        keepTopic.statusSummary = data.status || keepTopic.statusSummary;
+      }
       keepTopic.statusLastUpdated = Utils.timestamp();
       keepTopic.sidebarCache = null;
       Storage.saveTopic(keepTopic);
@@ -1598,8 +2094,10 @@ const App = {
       console.warn('Post-merge status update failed:', err);
     }
 
-    Sidebar.show(keepTopicId);
-    Sidebar.refresh();
+    if (!this._isUnassignedTopic(keepTopicId)) {
+      Sidebar.show(keepTopicId);
+      Sidebar.refresh();
+    }
     this._renderChatList();
     this._populateTopicSelector();
     Utils.showToast(`Merged "${absorbTopic.name}" into "${keepTopic.name}"`, 'success');

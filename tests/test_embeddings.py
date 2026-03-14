@@ -292,4 +292,4 @@ class TestEmbeddingServiceGemini:
         with patch("google.genai.Client", return_value=mock_client):
             await svc.embed_text("test")
             call_kwargs = mock_client.aio.models.embed_content.call_args.kwargs
-            assert call_kwargs.get("model") == "text-embedding-004"
+            assert call_kwargs.get("model") == "gemini-embedding-001"

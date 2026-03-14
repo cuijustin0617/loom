@@ -5,15 +5,12 @@ const Sidebar = {
   currentData: null,
 
   init() {
-    document.getElementById('sidebarRefreshBtn').addEventListener('click', () => {
-      StudyLog.event('sidebar_refreshed', { topicId: this.currentTopicId, trigger: 'manual' });
-      this.refresh();
-    });
     this._initStatusEdit();
     this._initStatusDrag();
     this._initStatusUpdate();
     this._initMergeDialog();
     this._initShuffle();
+    this._initModuleCollapse();
   },
 
   show(topicId) {
@@ -23,7 +20,6 @@ const Sidebar = {
     document.getElementById('sidebarEmpty').style.display = 'none';
     document.getElementById('moduleStatus').style.display = 'block';
     document.getElementById('moduleDirections').style.display = 'block';
-    document.getElementById('sidebarRefreshBtn').style.display = 'flex';
 
     const topic = Storage.getTopic(topicId);
     if (topic) {
@@ -59,7 +55,6 @@ const Sidebar = {
     document.getElementById('moduleStatus').style.display = 'none';
     document.getElementById('moduleConnections').style.display = 'none';
     document.getElementById('moduleDirections').style.display = 'none';
-    document.getElementById('sidebarRefreshBtn').style.display = 'none';
     document.getElementById('topicBadge').style.display = 'none';
 
     if (STUDY_CONDITION === 'baseline') {
@@ -78,9 +73,12 @@ const Sidebar = {
     if (!topic) return;
 
     const chatId = Storage.getCurrentChatId();
-    const messages = Storage.getMessages(chatId).map(m => ({
-      role: m.role, content: m.content,
-    }));
+    const messages = Storage.getMessages(chatId).map(m => {
+      if (m.role === 'assistant' && m.chunkLabels && Object.keys(m.chunkLabels).length > 0) {
+        return { role: m.role, content: App._injectChunkLabels(m.content, m.chunkLabels) };
+      }
+      return { role: m.role, content: m.content };
+    });
     if (messages.length === 0) return;
 
     this._showLoading();
@@ -150,18 +148,65 @@ const Sidebar = {
 
   _createDirectionCard(dir) {
     const el = document.createElement('div');
-    el.className = 'direction-card';
+    const dirType = dir.type || 'extend';
+    el.className = `direction-card type-${dirType}`;
     el.draggable = true;
+    const threadLabel = dir.threadLabel ? Utils.escapeHtml(dir.threadLabel) : '';
+    const typeLabels = { strengthen: 'strengthen', bridge: 'bridge', extend: 'extend' };
+    const typeLabel = typeLabels[dirType] || 'explore';
+    const tagHtml = threadLabel
+      ? `<div class="direction-tag tag-${dirType}"><span class="direction-tag-type">${typeLabel}</span><span class="direction-tag-sep">&middot;</span><span class="direction-tag-thread">${threadLabel}</span></div>`
+      : '';
+    const reasonHtml = dir.reason
+      ? `<div class="direction-reason">${Utils.escapeHtml(dir.reason)}</div>`
+      : '';
     el.innerHTML = `
+      ${tagHtml}
       <div class="card-header">
-        <span class="card-type-icon direction-icon">✨</span>
         <span class="card-title">${Utils.escapeHtml(dir.title || '')}</span>
       </div>
       <div class="card-question">${Utils.escapeHtml(dir.question || '')}</div>
-      <div class="card-drag-hint">⟶ Drag to chat</div>
+      ${reasonHtml}
+      <div class="card-actions-row">
+        <div class="card-drag-hint">⟶ Drag to chat</div>
+        <button class="card-new-chat-btn" title="Ask in new chat">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
+            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          New chat
+        </button>
+      </div>
     `;
     this._setupDrag(el, dir.question || '', dir.title || '');
+    el.querySelector('.card-new-chat-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      StudyLog.event('module3_direction_new_chat', { topicId: this.currentTopicId, directionTitle: dir.title || '' });
+      this._startDirectionInNewChat(dir);
+    });
     return el;
+  },
+
+  _startDirectionInNewChat(dir) {
+    const topicId = this.currentTopicId;
+    App.newChat();
+    
+    // Select the topic so it gets grouped and context is injected by App.sendMessage()
+    if (topicId) {
+      App.selectedTopicId = topicId;
+      const topicSel = document.getElementById('topicSelect');
+      if (topicSel) topicSel.value = topicId;
+    }
+    
+    // Enable search by default
+    App.useSearch = true;
+    const searchBtn = document.getElementById('searchToggleBtn');
+    if (searchBtn) {
+      searchBtn.classList.add('active');
+      searchBtn.title = 'Google Search ON';
+    }
+    
+    document.getElementById('chatInput').value = dir.question || '';
+    App.sendMessage();
   },
 
   _setupDrag(el, fullText, label) {
@@ -201,7 +246,6 @@ const Sidebar = {
       container.innerHTML = '<p class="status-empty">No status yet. Chat more to build your profile.</p>';
       return;
     }
-    // Fallback for old HTML that only has a <p> element
     if (container.id === 'statusText') {
       container.textContent = this._serializeStatus(statusData);
       return;
@@ -211,21 +255,66 @@ const Sidebar = {
       return;
     }
     const overview = statusData.overview || [];
+    const threads = statusData.threads || [];
     const specifics = statusData.specifics || [];
     let html = '';
+
     if (overview.length > 0) {
-      html += '<div class="status-section"><div class="status-section-label">Overview</div>';
+      const overviewCollapsed = localStorage.getItem('loom_overviewCollapsed') === 'true';
+      html += '<div class="status-section"><div class="status-section-label collapsible' + (overviewCollapsed ? ' section-collapsed' : '') + '" data-section-toggle="overview"><span class="section-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="8" height="8"><polyline points="6 9 12 15 18 9"/></svg></span>Overview</div><div class="status-section-items' + (overviewCollapsed ? ' section-collapsed' : '') + '" data-section-items="overview">';
       overview.forEach((pt, i) => {
         html += `<div class="status-item" data-section="overview" data-idx="${i}">
           <span class="status-item-text">${Utils.escapeHtml(pt)}</span>
           <span class="status-item-actions">
-            <button class="status-item-btn status-item-edit" title="Edit">✎</button>
             <button class="status-item-btn status-item-del" title="Remove">×</button>
           </span></div>`;
       });
+      html += '</div></div>';
+    }
+
+    if (threads.length > 0) {
+      html += '<div class="status-section"><div class="status-section-label">Learning Threads</div>';
+      threads.forEach((thread, ti) => {
+        const label = thread.label || 'Thread';
+        const steps = thread.steps || [];
+        const dotsHtml = steps.map((s, si) => {
+          const level = (typeof s === 'object' ? s.level : '') || 'brief';
+          const text = typeof s === 'object' ? s.text || '' : String(s);
+          return `<span class="thread-dot thread-dot-${level}" data-thread="${ti}" data-step="${si}" title="${Utils.escapeHtml(text)}"></span>`;
+        }).join('<span class="thread-connector"></span>');
+
+        html += `<div class="thread-row" data-thread-idx="${ti}">
+          <div class="thread-header">
+            <button class="thread-toggle" data-thread="${ti}">
+              <svg class="thread-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="10" height="10"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+            <span class="thread-label">${Utils.escapeHtml(label)}</span>
+            <span class="thread-chain">${dotsHtml}</span>
+            <span class="status-item-actions">
+              <button class="status-item-btn thread-del-btn" data-thread="${ti}" title="Remove thread">×</button>
+            </span>
+          </div>
+          <div class="thread-steps" data-thread="${ti}" style="display:none;">
+            ${steps.map((s, si) => {
+          const text = typeof s === 'object' ? s.text || '' : String(s);
+          const level = (typeof s === 'object' ? s.level : '') || 'brief';
+          return `<div class="thread-step" data-thread="${ti}" data-step="${si}">
+                <span class="thread-step-dot thread-dot-${level}"></span>
+                <span class="thread-step-text">${Utils.escapeHtml(text)}</span>
+                <span class="status-level level-${level}">${Utils.escapeHtml(level)}</span>
+                <span class="status-item-actions">
+                  <button class="status-item-btn status-item-del" title="Remove step">×</button>
+                </span>
+              </div>`;
+        }).join('')}
+          </div>
+        </div>`;
+      });
       html += '</div>';
     }
-    if (specifics.length > 0) {
+
+    // Legacy specifics fallback
+    if (specifics.length > 0 && threads.length === 0) {
       html += '<div class="status-section"><div class="status-section-label">Specifics</div>';
       specifics.forEach((item, i) => {
         const text = typeof item === 'string' ? item : item.text || '';
@@ -235,12 +324,12 @@ const Sidebar = {
           <span class="status-item-text">${Utils.escapeHtml(text)}</span>
           ${level ? `<span class="status-level${levelClass}">${Utils.escapeHtml(level)}</span>` : ''}
           <span class="status-item-actions">
-            <button class="status-item-btn status-item-edit" title="Edit">✎</button>
             <button class="status-item-btn status-item-del" title="Remove">×</button>
           </span></div>`;
       });
       html += '</div>';
     }
+
     if (!html) {
       html = '<p class="status-empty">No status yet. Chat more to build your profile.</p>';
     }
@@ -251,7 +340,9 @@ const Sidebar = {
   _bindStatusItemActions() {
     const container = this._getStatusContainer();
     if (!container || container.id !== 'statusStructured') return;
-    container.querySelectorAll('.status-item-del').forEach(btn => {
+
+    // Overview and legacy specifics delete
+    container.querySelectorAll('.status-item .status-item-del').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const item = btn.closest('.status-item');
@@ -260,32 +351,118 @@ const Sidebar = {
         this._deleteStatusItem(section, idx);
       });
     });
-    container.querySelectorAll('.status-item-edit').forEach(btn => {
-      btn.addEventListener('click', (e) => {
+
+    // Overview and legacy specifics inline edit
+    container.querySelectorAll('.status-item[data-section]').forEach(item => {
+      item.addEventListener('dblclick', (e) => {
         e.stopPropagation();
-        const item = btn.closest('.status-item');
         const section = item.dataset.section;
         const idx = parseInt(item.dataset.idx);
-        const textEl = item.querySelector('.status-item-text');
-        const original = textEl.textContent;
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.className = 'status-inline-edit';
-        input.value = original;
-        textEl.replaceWith(input);
-        input.focus();
-        input.select();
-        const save = () => {
-          const val = input.value.trim();
-          if (val && val !== original) this._editStatusItem(section, idx, val);
-          else this._renderStatus(this._getCurrentStatus());
-        };
-        input.addEventListener('blur', save);
-        input.addEventListener('keydown', (ev) => {
-          if (ev.key === 'Enter') input.blur();
-          if (ev.key === 'Escape') { input.value = original; input.blur(); }
-        });
+        this._startInlineEdit(item, section, idx);
       });
+    });
+
+    // Thread toggle expand/collapse
+    container.querySelectorAll('.thread-toggle').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const ti = btn.dataset.thread;
+        const stepsEl = container.querySelector(`.thread-steps[data-thread="${ti}"]`);
+        const chevron = btn.querySelector('.thread-chevron');
+        if (stepsEl) {
+          const open = stepsEl.style.display !== 'none';
+          stepsEl.style.display = open ? 'none' : 'block';
+          chevron?.classList.toggle('expanded', !open);
+        }
+      });
+    });
+
+    // Thread delete
+    container.querySelectorAll('.thread-del-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const ti = parseInt(btn.dataset.thread);
+        this._deleteThread(ti);
+      });
+    });
+
+    // Thread step delete
+    container.querySelectorAll('.thread-step .status-item-del').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const step = btn.closest('.thread-step');
+        const ti = parseInt(step.dataset.thread);
+        const si = parseInt(step.dataset.step);
+        this._deleteThreadStep(ti, si);
+      });
+    });
+
+    // Thread step inline edit on double-click
+    container.querySelectorAll('.thread-step').forEach(step => {
+      step.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        const ti = parseInt(step.dataset.thread);
+        const si = parseInt(step.dataset.step);
+        this._startThreadStepEdit(step, ti, si);
+      });
+    });
+  },
+
+  _startInlineEdit(item, section, idx) {
+    const textEl = item.querySelector('.status-item-text');
+    if (!textEl) return;
+    const original = textEl.textContent;
+    const input = document.createElement('textarea');
+    input.className = 'status-inline-edit';
+    input.value = original;
+    input.rows = 1;
+    textEl.replaceWith(input);
+    input.style.height = 'auto';
+    input.style.height = input.scrollHeight + 'px';
+    input.focus();
+    input.select();
+    input.addEventListener('input', () => {
+      input.style.height = 'auto';
+      input.style.height = input.scrollHeight + 'px';
+    });
+    const save = () => {
+      const val = input.value.trim();
+      if (val && val !== original) this._editStatusItem(section, idx, val);
+      else this._renderStatus(this._getCurrentStatus());
+    };
+    input.addEventListener('blur', save);
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); input.blur(); }
+      if (ev.key === 'Escape') { input.value = original; input.blur(); }
+    });
+  },
+
+  _startThreadStepEdit(stepEl, ti, si) {
+    const textEl = stepEl.querySelector('.thread-step-text');
+    if (!textEl) return;
+    const original = textEl.textContent;
+    const input = document.createElement('textarea');
+    input.className = 'status-inline-edit';
+    input.value = original;
+    input.rows = 1;
+    textEl.replaceWith(input);
+    input.style.height = 'auto';
+    input.style.height = input.scrollHeight + 'px';
+    input.focus();
+    input.select();
+    input.addEventListener('input', () => {
+      input.style.height = 'auto';
+      input.style.height = input.scrollHeight + 'px';
+    });
+    const save = () => {
+      const val = input.value.trim();
+      if (val && val !== original) this._editThreadStep(ti, si, val);
+      else this._renderStatus(this._getCurrentStatus());
+    };
+    input.addEventListener('blur', save);
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); input.blur(); }
+      if (ev.key === 'Escape') { input.value = original; input.blur(); }
     });
   },
 
@@ -326,12 +503,65 @@ const Sidebar = {
     StudyLog.event('summary_edited', { topicId: this.currentTopicId, section, editType: 'edit', oldValue, newValue: newText });
   },
 
+  _deleteThread(threadIdx) {
+    const topic = Storage.getTopic(this.currentTopicId);
+    if (!topic || typeof topic.statusSummary !== 'object') return;
+    const threads = topic.statusSummary.threads;
+    if (!threads || threadIdx < 0 || threadIdx >= threads.length) return;
+    const oldLabel = threads[threadIdx].label;
+    threads.splice(threadIdx, 1);
+    topic.statusLastUpdated = Utils.timestamp();
+    Storage.saveTopic(topic);
+    this._renderStatus(topic.statusSummary);
+    StudyLog.event('summary_edited', { topicId: this.currentTopicId, section: 'threads', editType: 'delete_thread', oldValue: oldLabel });
+  },
+
+  _deleteThreadStep(threadIdx, stepIdx) {
+    const topic = Storage.getTopic(this.currentTopicId);
+    if (!topic || typeof topic.statusSummary !== 'object') return;
+    const threads = topic.statusSummary.threads;
+    if (!threads || threadIdx < 0 || threadIdx >= threads.length) return;
+    const steps = threads[threadIdx].steps;
+    if (!steps || stepIdx < 0 || stepIdx >= steps.length) return;
+    const oldValue = typeof steps[stepIdx] === 'object' ? steps[stepIdx].text : steps[stepIdx];
+    steps.splice(stepIdx, 1);
+    if (steps.length === 0) threads.splice(threadIdx, 1);
+    topic.statusLastUpdated = Utils.timestamp();
+    Storage.saveTopic(topic);
+    this._renderStatus(topic.statusSummary);
+    StudyLog.event('summary_edited', { topicId: this.currentTopicId, section: 'threads', editType: 'delete_step', oldValue });
+  },
+
+  _editThreadStep(threadIdx, stepIdx, newText) {
+    const topic = Storage.getTopic(this.currentTopicId);
+    if (!topic || typeof topic.statusSummary !== 'object') return;
+    const threads = topic.statusSummary.threads;
+    if (!threads || threadIdx < 0 || threadIdx >= threads.length) return;
+    const steps = threads[threadIdx].steps;
+    if (!steps || stepIdx < 0 || stepIdx >= steps.length) return;
+    const oldValue = typeof steps[stepIdx] === 'object' ? steps[stepIdx].text : steps[stepIdx];
+    if (typeof steps[stepIdx] === 'object') steps[stepIdx].text = newText;
+    else steps[stepIdx] = newText;
+    topic.statusLastUpdated = Utils.timestamp();
+    Storage.saveTopic(topic);
+    this._renderStatus(topic.statusSummary);
+    StudyLog.event('summary_edited', { topicId: this.currentTopicId, section: 'threads', editType: 'edit_step', oldValue, newValue: newText });
+  },
+
   _serializeStatus(statusSummary) {
     if (!statusSummary) return '';
     if (typeof statusSummary === 'string') return statusSummary;
     const parts = [];
     if (statusSummary.overview) {
       parts.push('Overview: ' + statusSummary.overview.join('; '));
+    }
+    if (statusSummary.threads) {
+      statusSummary.threads.forEach(t => {
+        const stepStrs = (t.steps || []).map(s =>
+          typeof s === 'object' ? `${s.text} (${s.level || 'unknown'})` : s
+        );
+        parts.push(`Thread "${t.label}": ${stepStrs.join(' → ')}`);
+      });
     }
     if (statusSummary.specifics) {
       const items = statusSummary.specifics.map(s =>
@@ -356,13 +586,14 @@ const Sidebar = {
   },
 
   _initStatusUpdate() {
-    document.getElementById('statusUpdateBtn').addEventListener('click', async () => {
+    document.getElementById('statusUpdateHeaderBtn').addEventListener('click', async (e) => {
+      e.stopPropagation();
       if (!this.currentTopicId) return;
       const topic = Storage.getTopic(this.currentTopicId);
       if (!topic) return;
 
-      const btn = document.getElementById('statusUpdateBtn');
-      btn.textContent = 'Updating…';
+      const btn = document.getElementById('statusUpdateHeaderBtn');
+      btn.classList.add('loading');
       btn.disabled = true;
 
       try {
@@ -379,8 +610,8 @@ const Sidebar = {
         });
         const data = await resp.json();
         let newStatus;
-        if (data.overview) {
-          newStatus = { overview: data.overview, specifics: data.specifics || [] };
+        if (data.overview || data.threads) {
+          newStatus = { overview: data.overview || [], threads: data.threads || [] };
         } else {
           newStatus = data.status || topic.statusSummary;
         }
@@ -395,7 +626,7 @@ const Sidebar = {
         console.error('Status update failed:', err);
         Utils.showToast('Status update failed', 'error');
       }
-      btn.textContent = 'Update';
+      btn.classList.remove('loading');
       btn.disabled = false;
     });
   },
@@ -483,18 +714,27 @@ const Sidebar = {
     });
   },
 
-  async shuffleDirections(location = 'sidebar') {
-    if (!this.currentTopicId) return;
-    const topic = Storage.getTopic(this.currentTopicId);
+  async shuffleDirections(location = 'sidebar', targetTopicId = null) {
+    const topicId = targetTopicId || this.currentTopicId;
+    if (!topicId) return;
+    const topic = Storage.getTopic(topicId);
     if (!topic) return;
 
-    const btn = document.getElementById('shuffleDirectionsBtn');
-    if (btn) btn.classList.add('loading');
+    let btn = null;
+    if (location !== 'welcome') {
+      btn = document.getElementById('shuffleDirectionsBtn');
+      if (btn) btn.classList.add('loading');
+    }
 
-    const oldDirs = (this.currentData?.newDirections || []).map(d => d.title);
+    let oldDirs = [];
+    if (location === 'welcome' && topic.sidebarCache) {
+      oldDirs = (topic.sidebarCache.newDirections || []).map(d => d.title);
+    } else if (this.currentData) {
+      oldDirs = (this.currentData.newDirections || []).map(d => d.title);
+    }
 
     const chatId = Storage.getCurrentChatId();
-    const messages = Storage.getMessages(chatId);
+    const messages = chatId ? Storage.getMessages(chatId) : [];
     const currentSummary = messages.slice(-4).map(m => `${m.role}: ${m.content}`).join('\n');
 
     try {
@@ -508,37 +748,43 @@ const Sidebar = {
             id: c.id, title: c.title, preview: c.preview,
           })),
           currentSummary,
+          previouslySuggested: oldDirs,
           model: Storage.getSidebarModel(),
         }),
       });
       const data = await resp.json();
       const newDirs = data.newDirections || [];
 
-      // Update UI
-      const dirContainer = document.getElementById('directionCards');
-      dirContainer.innerHTML = '';
-      if (newDirs.length === 0) {
-        dirContainer.innerHTML = '<p style="font-size:12px;color:var(--text-muted);">Keep chatting for suggestions.</p>';
-      }
-      newDirs.forEach(dir => dirContainer.appendChild(this._createDirectionCard(dir)));
-
       // Update cache
-      if (this.currentData) this.currentData.newDirections = newDirs;
       const freshTopic = Storage.getTopic(topic.id);
-      if (freshTopic && freshTopic.sidebarCache) {
+      if (freshTopic) {
+        if (!freshTopic.sidebarCache) freshTopic.sidebarCache = {};
         freshTopic.sidebarCache.newDirections = newDirs;
         Storage.saveTopic(freshTopic);
       }
+      
+      if (location === 'sidebar' && topicId === this.currentTopicId) {
+        // Update UI
+        const dirContainer = document.getElementById('directionCards');
+        if (dirContainer) {
+          dirContainer.innerHTML = '';
+          if (newDirs.length === 0) {
+            dirContainer.innerHTML = '<p style="font-size:12px;color:var(--text-muted);">Keep chatting for suggestions.</p>';
+          }
+          newDirs.forEach(dir => dirContainer.appendChild(this._createDirectionCard(dir)));
+        }
+        if (this.currentData) this.currentData.newDirections = newDirs;
+      }
 
       StudyLog.event('module3_shuffled', {
-        topicId: this.currentTopicId,
+        topicId: topicId,
         location,
         oldDirections: oldDirs,
         newDirections: newDirs.map(d => d.title),
       });
     } catch (err) {
       console.error('Shuffle directions failed:', err);
-      Utils.showToast('Failed to shuffle suggestions', 'error');
+      if (location === 'sidebar') Utils.showToast('Failed to shuffle suggestions', 'error');
     }
 
     if (btn) btn.classList.remove('loading');
@@ -556,5 +802,54 @@ const Sidebar = {
       document.getElementById('mergeTopicDialog').style.display = 'none';
       await App._mergeTopics(targetId, sourceTopicId);
     });
+  },
+
+  _initModuleCollapse() {
+    // Module collapse: clicking header or collapse button toggles module body
+    document.querySelectorAll('.module-collapse-btn').forEach(btn => {
+      const moduleId = btn.dataset.module;
+      // Restore persisted state
+      const collapsed = localStorage.getItem('loom_moduleCollapse_' + moduleId) === 'true';
+      if (collapsed) {
+        const body = document.getElementById(moduleId + 'Body');
+        if (body) body.classList.add('collapsed');
+        btn.classList.add('collapsed');
+      }
+
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._toggleModuleCollapse(moduleId);
+      });
+    });
+
+    document.querySelectorAll('.module-header[data-module]').forEach(header => {
+      header.addEventListener('click', (e) => {
+        // Don't toggle if clicking the update or shuffle button
+        if (e.target.closest('.status-update-btn') || e.target.closest('.shuffle-btn')) return;
+        const moduleId = header.dataset.module;
+        this._toggleModuleCollapse(moduleId);
+      });
+    });
+
+    // Overview section collapse within Module 1
+    document.addEventListener('click', (e) => {
+      const label = e.target.closest('.status-section-label.collapsible');
+      if (!label) return;
+      const sectionKey = label.dataset.sectionToggle;
+      const itemsEl = label.parentElement.querySelector('[data-section-items="' + sectionKey + '"]');
+      if (!itemsEl) return;
+      const isCollapsed = label.classList.toggle('section-collapsed');
+      itemsEl.classList.toggle('section-collapsed', isCollapsed);
+      localStorage.setItem('loom_overviewCollapsed', isCollapsed);
+    });
+  },
+
+  _toggleModuleCollapse(moduleId) {
+    const body = document.getElementById(moduleId + 'Body');
+    const btn = document.querySelector('.module-collapse-btn[data-module="' + moduleId + '"]');
+    if (!body) return;
+    const collapsed = body.classList.toggle('collapsed');
+    if (btn) btn.classList.toggle('collapsed', collapsed);
+    localStorage.setItem('loom_moduleCollapse_' + moduleId, collapsed);
   },
 };

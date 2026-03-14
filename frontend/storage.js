@@ -153,7 +153,7 @@ const Storage = {
   migrateTopicColors() {
     const data = this._getAll();
     const topics = data.topics;
-    if (topics.length === 0) return;
+    if (!topics || topics.length === 0) return;
     const needsMigration = topics.some(t => t.colorHue === undefined || t.colorHue === null);
     if (!needsMigration) return;
     const assignedHues = [];
@@ -298,10 +298,45 @@ const Storage = {
       }));
   },
 
+  // ── Embedding Migration ─────────────────────────────────────────────────
+
+  async reEmbedChats() {
+    const data = this._getAll();
+    const chats = data.chats.filter(c => c.summary && c.summary.trim());
+    if (!chats.length) return;
+
+    const EXPECTED_DIM = 3072;
+    const needsReEmbed = chats.filter(c =>
+      !c.embedding || c.embedding.length !== EXPECTED_DIM
+    );
+    if (!needsReEmbed.length) return;
+
+    console.log(`[reEmbed] Re-embedding ${needsReEmbed.length} chats...`);
+    for (const chat of needsReEmbed) {
+      try {
+        const resp = await fetch('/api/embed', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: chat.summary }),
+        });
+        if (!resp.ok) continue;
+        const result = await resp.json();
+        chat.embedding = result.embedding;
+        const idx = data.chats.findIndex(c => c.id === chat.id);
+        if (idx >= 0) data.chats[idx] = chat;
+        console.log(`[reEmbed] ✅ ${chat.id} (${chat.title})`);
+      } catch (e) {
+        console.warn(`[reEmbed] ❌ ${chat.id}:`, e);
+      }
+    }
+    this._saveAll(data);
+    console.log('[reEmbed] Migration complete');
+  },
+
   // ── Model Preferences ───────────────────────────────────────────────────
 
   getChatModel() {
-    return localStorage.getItem('loom_chatModel') || 'gemini-2.5-flash';
+    return localStorage.getItem('loom_chatModel') || 'gemini-3-flash-preview';
   },
 
   setChatModel(model) {
@@ -309,7 +344,7 @@ const Storage = {
   },
 
   getSidebarModel() {
-    return localStorage.getItem('loom_sidebarModel') || 'gemini-2.5-flash';
+    return localStorage.getItem('loom_sidebarModel') || 'gemini-3-flash-preview';
   },
 
   setSidebarModel(model) {

@@ -31,7 +31,7 @@ class EmbeddingService:
 
         client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
         result = await client.aio.models.embed_content(
-            model="text-embedding-004", contents=text
+            model="gemini-embedding-001", contents=text
         )
         return list(result.embeddings[0].values)
 
@@ -56,10 +56,11 @@ def rank_by_similarity(
     Each candidate must have an 'id' and 'embedding' field.
     Returns candidates sorted by similarity score descending, with 'score' added.
     """
+    query_dim = len(query_embedding)
     results = []
     for candidate in candidates:
         emb = candidate.get("embedding")
-        if not emb:
+        if not emb or len(emb) != query_dim:
             continue
         score = cosine_similarity(query_embedding, emb)
         results.append({**candidate, "score": score})

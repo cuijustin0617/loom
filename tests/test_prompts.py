@@ -152,7 +152,7 @@ class TestStatusUpdatePrompt:
             current_messages="(none)", recent_summaries="test",
         )
         assert '"overview"' in result
-        assert '"specifics"' in result
+        assert '"threads"' in result
         assert '"level"' in result
 
     def test_mentions_incremental_rules(self):
@@ -258,3 +258,39 @@ class TestStreamPrompts:
 
     def test_metadata_prompt_requests_json(self):
         assert "JSON" in CHAT_METADATA_PROMPT or "json" in CHAT_METADATA_PROMPT
+
+
+class TestStatusUpdatePromptLabels:
+    """Tests for chunk label awareness and conservative understanding inference in STATUS_UPDATE_PROMPT."""
+
+    def _formatted(self):
+        return STATUS_UPDATE_PROMPT.format(
+            topic_name="ML", current_status="Overview: basics",
+            current_messages="user: test", recent_summaries="- chat 1",
+        )
+
+    def test_mentions_user_labels(self):
+        result = self._formatted()
+        assert "USER: understood" in result or "understood this section" in result
+
+    def test_mentions_unsure_label(self):
+        result = self._formatted()
+        assert "USER: unsure" in result or "unsure about this section" in result
+
+    def test_mentions_conservative_inference(self):
+        result = self._formatted()
+        assert "Do NOT mark concepts" in result or "not evidence" in result
+
+    def test_mentions_user_actions_focus(self):
+        result = self._formatted()
+        has_focus = ("follow-up" in result or "reactions" in result or
+                     "labels" in result or "user's own actions" in result.lower())
+        assert has_focus, "Prompt should reference user actions as primary evidence"
+
+    def test_label_markers_format_documented(self):
+        result = self._formatted()
+        assert "[USER:" in result
+
+    def test_unlabeled_treated_as_skimmed(self):
+        result = self._formatted()
+        assert "skimmed" in result.lower() or "briefly" in result.lower()

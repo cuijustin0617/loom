@@ -1,25 +1,30 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Loom — Knowledge Sidebar</title>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
+    rel="stylesheet">
   <link rel="stylesheet" href="/static/styles.css?v=__CACHE_VERSION__">
 </head>
+
 <body>
   <!-- Login Overlay -->
   <div class="login-overlay" id="loginOverlay">
     <div class="login-card">
       <div class="login-logo">
         <svg viewBox="0 0 24 24" fill="none" width="40" height="40">
-          <path d="M12 2C12 2 6 8 6 14C6 17.5 8.5 20 12 22C15.5 20 18 17.5 18 14C18 8 12 2 12 2Z" fill="var(--primary)" opacity="0.9"/>
-          <ellipse cx="12" cy="14" rx="2" ry="3" fill="var(--primary)" opacity="0.5"/>
+          <path d="M12 2C12 2 6 8 6 14C6 17.5 8.5 20 12 22C15.5 20 18 17.5 18 14C18 8 12 2 12 2Z" fill="var(--primary)"
+            opacity="0.9" />
+          <ellipse cx="12" cy="14" rx="2" ry="3" fill="var(--primary)" opacity="0.5" />
         </svg>
       </div>
       <h2>Welcome to Loom</h2>
       <p class="login-subtitle">Enter your participant ID and set a password</p>
-      <input type="text" id="loginIdInput" placeholder="e.g., loom01 or baseline01" autocomplete="off" spellcheck="false">
+      <input type="text" id="loginIdInput" placeholder="e.g., loom01 or baseline01" autocomplete="off"
+        spellcheck="false">
       <input type="password" id="loginPasswordInput" placeholder="Password" autocomplete="off">
       <p class="login-error" id="loginError"></p>
       <button class="login-btn" id="loginBtn">Continue</button>
@@ -33,8 +38,9 @@
       <div class="sidebar-header">
         <div class="logo-icon">
           <svg viewBox="0 0 24 24" fill="none">
-            <path d="M12 2C12 2 6 8 6 14C6 17.5 8.5 20 12 22C15.5 20 18 17.5 18 14C18 8 12 2 12 2Z" fill="white" opacity="0.9"/>
-            <ellipse cx="12" cy="14" rx="2" ry="3" fill="white" opacity="0.5"/>
+            <path d="M12 2C12 2 6 8 6 14C6 17.5 8.5 20 12 22C15.5 20 18 17.5 18 14C18 8 12 2 12 2Z" fill="white"
+              opacity="0.9" />
+            <ellipse cx="12" cy="14" rx="2" ry="3" fill="white" opacity="0.5" />
           </svg>
         </div>
         <span class="logo-text">Loom</span>
@@ -42,7 +48,8 @@
 
       <button class="new-chat-btn" id="newChatBtn">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
-          <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          <line x1="12" y1="5" x2="12" y2="19" />
+          <line x1="5" y1="12" x2="19" y2="12" />
         </svg>
         New Chat
       </button>
@@ -57,8 +64,8 @@
       <div class="sidebar-actions">
         <button class="new-topic-btn" id="newTopicBtn">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-            <path d="M2 17l10 5 10-5"/>
+            <path d="M12 2L2 7l10 5 10-5-10-5z" />
+            <path d="M2 17l10 5 10-5" />
           </svg>
           New Topic
         </button>
@@ -73,7 +80,9 @@
           </div>
           <button class="logout-btn" id="logoutBtn" title="Switch user">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
             </svg>
           </button>
         </div>
@@ -82,7 +91,7 @@
     <div class="resize-handle" id="resizeLeft">
       <button class="sidebar-collapse-btn" id="collapseLeftBtn" title="Collapse sidebar">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="12" height="12">
-          <polyline points="15 18 9 12 15 6"/>
+          <polyline points="15 18 9 12 15 6" />
         </svg>
       </button>
     </div>
@@ -117,49 +126,37 @@
           <div class="input-row">
             <button class="input-icon" id="attachBtn" title="Attach image or file">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
-                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
               </svg>
             </button>
             <textarea id="chatInput" rows="1" placeholder="Ask a question..."></textarea>
             <select class="input-topic-select" id="topicSelect" title="Assign to topic">
               <option value="">Auto-detect</option>
             </select>
-            <button class="input-icon" id="searchToggleBtn" title="Google Search grounding">
+            <button class="search-btn" id="searchToggleBtn" title="Google Search grounding">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
               </svg>
+              <span>Search</span>
             </button>
-            <select class="input-model-select" id="chatModelSelect">
-              <optgroup label="Gemini">
-                <option value="gemini-2.5-flash" selected>Flash</option>
-                <option value="gemini-2.5-flash-lite">Flash Lite</option>
-                <option value="gemini-3-flash-preview">3 Flash</option>
-                <option value="gemini-3.1-pro-preview">3.1 Pro</option>
-              </optgroup>
-              <optgroup label="Gemini Live">
-                <option value="gemini-2.0-flash-live-001">Live Flash</option>
-              </optgroup>
-              <optgroup label="OpenAI">
-                <option value="gpt-5.2-2025-12-11">GPT-5.2</option>
-                <option value="gpt-5-mini-2025-08-07">GPT-5 Mini</option>
-                <option value="gpt-5-nano-2025-08-07">GPT-5 Nano</option>
-              </optgroup>
-            </select>
             <button class="send-btn" id="sendBtn">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
-                <line x1="22" y1="2" x2="11" y2="13"/>
-                <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                <line x1="22" y1="2" x2="11" y2="13" />
+                <polygon points="22 2 15 22 11 13 2 9 22 2" />
               </svg>
             </button>
           </div>
           <input type="file" id="fileInput" multiple accept="image/*,.pdf,.txt,.csv,.json" style="display:none;">
         </div>
+        <div class="chat-footer-note">All AI outputs are powered by Gemini-3-Flash.</div>
       </div>
     </main>
     <div class="resize-handle" id="resizeRight">
       <button class="sidebar-collapse-btn" id="collapseRightBtn" title="Collapse sidebar">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="12" height="12">
-          <polyline points="9 18 15 12 9 6"/>
+          <polyline points="9 18 15 12 9 6" />
         </svg>
       </button>
     </div>
@@ -169,28 +166,11 @@
       <div class="knowledge-header">
         <div class="knowledge-title">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
-            <circle cx="12" cy="12" r="10"/>
-            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10"/>
-            <path d="M2 12h20"/>
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10" />
+            <path d="M2 12h20" />
           </svg>
           Knowledge Sidebar
-        </div>
-        <div class="knowledge-header-row">
-          <div class="knowledge-subtitle">Personalized context modules</div>
-          <select class="model-select model-select-sm" id="sidebarModelSelect">
-            <optgroup label="Gemini">
-              <option value="gemini-2.5-flash" selected>gemini-2.5-flash</option>
-              <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
-              <option value="gemini-3-flash-preview">gemini-3-flash-preview</option>
-              <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview</option>
-              <option value="gemini-2.0-flash-live-001">gemini-2.0-flash-live</option>
-            </optgroup>
-            <optgroup label="OpenAI">
-              <option value="gpt-5.2-2025-12-11">gpt-5.2-2025-12-11</option>
-              <option value="gpt-5-mini-2025-08-07">gpt-5-mini-2025-08-07</option>
-              <option value="gpt-5-nano-2025-08-07">gpt-5-nano-2025-08-07</option>
-            </optgroup>
-          </select>
         </div>
       </div>
 
@@ -200,57 +180,95 @@
           <p class="sidebar-hint">The sidebar will surface relevant context when it detects a recurring topic.</p>
         </div>
 
-        <!-- Module 1: Status Summary -->
+        <!-- Module 1: Status Summary (User Knowledge) -->
         <div class="sidebar-module module-status" id="moduleStatus" style="display:none;">
-          <div class="module-header">
-            <span class="module-icon status-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-                <circle cx="12" cy="7" r="4"/>
+          <div class="module-header" data-module="moduleStatus">
+            <div class="module-header-label">
+              <span class="module-icon status-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                  <circle cx="12" cy="7" r="4" />
+                </svg>
+              </span>
+              <span class="module-title">User Knowledge</span>
+              <span class="module-title" id="statusTopicName"
+                style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-secondary);font-size:11px;margin-left:2px;"></span>
+            </div>
+            <button class="status-update-btn" id="statusUpdateHeaderBtn" title="Update status">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                <polyline points="23 4 23 10 17 10" />
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
               </svg>
-            </span>
-            <span class="module-title" id="statusTopicName">Your Status</span>
+            </button>
+            <button class="module-collapse-btn" data-module="moduleStatus" title="Collapse module">
+              <svg class="module-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                width="10" height="10">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
           </div>
-          <div class="status-content" id="statusContent">
-            <div class="status-structured" id="statusStructured" draggable="true"></div>
-            <div class="status-actions">
-              <button class="status-edit-btn" id="statusUpdateBtn" style="color:var(--accent-blue);">Update</button>
+          <div class="module-body" id="moduleStatusBody">
+            <div class="status-content" id="statusContent">
+              <div class="status-structured" id="statusStructured" draggable="true"></div>
             </div>
           </div>
         </div>
 
         <!-- Module 2: Linked Past Chats (connections from current response) -->
         <div class="sidebar-module module-connections" id="moduleConnections" style="display:none;">
-          <div class="module-header">
-            <span class="module-icon connections-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+          <div class="module-header" data-module="moduleConnections">
+            <div class="module-header-label">
+              <span class="module-icon connections-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                </svg>
+              </span>
+              <span class="module-title">Linked past chats</span>
+            </div>
+            <button class="module-collapse-btn" data-module="moduleConnections" title="Collapse module">
+              <svg class="module-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                width="10" height="10">
+                <polyline points="6 9 12 15 18 9" />
               </svg>
-            </span>
-            <span class="module-title">Linked past chats</span>
+            </button>
           </div>
-          <div class="connection-sidebar-cards" id="connectionSidebarCards"></div>
+          <div class="module-body" id="moduleConnectionsBody">
+            <div class="connection-sidebar-cards" id="connectionSidebarCards"></div>
+          </div>
         </div>
 
         <!-- Module 3: New Directions -->
         <div class="sidebar-module module-directions" id="moduleDirections" style="display:none;">
-          <div class="module-header">
-            <span class="module-icon directions-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
-              </svg>
-            </span>
-            <span class="module-title">Explore next</span>
+          <div class="module-header" data-module="moduleDirections">
+            <div class="module-header-label">
+              <span class="module-icon directions-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                  <polygon
+                    points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                </svg>
+              </span>
+              <span class="module-title">Explore next</span>
+            </div>
             <button class="shuffle-btn" id="shuffleDirectionsBtn" title="Shuffle suggestions">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
-                <polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/>
-                <polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/>
-                <line x1="4" y1="4" x2="9" y2="9"/>
+                <polyline points="16 3 21 3 21 8" />
+                <line x1="4" y1="20" x2="21" y2="3" />
+                <polyline points="21 16 21 21 16 21" />
+                <line x1="15" y1="15" x2="21" y2="21" />
+                <line x1="4" y1="4" x2="9" y2="9" />
+              </svg>
+            </button>
+            <button class="module-collapse-btn" data-module="moduleDirections" title="Collapse module">
+              <svg class="module-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                width="10" height="10">
+                <polyline points="6 9 12 15 18 9" />
               </svg>
             </button>
           </div>
-          <div class="direction-cards" id="directionCards"></div>
+          <div class="module-body" id="moduleDirectionsBody">
+            <div class="direction-cards" id="directionCards"></div>
+          </div>
         </div>
 
         <!-- Baseline: What I know about you -->
@@ -258,8 +276,8 @@
           <div class="module-header">
             <span class="module-icon status-icon">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-                <circle cx="12" cy="7" r="4"/>
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                <circle cx="12" cy="7" r="4" />
               </svg>
             </span>
             <span class="module-title">What I know about you</span>
@@ -269,14 +287,7 @@
           </div>
         </div>
 
-        <!-- Refresh button -->
-        <button class="sidebar-refresh-btn" id="sidebarRefreshBtn" style="display:none;">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
-            <polyline points="23 4 23 10 17 10"/>
-            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-          </svg>
-          Refresh sidebar
-        </button>
+
       </div>
     </aside>
   </div>
@@ -300,11 +311,13 @@
   <div class="dialog-overlay" id="mergeTopicDialog" style="display:none;">
     <div class="dialog">
       <h3>Merge Topics</h3>
-      <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;">Select a topic to merge into the current one. All chats will be reassigned and the status will be regenerated.</p>
+      <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;">Select a topic to merge into the current
+        one. All chats will be reassigned and the status will be regenerated.</p>
       <label>Merge into current topic:</label>
       <div class="merge-current-topic" id="mergeCurrentTopic" style="font-weight:600;margin-bottom:8px;"></div>
       <label>Topic to absorb:</label>
-      <select id="mergeTargetSelect" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;font-family:inherit;"></select>
+      <select id="mergeTargetSelect"
+        style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;font-family:inherit;"></select>
       <div class="dialog-actions">
         <button class="btn-cancel" id="mergeCancelBtn">Cancel</button>
         <button class="btn-save" id="mergeConfirmBtn">Merge</button>
@@ -312,9 +325,11 @@
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/marked/lib/marked.umd.min.js"></script>
   <script src="/static/utils.js?v=__CACHE_VERSION__"></script>
   <script src="/static/storage.js?v=__CACHE_VERSION__"></script>
   <script src="/static/sidebar.js?v=__CACHE_VERSION__"></script>
   <script src="/static/app.js?v=__CACHE_VERSION__"></script>
 </body>
+
 </html>

@@ -92,7 +92,8 @@ Return JSON:
   "topic": {{
     "name": "Topic Name",
     "matchedExistingId": "existing_topic_id_or_null",
-    "confidence": 0.92
+    "confidence": 0.92,
+    "isOneOff": false
   }},
   "concepts": [
     {{ "title": "Concept Title Up To 5 Words", "preview": "10-15 word description" }}
@@ -103,6 +104,7 @@ Rules:
 - "topic.name": broad domain like "Machine Learning", "Fitness"
 - "topic.matchedExistingId": id of existing topic if one matches, or null
 - "topic.confidence": 0-1
+- "isOneOff": true if this is a random one-off request unlikely to be followed up — things like formatting an email, quick factual lookups, translations, or random specific tasks that don't represent ongoing learning. false for sustained learning/knowledge-seeking topics.
 - "concepts": 1-4 key concepts, title max 5 words, preview max 15 words"""
 
 SIDEBAR_BRIDGE_QUESTIONS_PROMPT = """You help users connect their current conversation to their past knowledge.
@@ -137,32 +139,59 @@ Return JSON:
 
 Return 3-5 cards maximum. If fewer relevant items exist, return fewer."""
 
-SIDEBAR_NEW_DIRECTIONS_PROMPT = """Suggest areas the user has NOT explored yet within this topic.
+SIDEBAR_NEW_DIRECTIONS_PROMPT = """Suggest directions that strengthen, bridge, or extend the user's learning threads within this topic.
 
 Topic: {topic_name}
-User's current status: {topic_status}
+User's learning threads and status: {topic_status}
 Concepts they've already covered:
 {covered_concepts}
 
 Current conversation context:
 {current_summary}
 
-Suggest 2-3 new directions that are:
-- Adjacent to what the user knows but they haven't asked about
-- Naturally connected to the current conversation
-- Phrased as questions the user could ask
+Previously suggested directions (DO NOT SUGGEST THESE AGAIN):
+{previously_suggested}
+
+Generate 2-3 suggestions. Each must be one of these types:
+- "strengthen": Target a step the user has at brief or familiar level — deepen their understanding there
+- "bridge": Connect two of the user's threads that relate to each other but haven't been linked yet
+- "extend": Push the frontier of an existing thread — suggest the natural next step beyond where they stopped
+
+Rules:
+- Each suggestion must reference a specific thread label (or two for bridge type)
+- Include a short reason (1 sentence) explaining why this direction matters for the user
+- Questions should be OPEN-ENDED and CONCISE — phrased as simple, curiosity-driven questions the user could naturally ask, like "What is X?", "How does X work?", "How do X and Y connect?", "What are the tradeoffs of X?"
+- Do NOT write long, multi-part, or overly specific questions. The user hasn't asked these yet, so keep them approachable and suggestive — not prescriptive
+- Aim for a mix of types when possible, but don't force a type if it doesn't fit
 
 Return JSON:
 {{
   "newDirections": [
     {{
       "title": "Short Title 3-5 Words",
-      "question": "A natural question the user could ask to explore this direction"
+      "question": "A short, open-ended question like 'What is X?' or 'How does X work?'",
+      "type": "strengthen",
+      "threadLabel": "Consensus & Raft",
+      "reason": "Your grasp of leader election is familiar — this deepens it"
+    }},
+    {{
+      "title": "Connecting X and Y",
+      "question": "How do X and Y relate?",
+      "type": "bridge",
+      "threadLabel": "Thread A & Thread B",
+      "reason": "These two threads share a common foundation you haven't linked yet"
+    }},
+    {{
+      "title": "Next Step Beyond Z",
+      "question": "What comes after Z?",
+      "type": "extend",
+      "threadLabel": "Thread Name",
+      "reason": "You've covered the basics — this is the natural next frontier"
     }}
   ]
 }}"""
 
-STATUS_UPDATE_PROMPT = """You maintain a structured summary of a user's status in a topic.
+STATUS_UPDATE_PROMPT = """You maintain a structured summary of a user's learning trajectory in a topic.
 
 Topic: {topic_name}
 Current status: {current_status}
@@ -173,25 +202,54 @@ Past chat summaries (newest first):
 
 Update the status with two sections:
 
-1. **Overview**: 2-4 bullet points summarizing the user's overall profile in this topic. Think big-picture: user's background, context, traits, level, stats, goals, timeline. Incorporate any self-reported knowledge, notes, or stated expertise the user has shared. Example: "CS undergrad at Harvard, comfortable with classical ML, new to deep learning, want to work in silicon Valley"
+1. **Overview**: 2-4 bullet points summarizing the user's overall profile in this topic. Think big-picture: user's background, context, traits, level, stats, goals, timeline. Incorporate any self-reported knowledge, notes, or stated expertise the user has shared.
 
-2. **Specifics**: Individual items the user has explored, one per chat or concept. For each, include a short label and inferred understanding level based on how they asked (their own questions show deeper interest; clicking a suggested question means brief exposure).
+2. **Threads**: Organize the user's exploration into learning threads. Each thread is a coherent sequence of related concepts/questions that build on each other — like a trail through the topic space showing how the user's understanding evolved.
 
-Rules:
-- mainly ADD or EDIT(more detailed) information, don't remove existing info unless contradicted or clearly changed
+Rules for threads:
+- Group related chats into threads that show a logical learning PROGRESSION, not just topical similarity
+- A thread should read as a story: "started here, then went there, then explored this"
+- Each thread has a short label (3-6 words) describing the direction
+- Each thread has 1-5 ordered steps showing what the user explored, earliest to latest
+- Each step has a short text description (5-15 words) and an understanding level
+- System (assistant) messages may contain optional inline user labels: `[USER: understood this section]` means the user confirmed they read and understood that section; `[USER: unsure about this section]` means they flagged confusion. Unlabeled sections should be treated as briefly skimmed at best — do NOT assume the user absorbed unlabeled content.
+- Infer understanding primarily from the USER's own actions — their questions, follow-up reactions, and chunk labels:
+  - "solid": user demonstrated mastery through deep follow-ups, applied the concept correctly, or labeled it as understood
+  - "familiar": user asked about it directly AND engaged with the response (follow-up questions, or an understood label)
+  - "unsure": user explicitly flagged confusion — either via an [USER: unsure about this section] label, or by expressing lack of understanding in their messages (e.g. "I don't get this", "this is confusing", asking for re-explanation)
+  - "brief": concept was only mentioned by the system with no user engagement signal (no follow-up, no label)
+- Do NOT mark concepts as "familiar" or "solid" just because the system explained them. The system's response alone is not evidence the user understood it.
+- If the user explicitly states what they know or shares notes, that can be a step with "solid"/"familiar"
+- If a new chat extends an existing thread, append or update a step; if it opens a new direction, start a new thread
+- Avoid single-step threads unless the concept is truly standalone
+- Max 5 threads, max 6 steps per thread
+- If current status has old-format "specifics", reorganize them into threads
+
+Rules for overview:
+- mainly ADD or EDIT(more detailed) information, don't remove existing info unless contradicted
 - Keep each point to 1 short-medium line
-- Write specifics in a personal, descriptive style — e.g. "asked about X and dug into Y", "explored how X works", "briefly touched on X as part of a broader answer" — not just a bare concept name
-- Infer understanding: "solid" if user asked deep follow-ups, "familiar" if they asked about it, "brief" if it's only part of the system's reply and user hasn't seemed to care much yet
-- If the user explicitly states what they know, learned, or shares notes on a topic, include those as specifics with level "solid"/"familiar"
-- If current status is a plain string (legacy), convert it to the structured format
 
 Return JSON:
 {{
   "overview": ["point 1", "point 2"],
-  "specifics": [
-    {{"text": "asked about Raft consensus protocol and dug into leader election implementation", "level": "solid"}},
-    {{"text": "explored Paxos algorithm and how it differs from Raft", "level": "familiar"}},
-    {{"text": "briefly touched on Byzantine fault tolerance as part of a broader answer", "level": "brief"}}
+  "threads": [
+    {{
+      "label": "Consensus & Raft",
+      "steps": [
+        {{"text": "Consensus basics and approaches", "level": "solid"}},
+        {{"text": "Raft protocol implementation", "level": "solid"}},
+        {{"text": "Leader election mechanics", "level": "familiar"}},
+        {{"text": "Log replication", "level": "brief"}},
+        {{"text": "Split-brain scenarios", "level": "unsure"}}
+      ]
+    }},
+    {{
+      "label": "CAP theorem exploration",
+      "steps": [
+        {{"text": "CAP theorem tradeoffs", "level": "familiar"}},
+        {{"text": "Eventual consistency models", "level": "brief"}}
+      ]
+    }}
   ]
 }}"""
 
@@ -224,10 +282,17 @@ Return JSON:
 {{
   "newTopics": [
     {{ "name": "Topic Name", "chatIds": ["chat_id_1", "chat_id_2"] }}
+  ],
+  "assignToExisting": [
+    {{ "topicId": "existing_topic_id", "chatIds": ["chat_id_3"] }}
   ]
 }}
 
-If no new topics are detected, return {{ "newTopics": [] }}"""
+Rules:
+- If chats form a new cluster (2+ chats in same domain), add to newTopics
+- If an unassigned chat clearly belongs to an existing topic, add to assignToExisting
+- Chats that are random one-off requests (formatting emails, quick lookups, translations, etc.) should NOT be grouped — leave them out of both arrays
+- If no groupings are found, return {{ "newTopics": [], "assignToExisting": [] }}"""
 
 BASELINE_PERSONAL_DETAILS_PROMPT = """You are a helpful system that extracts personal details about the user from their conversations. Your goal is to maintain a running bullet-point list of what the system knows about the user.
 

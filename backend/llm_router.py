@@ -37,7 +37,7 @@ def _fallback_response(raw: str) -> dict:
     return {**_FALLBACK, "response": text}
 
 
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-3-flash-preview"
 
 
 def _route_provider(model: str) -> str:

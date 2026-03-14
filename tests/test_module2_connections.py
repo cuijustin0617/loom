@@ -648,9 +648,8 @@ class TestConnectionPersistenceJS:
     def _get_appendMessage_def(self):
         """Find the _appendMessage function definition (not a call site)."""
         js = self._get_js()
-        # The definition pattern: _appendMessage(msg)
         idx = js.index('_appendMessage(msg)')
-        return js[idx:idx + 2000]
+        return js[idx:idx + 5000]
 
     def test_assistant_msg_stores_connections(self):
         js = self._get_js()
