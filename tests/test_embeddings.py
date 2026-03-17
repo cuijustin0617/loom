@@ -263,6 +263,36 @@ class TestEmbeddingServiceOpenAI:
             assert call_args.kwargs.get("model") == "text-embedding-3-small" or \
                    call_args[1].get("model") == "text-embedding-3-small"
 
+    @pytest.mark.asyncio
+    async def test_openai_embed_texts_batch(self):
+        svc = EmbeddingService(provider="openai")
+        d0 = MagicMock(); d0.index = 0; d0.embedding = [0.1, 0.2]
+        d1 = MagicMock(); d1.index = 1; d1.embedding = [0.3, 0.4]
+        mock_response = MagicMock()
+        mock_response.data = [d1, d0]
+
+        with patch("openai.AsyncOpenAI") as MockClient:
+            instance = MockClient.return_value
+            instance.embeddings.create = AsyncMock(return_value=mock_response)
+            result = await svc.embed_texts(["hello", "world"])
+            assert len(result) == 2
+            assert result[0] == [0.1, 0.2]
+            assert result[1] == [0.3, 0.4]
+
+    @pytest.mark.asyncio
+    async def test_openai_embed_texts_single_item(self):
+        svc = EmbeddingService(provider="openai")
+        d0 = MagicMock(); d0.index = 0; d0.embedding = [0.5, 0.6]
+        mock_response = MagicMock()
+        mock_response.data = [d0]
+
+        with patch("openai.AsyncOpenAI") as MockClient:
+            instance = MockClient.return_value
+            instance.embeddings.create = AsyncMock(return_value=mock_response)
+            result = await svc.embed_texts(["only one"])
+            assert len(result) == 1
+            assert result[0] == [0.5, 0.6]
+
 
 class TestEmbeddingServiceGemini:
     @pytest.mark.asyncio
@@ -293,3 +323,39 @@ class TestEmbeddingServiceGemini:
             await svc.embed_text("test")
             call_kwargs = mock_client.aio.models.embed_content.call_args.kwargs
             assert call_kwargs.get("model") == "gemini-embedding-001"
+
+    @pytest.mark.asyncio
+    async def test_gemini_embed_texts_batch(self):
+        svc = EmbeddingService(provider="gemini")
+
+        call_count = [0]
+        async def mock_embed_content(**kwargs):
+            mock_embedding = MagicMock()
+            mock_embedding.values = [0.1 * (call_count[0] + 1)]
+            call_count[0] += 1
+            mock_resp = MagicMock()
+            mock_resp.embeddings = [mock_embedding]
+            return mock_resp
+
+        mock_client = MagicMock()
+        mock_client.aio.models.embed_content = mock_embed_content
+
+        with patch("google.genai.Client", return_value=mock_client):
+            result = await svc.embed_texts(["hello", "world"])
+            assert len(result) == 2
+            assert result[0] == [0.1]
+            assert result[1] == [0.2]
+
+
+class TestEmbedTextsEdgeCases:
+    @pytest.mark.asyncio
+    async def test_embed_texts_empty_list(self):
+        svc = EmbeddingService(provider="openai")
+        result = await svc.embed_texts([])
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_embed_texts_unknown_provider(self):
+        svc = EmbeddingService(provider="unknown")
+        with pytest.raises(ValueError, match="Unknown embedding provider"):
+            await svc.embed_texts(["test"])

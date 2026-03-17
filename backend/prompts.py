@@ -347,3 +347,18 @@ Return JSON:
 {{
   "overview": ["updated point 1", "updated point 2"]
 }}"""
+
+TOPIC_RENAME_CHECK_PROMPT = """A user renamed their learning topic from "{old_name}" to "{new_name}".
+
+Here are the current overview bullets for this topic:
+{current_overview}
+
+Check whether any of these bullets specifically reference the old topic name "{old_name}" and would read awkwardly or incorrectly now. If so, update ONLY the bullets that reference the old name — replace the old name with the new name or rephrase naturally. Leave all other bullets UNCHANGED.
+
+If no bullets reference the old name at all, return them as-is with needsUpdate: false.
+
+Return JSON:
+{{
+  "needsUpdate": true/false,
+  "overview": ["bullet 1", "bullet 2"]
+}}"""

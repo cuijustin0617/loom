@@ -254,6 +254,26 @@ body {
   justify-content: space-between;
 }
 
+.chat-list-group-title span {
+  cursor: default;
+}
+
+.topic-rename-input {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--primary);
+  border-radius: 4px;
+  padding: 2px 6px;
+  outline: none;
+  flex: 1;
+  min-width: 0;
+  font-family: inherit;
+}
+
 .chat-list-group-title.unassigned-group {
   color: #b0b0a8;
   opacity: 1;
@@ -364,7 +384,7 @@ body {
   transform: translateY(-50%);
   padding-left: 24px;
   padding-right: 4px;
-  background: linear-gradient(to right, transparent, #f5f5f5 40%);
+  background: linear-gradient(to right, transparent, var(--sidebar-bg) 30%);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.15s;
@@ -376,7 +396,7 @@ body {
 }
 
 .chat-item.active .chat-item-actions {
-  background: linear-gradient(to right, transparent, #e8f0eb 40%);
+  background: linear-gradient(to right, transparent, #e8f0eb 30%);
 }
 
 .chat-delete-btn {
@@ -399,6 +419,28 @@ body {
   background: rgba(239, 68, 68, 0.1);
   color: var(--danger);
 }
+
+.chat-move-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 5px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+  background: transparent;
+}
+
+.chat-move-btn:hover {
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--primary);
+}
+
 
 .sidebar-actions {
   padding: 8px 16px;
@@ -941,13 +983,17 @@ body {
   border: 1px solid var(--border);
   border-radius: 36px;
   padding: 0;
-  overflow: hidden;
+  position: relative;
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .chat-input:focus-within {
   border-color: var(--primary);
   box-shadow: 0 0 0 3px rgba(74, 124, 89, 0.08);
+}
+
+.topic-suggestion.visible:has(+ .chat-input:focus-within) {
+  border-color: var(--primary);
 }
 
 .chat-input.drag-over {
@@ -1078,28 +1124,254 @@ body {
 }
 
 .input-topic-select {
-  padding: 4px 6px;
+  display: none;
+}
+
+/* ── Topic Suggestion Bar ─────────────────────────────────────────────────── */
+
+.topic-suggestion {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 20px;
+  border-radius: 36px 36px 0 0;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-bottom: none;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 150ms ease-out, transform 150ms ease-out, background 150ms ease-out;
+  margin-bottom: -1px;
+  position: relative;
+  z-index: 1;
+}
+
+.topic-suggestion.visible {
+  display: flex;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.topic-suggestion.hiding {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.topic-suggestion.visible + .chat-input {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  border-top: none;
+}
+
+.topic-suggestion-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.topic-suggestion-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topic-suggestion-text strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.topic-suggestion-accept {
+  padding: 3px 10px;
+  border-radius: 12px;
+  border: none;
   font-size: 11px;
   font-weight: 600;
   font-family: inherit;
-  color: var(--accent-purple);
-  background: var(--accent-purple-light);
   cursor: pointer;
-  outline: none;
-  flex-shrink: 0;
-  max-width: 100px;
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%238B5CF6' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 5px center;
-  padding-right: 18px;
+  white-space: nowrap;
+  transition: filter 0.15s;
 }
 
-.input-topic-select:focus {
-  border-color: var(--accent-purple);
+.topic-suggestion-accept:hover {
+  filter: brightness(0.92);
+}
+
+.topic-suggestion-dismiss {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.topic-suggestion-dismiss:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--text-secondary);
+}
+
+/* ── Custom Topic Picker Dropdown ─────────────────────────────────────────── */
+
+.topic-picker {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.topic-picker-trigger {
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 18px;
+  background: rgba(0, 0, 0, 0.04);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  outline: none;
+  max-width: 160px;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.topic-picker-trigger:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.topic-picker-trigger:focus-visible {
+  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2);
+}
+
+.topic-picker-trigger.open {
+  background: var(--accent-purple-light);
+  color: var(--accent-purple);
+}
+
+.topic-picker-trigger.topic-selected {
+  background: var(--accent-purple-light);
+  color: var(--accent-purple);
+}
+
+.topic-picker-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.topic-picker-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.topic-picker-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: none;
+}
+
+.topic-picker-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 90px;
+}
+
+.topic-picker-chevron {
+  flex-shrink: 0;
+  opacity: 0.45;
+  transition: transform 0.15s;
+}
+
+.topic-picker-trigger.open .topic-picker-chevron {
+  transform: rotate(180deg);
+}
+
+.topic-picker-dropdown {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  min-width: 170px;
+  max-width: 240px;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--main-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.10), 0 1px 4px rgba(0, 0, 0, 0.06);
+  padding: 4px;
+  display: none;
+  opacity: 0;
+  transform: scale(0.95) translateY(4px);
+  transform-origin: bottom right;
+  transition: opacity 150ms ease-out, transform 150ms ease-out;
+  z-index: 500;
+}
+
+.topic-picker-dropdown.open {
+  display: block;
+  opacity: 1;
+  transform: scale(1) translateY(0);
+}
+
+.topic-picker-option {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 0.1s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topic-picker-option:hover,
+.topic-picker-option.focused {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.topic-picker-option.selected {
+  font-weight: 600;
+  color: var(--accent-purple);
+}
+
+.topic-picker-option-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.topic-picker-option-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.topic-picker-option-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .search-btn {
@@ -2400,6 +2672,39 @@ body {
   -webkit-box-orient: vertical;
 }
 
+.conn-sb-insights {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.conn-sb-insight-item {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  font-style: italic;
+  cursor: pointer;
+  padding: 2px 0;
+  border-radius: 3px;
+  transition: color 0.15s;
+}
+
+.conn-sb-insight-item:hover {
+  color: var(--accent-purple);
+}
+
+.conn-sb-count {
+  font-size: 10px;
+  background: var(--accent-purple);
+  color: #fff;
+  border-radius: 8px;
+  padding: 0 5px;
+  line-height: 16px;
+  font-weight: 600;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 /* ── Connection Card (Module 2 rich popover) ───────────────────────────── */
 .conn-card {
   position: fixed;
@@ -2873,7 +3178,9 @@ body.baseline-mode .module-directions,
 body.baseline-mode #sidebarRefreshBtn,
 body.baseline-mode .new-topic-btn,
 body.baseline-mode .view-toggle,
-body.baseline-mode .input-topic-select {
+body.baseline-mode .input-topic-select,
+body.baseline-mode .topic-picker,
+body.baseline-mode .topic-suggestion {
   display: none !important;
 }
 

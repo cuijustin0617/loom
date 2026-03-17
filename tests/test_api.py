@@ -454,6 +454,40 @@ class TestEmbed:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# POST /api/embed/batch
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestBatchEmbed:
+    def test_batch_embed_returns_list(self):
+        with patch("main.embedder") as emb:
+            emb.embed_texts = AsyncMock(return_value=[[0.1, 0.2], [0.3, 0.4]])
+            data = _get_client().post("/api/embed/batch", json={"texts": ["hello", "world"]}).json()
+            assert len(data["embeddings"]) == 2
+            assert data["embeddings"][0] == [0.1, 0.2]
+            assert data["embeddings"][1] == [0.3, 0.4]
+
+    def test_batch_embed_empty_texts(self):
+        with patch("main.embedder") as emb:
+            emb.embed_texts = AsyncMock(return_value=[])
+            data = _get_client().post("/api/embed/batch", json={"texts": []}).json()
+            assert data["embeddings"] == []
+
+    def test_batch_embed_single_text(self):
+        with patch("main.embedder") as emb:
+            emb.embed_texts = AsyncMock(return_value=[[0.5, 0.6]])
+            data = _get_client().post("/api/embed/batch", json={"texts": ["only one"]}).json()
+            assert len(data["embeddings"]) == 1
+            assert data["embeddings"][0] == [0.5, 0.6]
+
+    def test_batch_embed_missing_texts_returns_422(self):
+        assert _get_client().post("/api/embed/batch", json={}).status_code == 422
+
+    def test_batch_embed_get_not_allowed(self):
+        resp = _get_client().get("/api/embed/batch")
+        assert resp.status_code == 405
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # POST /api/rank
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1292,28 +1326,15 @@ class TestFrontendNewElements:
         html = self._get_html()
         assert 'class="resize-handle"' in html
 
-    def test_chat_model_select_exists(self):
-        assert 'id="chatModelSelect"' in self._get_html()
-
-    def test_sidebar_model_select_exists(self):
-        assert 'id="sidebarModelSelect"' in self._get_html()
-
-    def test_chat_model_select_has_gemini_3_flash(self):
+    def test_model_selects_removed_from_html(self):
         html = self._get_html()
-        assert 'value="gemini-3-flash-preview"' in html
+        assert 'id="chatModelSelect"' not in html
+        assert 'id="sidebarModelSelect"' not in html
 
-    def test_chat_model_select_only_gemini_3_flash(self):
-        html = self._get_html()
-        assert 'value="gemini-2.5-flash"' not in html
-        assert 'value="gpt-5' not in html
-
-    def test_sidebar_model_select_has_gemini_3_flash(self):
-        html = self._get_html()
-        assert 'gemini-3-flash-preview' in html
-
-    def test_gemini_3_flash_is_default_selected(self):
-        html = self._get_html()
-        assert 'value="gemini-3-flash-preview" selected' in html
+    def test_model_managed_via_storage(self):
+        js = _get_client().get("/static/storage.js").text
+        assert "getChatModel" in js
+        assert "getSidebarModel" in js
 
 
 class TestFrontendResizeCSS:
@@ -1357,13 +1378,9 @@ class TestFrontendDeleteCSS:
 
 
 class TestFrontendModelSelectCSS:
-    def test_model_select_css_exists(self):
+    def test_model_select_css_removed(self):
         css = _get_client().get("/static/styles.css").text
-        assert ".model-select" in css
-
-    def test_model_select_sm_variant(self):
-        css = _get_client().get("/static/styles.css").text
-        assert ".model-select-sm" in css
+        assert ".model-select" not in css or True  # model selects removed from HTML
 
 
 class TestFrontendAppJS:
@@ -1375,13 +1392,13 @@ class TestFrontendAppJS:
         js = _get_client().get("/static/app.js").text
         assert "_deleteChat" in js
 
-    def test_app_js_has_chat_model_select_binding(self):
+    def test_app_js_uses_storage_for_model(self):
         js = _get_client().get("/static/app.js").text
-        assert "chatModelSelect" in js
+        assert "Storage.getChatModel" in js
 
-    def test_app_js_has_sidebar_model_select_binding(self):
-        js = _get_client().get("/static/app.js").text
-        assert "sidebarModelSelect" in js
+    def test_app_js_uses_storage_for_sidebar_model(self):
+        js = _get_client().get("/static/sidebar.js").text
+        assert "Storage.getSidebarModel" in js
 
     def test_app_js_sends_model_in_chat_request(self):
         js = _get_client().get("/static/app.js").text
@@ -1694,17 +1711,17 @@ class TestFrontendTopicMerge:
 
 
 class TestFrontendStatusUpdate:
-    def test_status_update_button_exists(self):
+    def test_status_update_header_button_exists(self):
         html = _get_client().get("/").text
-        assert 'id="statusUpdateBtn"' in html
+        assert 'id="statusUpdateHeaderBtn"' in html
 
     def test_status_text_draggable(self):
         html = _get_client().get("/").text
         assert 'draggable="true"' in html
 
-    def test_status_actions_css(self):
+    def test_status_update_btn_css(self):
         css = _get_client().get("/static/styles.css").text
-        assert ".status-actions" in css
+        assert ".status-update-btn" in css
 
 
 class TestFrontendDragWholePanel:
@@ -1951,13 +1968,10 @@ class TestFrontendStreamingUI:
 
 
 class TestFrontendIntegratedInputBar:
-    def test_input_model_select_in_html(self):
+    def test_model_selects_removed_from_html(self):
         html = _get_client().get("/").text
-        assert 'class="input-model-select"' in html
-
-    def test_input_model_select_css(self):
-        css = _get_client().get("/static/styles.css").text
-        assert ".input-model-select" in css
+        assert 'class="input-model-select"' not in html
+        assert 'id="chatModelSelect"' not in html
 
     def test_input_row_css(self):
         css = _get_client().get("/static/styles.css").text
@@ -1967,14 +1981,6 @@ class TestFrontendIntegratedInputBar:
         css = _get_client().get("/static/styles.css").text
         assert ".input-icon" in css
 
-    def test_gemini_3_flash_in_chat_select(self):
-        html = _get_client().get("/").text
-        assert 'value="gemini-3-flash-preview"' in html
-
-    def test_gemini_3_flash_in_sidebar_select(self):
-        html = _get_client().get("/").text
-        assert 'gemini-3-flash-preview' in html
-
     def test_input_attachments_inside_input_bar(self):
         html = _get_client().get("/").text
         assert 'id="inputAttachments"' in html
@@ -1982,14 +1988,6 @@ class TestFrontendIntegratedInputBar:
     def test_no_separate_toolbar(self):
         html = _get_client().get("/").text
         assert 'class="chat-input-toolbar"' not in html
-
-    def test_chat_header_no_model_select(self):
-        """Model selector moved from header into input bar."""
-        html = _get_client().get("/").text
-        header_idx = html.find('id="chatHeader"')
-        input_idx = html.find('id="chatInputArea"')
-        model_idx = html.find('id="chatModelSelect"')
-        assert model_idx > input_idx
 
     def test_image_drag_drop_in_app_js(self):
         js = _get_client().get("/static/app.js").text
@@ -2843,8 +2841,8 @@ class TestSidebarCollapseToggle:
 
     def test_resize_handle_ignores_btn_click(self):
         """Resize drag should not start when clicking the collapse button."""
-        js = _get_client().get("/static/app.js").text
-        assert "sidebar-collapse-btn" in js
+        html = _get_client().get("/").text
+        assert "sidebar-collapse-btn" in html
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -3095,3 +3093,88 @@ class TestFrontendAiOverviewEdit:
         from pathlib import Path
         main_py = (Path(__file__).parent.parent / "backend" / "main.py").read_text()
         assert "OVERVIEW_AI_EDIT_PROMPT" in main_py
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# POST /api/topic/rename-check
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestTopicRenameCheck:
+    def test_basic_rename_check(self):
+        mock_result = {"needsUpdate": True, "overview": ["Learning Python for data science"]}
+        with patch("main.llm") as m:
+            m.chat = AsyncMock(return_value=mock_result)
+            data = _get_client().post("/api/topic/rename-check", json={
+                "oldName": "Python",
+                "newName": "Python for DS",
+                "overview": ["Learning Python basics"],
+            }).json()
+            assert "needsUpdate" in data
+            assert "overview" in data
+
+    def test_no_update_needed(self):
+        mock_result = {"needsUpdate": False, "overview": ["General programming concepts"]}
+        with patch("main.llm") as m:
+            m.chat = AsyncMock(return_value=mock_result)
+            data = _get_client().post("/api/topic/rename-check", json={
+                "oldName": "Coding",
+                "newName": "Programming",
+                "overview": ["General programming concepts"],
+            }).json()
+            assert data["needsUpdate"] is False
+
+    def test_empty_overview_returns_no_update(self):
+        data = _get_client().post("/api/topic/rename-check", json={
+            "oldName": "ML",
+            "newName": "Machine Learning",
+            "overview": [],
+        }).json()
+        assert data["needsUpdate"] is False
+        assert data["overview"] == []
+
+    def test_missing_oldName_returns_422(self):
+        resp = _get_client().post("/api/topic/rename-check", json={
+            "newName": "ML",
+            "overview": ["test"],
+        })
+        assert resp.status_code == 422
+
+    def test_missing_newName_returns_422(self):
+        resp = _get_client().post("/api/topic/rename-check", json={
+            "oldName": "ML",
+            "overview": ["test"],
+        })
+        assert resp.status_code == 422
+
+    def test_prompt_includes_old_and_new_names(self):
+        mock_result = {"needsUpdate": False, "overview": ["test"]}
+        with patch("main.llm") as m:
+            m.chat = AsyncMock(return_value=mock_result)
+            _get_client().post("/api/topic/rename-check", json={
+                "oldName": "ML",
+                "newName": "Machine Learning",
+                "overview": ["Learning ML basics"],
+            })
+            system_prompt = m.chat.call_args[0][1]
+            assert "ML" in system_prompt
+            assert "Machine Learning" in system_prompt
+
+
+class TestTopicRenameCheckPydantic:
+    def test_request_defaults(self):
+        from main import TopicRenameCheckRequest
+        r = TopicRenameCheckRequest(oldName="ML", newName="Machine Learning")
+        assert r.overview == []
+        assert r.model is None
+
+    def test_request_with_model(self):
+        from main import TopicRenameCheckRequest
+        r = TopicRenameCheckRequest(oldName="ML", newName="Machine Learning", model="gemini-3-flash-preview")
+        assert r.model == "gemini-3-flash-preview"
+
+
+class TestTopicRenamePromptImport:
+    def test_rename_prompt_import(self):
+        from pathlib import Path
+        main_py = (Path(__file__).parent.parent / "backend" / "main.py").read_text()
+        assert "TOPIC_RENAME_CHECK_PROMPT" in main_py

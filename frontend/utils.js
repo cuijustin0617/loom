@@ -210,8 +210,74 @@ const Utils = {
   },
 };
 
-/* ── Study Logging ─────────────────────────────────────────────────────── */
+/* ── Study Logging (with local backup queue + retry) ──────────────────── */
 const StudyLog = {
+  _queue: [],
+  _flushTimer: null,
+  _retryMs: 5000,
+  _maxRetries: 3,
+  _localStorageKey: 'loom_event_queue',
+
+  _restoreQueue() {
+    try {
+      const saved = localStorage.getItem(this._localStorageKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          this._queue.push(...parsed);
+          localStorage.removeItem(this._localStorageKey);
+          this._scheduleFlush();
+        }
+      }
+    } catch (_) {}
+  },
+
+  _persistQueue() {
+    try {
+      if (this._queue.length > 0) {
+        localStorage.setItem(this._localStorageKey, JSON.stringify(this._queue));
+      }
+    } catch (_) {}
+  },
+
+  _scheduleFlush() {
+    if (this._flushTimer) return;
+    this._flushTimer = setTimeout(() => {
+      this._flushTimer = null;
+      this._flush();
+    }, this._retryMs);
+  },
+
+  async _flush() {
+    const batch = this._queue.splice(0, this._queue.length);
+    const failed = [];
+    for (const item of batch) {
+      try {
+        const resp = await fetch('/api/log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(item.payload),
+        });
+        if (!resp.ok && item.retries < this._maxRetries) {
+          item.retries++;
+          failed.push(item);
+        }
+      } catch (_) {
+        if (item.retries < this._maxRetries) {
+          item.retries++;
+          failed.push(item);
+        }
+      }
+    }
+    if (failed.length > 0) {
+      this._queue.push(...failed);
+      this._persistQueue();
+      this._scheduleFlush();
+    } else {
+      try { localStorage.removeItem(this._localStorageKey); } catch (_) {}
+    }
+  },
+
   event(eventType, data = {}) {
     const userId = Storage?.getUserId?.() || null;
     if (!userId) return;
@@ -222,12 +288,21 @@ const StudyLog = {
       data,
       timestamp: new Date().toISOString(),
     };
-    // Fire-and-forget; don't block the UI
+    // Primary: fire-and-forget with backup on failure
     fetch('/api/log', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-    }).catch(() => {});
+    }).catch(() => {
+      this._queue.push({ payload, retries: 0 });
+      this._persistQueue();
+      this._scheduleFlush();
+    });
+  },
+
+  init() {
+    this._restoreQueue();
+    window.addEventListener('beforeunload', () => this._persistQueue());
   },
 };
 

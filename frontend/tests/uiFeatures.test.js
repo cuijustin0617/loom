@@ -424,6 +424,7 @@ test('sidebar.js init() calls all necessary init functions', () => {
     assert.ok(initFunc.includes('_initStatusDrag'), 'init should call _initStatusDrag');
     assert.ok(initFunc.includes('_initStatusUpdate'), 'init should call _initStatusUpdate');
     assert.ok(initFunc.includes('_initMergeDialog'), 'init should call _initMergeDialog');
+    assert.ok(initFunc.includes('_initMoveDialog'), 'init should call _initMoveDialog');
     assert.ok(initFunc.includes('_initShuffle'), 'init should call _initShuffle');
     assert.ok(initFunc.includes('_initModuleCollapse'), 'init should call _initModuleCollapse');
 });
@@ -490,6 +491,575 @@ test('directions prompt example questions are short and general', () => {
         'Bridge example should be a short general question');
     assert.ok(promptContent.includes('What comes after Z?'),
         'Extend example should be a short general question');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// NEW TODO 1: Move chat to different topic
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\n─── NEW TODO 1: Move Chat to Topic ───');
+
+test('app.js has _moveChat method', () => {
+    assert.ok(appContent.includes('_moveChat(chatId,'),
+        'app.js should define _moveChat method');
+});
+
+test('app.js has _showMoveDropdown method', () => {
+    assert.ok(appContent.includes('_showMoveDropdown('),
+        'app.js should define _showMoveDropdown method');
+});
+
+test('chat item has move button markup', () => {
+    assert.ok(appContent.includes('chat-move-btn'),
+        'app.js should reference chat-move-btn class');
+});
+
+test('CSS defines chat-move-btn style', () => {
+    assert.ok(cssContent.includes('.chat-move-btn'),
+        'CSS should define .chat-move-btn');
+});
+
+test('move chat dialog exists in HTML', () => {
+    assert.ok(htmlContent.includes('id="moveChatDialog"'),
+        'HTML should define moveChatDialog');
+});
+
+test('_moveChat updates topicId and cleans up empty topics', () => {
+    const moveFn = appContent.substring(
+        appContent.indexOf('_moveChat(chatId,'),
+        appContent.indexOf('_deleteChat(chatId,')
+    );
+    assert.ok(moveFn.includes('chat.topicId = newTopicId'),
+        '_moveChat should set new topicId');
+    assert.ok(moveFn.includes('Storage.deleteTopic'),
+        '_moveChat should clean up empty source topic');
+    assert.ok(moveFn.includes('chat_moved'),
+        '_moveChat should log chat_moved event');
+});
+
+test('move dropdown excludes current topic and Unassigned', () => {
+    const dropdownFn = appContent.substring(
+        appContent.indexOf('_showMoveDropdown('),
+        appContent.indexOf('_moveChat(chatId,')
+    );
+    assert.ok(dropdownFn.includes("t.id !== currentTopicId"),
+        'Dropdown should filter out current topic');
+    assert.ok(dropdownFn.includes("t.name !== 'Unassigned'"),
+        'Dropdown should filter out Unassigned');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// NEW TODO 2: Rename topic
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\n─── NEW TODO 2: Rename Topic ───');
+
+test('app.js has _renameTopic method', () => {
+    assert.ok(appContent.includes('_renameTopic(topicId,'),
+        'app.js should define _renameTopic method');
+});
+
+test('app.js has _startTopicRename method', () => {
+    assert.ok(appContent.includes('_startTopicRename('),
+        'app.js should define _startTopicRename method');
+});
+
+test('topic title has double-click rename listener', () => {
+    assert.ok(appContent.includes("'dblclick'") && appContent.includes('_startTopicRename'),
+        'Should bind dblclick to _startTopicRename');
+});
+
+test('_renameTopic updates topic name and saves', () => {
+    const renameFn = appContent.substring(
+        appContent.indexOf('async _renameTopic('),
+        appContent.indexOf('// ── Merge Topics')
+    );
+    assert.ok(renameFn.includes('topic.name = newName'),
+        '_renameTopic should set new name');
+    assert.ok(renameFn.includes('Storage.saveTopic'),
+        '_renameTopic should save topic');
+    assert.ok(renameFn.includes('topic_renamed'),
+        '_renameTopic should log topic_renamed event');
+});
+
+test('_renameTopic calls rename-check endpoint for overview', () => {
+    const renameFn = appContent.substring(
+        appContent.indexOf('async _renameTopic('),
+        appContent.indexOf('// ── Merge Topics')
+    );
+    assert.ok(renameFn.includes('/api/topic/rename-check'),
+        '_renameTopic should call rename-check API');
+});
+
+test('CSS defines topic-rename-input style', () => {
+    assert.ok(cssContent.includes('.topic-rename-input'),
+        'CSS should define .topic-rename-input');
+});
+
+test('backend prompts.py has TOPIC_RENAME_CHECK_PROMPT', () => {
+    assert.ok(promptContent.includes('TOPIC_RENAME_CHECK_PROMPT'),
+        'prompts.py should define TOPIC_RENAME_CHECK_PROMPT');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// NEW TODO 4: IME input fix and attachment-only send
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\n─── NEW TODO 4: IME Input Fix ───');
+
+test('chatInput keydown handler checks isComposing', () => {
+    assert.ok(appContent.includes('e.isComposing'),
+        'chatInput handler should check e.isComposing');
+});
+
+test('sendMessage allows sending with only attachments', () => {
+    assert.ok(appContent.includes('this.pendingAttachments.length === 0) return'),
+        'sendMessage should check pendingAttachments before early return');
+});
+
+test('sendMessage provides default message for attachment-only sends', () => {
+    assert.ok(appContent.includes('pendingAttachments.length > 0'),
+        'sendMessage should handle attachment-only case');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// NEW TODO 5: Deduplicate module 2 connection cards
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\n─── NEW TODO 5: Deduplicate Connection Cards ───');
+
+test('showConnections groups connections by chatId', () => {
+    assert.ok(sidebarContent.includes("const grouped = {}"),
+        'showConnections should group connections by chatId');
+    assert.ok(sidebarContent.includes('groupOrder'),
+        'showConnections should maintain group order');
+});
+
+test('grouped cards show count badge for multiple connections', () => {
+    assert.ok(sidebarContent.includes('conn-sb-count'),
+        'Should render count badge for multiple connections from same chat');
+});
+
+test('individual insight items have per-connection hover/click', () => {
+    assert.ok(sidebarContent.includes('conn-sb-insight-item'),
+        'Should render individual insight items within grouped card');
+});
+
+test('CSS defines conn-sb-insights and conn-sb-insight-item styles', () => {
+    assert.ok(cssContent.includes('.conn-sb-insights'),
+        'CSS should define .conn-sb-insights');
+    assert.ok(cssContent.includes('.conn-sb-insight-item'),
+        'CSS should define .conn-sb-insight-item');
+});
+
+test('CSS defines conn-sb-count badge style', () => {
+    assert.ok(cssContent.includes('.conn-sb-count'),
+        'CSS should define .conn-sb-count badge');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// NEW TODO 6: Default search button to ON
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\n─── NEW TODO 6: Search Default ON ───');
+
+test('useSearch defaults to true', () => {
+    assert.ok(appContent.includes('useSearch: true'),
+        'useSearch should default to true');
+});
+
+test('search button gets active class on init', () => {
+    const bindEvents = appContent.substring(
+        appContent.indexOf('_bindEvents()'),
+        appContent.indexOf('_initResize(')
+    );
+    assert.ok(bindEvents.includes("searchBtn.classList.add('active')"),
+        'searchBtn should get active class during _bindEvents');
+});
+
+test('newChat resets useSearch to true', () => {
+    const newChatFn = appContent.substring(
+        appContent.indexOf('newChat()'),
+        appContent.indexOf('async sendMessage()')
+    );
+    assert.ok(newChatFn.includes('this.useSearch = true'),
+        'newChat should reset useSearch to true');
+});
+
+test('newChat reactivates searchToggleBtn', () => {
+    const newChatFn = appContent.substring(
+        appContent.indexOf('newChat()'),
+        appContent.indexOf('async sendMessage()')
+    );
+    assert.ok(newChatFn.includes("searchBtn.classList.add('active')") || newChatFn.includes("searchBtn") ,
+        'newChat should reactivate searchToggleBtn');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Topic Suggestion: Keyword Scorer Logic (pure unit tests)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\n─── Topic Suggestion: Keyword Scorer Logic ───');
+
+// Re-implement tokenize and scoring for unit tests
+const STOP_WORDS = new Set([
+    'a','an','the','and','or','but','in','on','at','to','for','of','with','by',
+    'from','is','it','as','be','was','are','were','been','being','have','has',
+    'had','do','does','did','will','would','could','should','may','might','can',
+    'this','that','these','those','i','me','my','we','our','you','your','he',
+    'she','they','them','their','its','not','no','so','if','then','than','too',
+    'very','just','about','up','out','how','what','when','where','which','who',
+    'why','all','each','some','any','few','more','most','am','into','also',
+]);
+
+function tokenize(text) {
+    return text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)
+        .filter(t => t.length > 1 && !STOP_WORDS.has(t));
+}
+
+function bigrams(tokens) {
+    const bg = [];
+    for (let i = 0; i < tokens.length - 1; i++) {
+        bg.push(tokens[i] + ' ' + tokens[i + 1]);
+    }
+    return bg;
+}
+
+test('tokenize removes stop words and lowercases', () => {
+    const tokens = tokenize('How do I learn Machine Learning in Python?');
+    assert.ok(!tokens.includes('how'), 'Should remove stop word "how"');
+    assert.ok(!tokens.includes('do'), 'Should remove stop word "do"');
+    assert.ok(!tokens.includes('i'), 'Should remove stop word "i"');
+    assert.ok(!tokens.includes('in'), 'Should remove stop word "in"');
+    assert.ok(tokens.includes('learn'), 'Should keep "learn"');
+    assert.ok(tokens.includes('machine'), 'Should lowercase "Machine"');
+    assert.ok(tokens.includes('learning'), 'Should keep "learning"');
+    assert.ok(tokens.includes('python'), 'Should keep "python"');
+});
+
+test('tokenize filters single-character tokens', () => {
+    const tokens = tokenize('I a b c deep learning');
+    assert.ok(!tokens.includes('b'), 'Should filter single-char "b"');
+    assert.ok(!tokens.includes('c'), 'Should filter single-char "c"');
+    assert.ok(tokens.includes('deep'), 'Should keep "deep"');
+});
+
+test('bigram generation produces correct pairs', () => {
+    const tokens = ['machine', 'learning', 'python'];
+    const bg = bigrams(tokens);
+    assert.strictEqual(bg.length, 2);
+    assert.strictEqual(bg[0], 'machine learning');
+    assert.strictEqual(bg[1], 'learning python');
+});
+
+test('bigrams of single token returns empty', () => {
+    assert.strictEqual(bigrams(['hello']).length, 0);
+});
+
+test('keyword scoring: query with exact topic words scores > 0', () => {
+    const queryTokens = tokenize('teach me about PyTorch neural networks');
+    const topicTokens = new Set(tokenize('Machine Learning PyTorch basics Neural network fundamentals'));
+    let matched = 0;
+    queryTokens.forEach(qt => { if (topicTokens.has(qt)) matched++; });
+    const score = matched / queryTokens.length;
+    assert.ok(score > 0, `Score should be > 0, got ${score}`);
+});
+
+test('keyword scoring: query with no overlap scores 0', () => {
+    const queryTokens = tokenize('how to cook pasta Italian recipe');
+    const topicTokens = new Set(tokenize('Machine Learning PyTorch basics Neural network'));
+    let matched = 0;
+    queryTokens.forEach(qt => { if (topicTokens.has(qt)) matched++; });
+    const score = matched / queryTokens.length;
+    assert.strictEqual(score, 0, 'Score should be 0 for unrelated query');
+});
+
+test('IDF weighting: rare tokens get higher weight than common ones', () => {
+    const docFreq = { 'python': 3, 'pytorch': 1, 'learning': 3 };
+    const numDocs = 3;
+    const idfPytorch = Math.log(numDocs / docFreq['pytorch']) + 1;
+    const idfPython = Math.log(numDocs / docFreq['python']) + 1;
+    assert.ok(idfPytorch > idfPython,
+        `IDF for rare "pytorch" (${idfPytorch.toFixed(2)}) should be > common "python" (${idfPython.toFixed(2)})`);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Topic Suggestion: Topic Document Builder
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\n─── Topic Suggestion: Topic Document Builder ───');
+
+test('app.js contains _buildTopicDocument method', () => {
+    assert.ok(appContent.includes('_buildTopicDocument('),
+        'app.js should define _buildTopicDocument');
+});
+
+test('_buildTopicDocument uses topic name', () => {
+    const fn = appContent.substring(
+        appContent.indexOf('_buildTopicDocument('),
+        appContent.indexOf('_simpleHash(')
+    );
+    assert.ok(fn.includes('topic.name'), 'Should use topic.name');
+});
+
+test('_buildTopicDocument uses overview and thread labels', () => {
+    const fn = appContent.substring(
+        appContent.indexOf('_buildTopicDocument('),
+        appContent.indexOf('_simpleHash(')
+    );
+    assert.ok(fn.includes('overview') || fn.includes('statusSummary'),
+        'Should reference overview');
+    assert.ok(fn.includes('threads') || fn.includes('label'),
+        'Should reference threads/labels');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Topic Suggestion: Hybrid Ranking Logic (pure unit tests)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\n─── Topic Suggestion: Hybrid Ranking Logic ───');
+
+test('app.js contains TopicSuggester with hybrid thresholds', () => {
+    assert.ok(appContent.includes('KEYWORD_CONFIDENT'),
+        'Should define KEYWORD_CONFIDENT threshold');
+    assert.ok(appContent.includes('KEYWORD_AMBIGUOUS'),
+        'Should define KEYWORD_AMBIGUOUS threshold');
+    assert.ok(appContent.includes('COMBINED_THRESHOLD'),
+        'Should define COMBINED_THRESHOLD');
+    assert.ok(appContent.includes('EMBEDDING_ONLY_THRESHOLD'),
+        'Should define EMBEDDING_ONLY_THRESHOLD');
+});
+
+test('high keyword score skips embedding call', () => {
+    const rankFn = appContent.substring(
+        appContent.indexOf('async rankTopics('),
+        appContent.indexOf('_combineScores(')
+    );
+    assert.ok(rankFn.includes('KEYWORD_CONFIDENT'),
+        'rankTopics should check KEYWORD_CONFIDENT');
+    assert.ok(rankFn.includes("method: 'keyword'"),
+        'Should return method: keyword for high confidence');
+});
+
+test('ambiguous keyword score triggers embedding', () => {
+    const rankFn = appContent.substring(
+        appContent.indexOf('async rankTopics('),
+        appContent.indexOf('_combineScores(')
+    );
+    assert.ok(rankFn.includes('KEYWORD_AMBIGUOUS'),
+        'rankTopics should check KEYWORD_AMBIGUOUS');
+    assert.ok(rankFn.includes('/api/embed'),
+        'Should call embed API for ambiguous matches');
+});
+
+test('combined scoring uses correct weights', () => {
+    const combineFn = appContent.substring(
+        appContent.indexOf('_combineScores('),
+        appContent.indexOf('// ── Suggestion UI')
+    );
+    assert.ok(combineFn.includes('KEYWORD_WEIGHT') && combineFn.includes('EMBEDDING_WEIGHT'),
+        'Should use KEYWORD_WEIGHT and EMBEDDING_WEIGHT');
+});
+
+test('combined score math: 0.4 * keyword + 0.6 * embedding', () => {
+    const kwWeight = 0.4;
+    const embWeight = 0.6;
+    const combined = kwWeight * 0.5 + embWeight * 0.8;
+    assert.ok(Math.abs(combined - 0.68) < 1e-10,
+        `0.4 * 0.5 + 0.6 * 0.8 should be ~0.68, got ${combined}`);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Topic Suggestion: Suggestion UI
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\n─── Topic Suggestion: Suggestion UI ───');
+
+test('CSS defines .topic-suggestion styles', () => {
+    assert.ok(cssContent.includes('.topic-suggestion'),
+        'CSS should define .topic-suggestion');
+});
+
+test('CSS defines .topic-suggestion.visible with opacity transition', () => {
+    assert.ok(cssContent.includes('.topic-suggestion.visible'),
+        'CSS should define .topic-suggestion.visible');
+    assert.ok(cssContent.includes('translateY'),
+        'Should use translateY for entrance animation');
+});
+
+test('CSS defines .topic-suggestion-accept and .topic-suggestion-dismiss', () => {
+    assert.ok(cssContent.includes('.topic-suggestion-accept'),
+        'CSS should define .topic-suggestion-accept');
+    assert.ok(cssContent.includes('.topic-suggestion-dismiss'),
+        'CSS should define .topic-suggestion-dismiss');
+});
+
+test('HTML has topic suggestion container', () => {
+    assert.ok(htmlContent.includes('id="topicSuggestion"'),
+        'HTML should have topicSuggestion element');
+    assert.ok(htmlContent.includes('topic-suggestion'),
+        'HTML should have topic-suggestion class');
+});
+
+test('app.js has _showTopicSuggestion and _hideTopicSuggestion methods', () => {
+    assert.ok(appContent.includes('_showTopicSuggestion('),
+        'Should define _showTopicSuggestion');
+    assert.ok(appContent.includes('_hideTopicSuggestion('),
+        'Should define _hideTopicSuggestion');
+});
+
+test('app.js tracks _suggestionDismissed state', () => {
+    assert.ok(appContent.includes('_suggestionDismissed'),
+        'Should track _suggestionDismissed state');
+});
+
+test('suggestion accept updates selectedTopicId', () => {
+    const defStart = appContent.indexOf('_acceptSuggestion(topicId) {');
+    assert.ok(defStart >= 0, '_acceptSuggestion function definition should exist');
+    const acceptFn = appContent.substring(defStart, defStart + 300);
+    assert.ok(acceptFn.includes('App.selectedTopicId'),
+        'Accept should update App.selectedTopicId');
+});
+
+test('suggestion dismiss sets _suggestionDismissed to true', () => {
+    const dismissFn = appContent.substring(
+        appContent.indexOf('_dismissSuggestion('),
+        appContent.indexOf('// ── Debounced Handler')
+    );
+    assert.ok(dismissFn.includes('_suggestionDismissed = true'),
+        'Dismiss should set _suggestionDismissed = true');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Topic Suggestion: Custom Topic Picker Dropdown
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\n─── Topic Suggestion: Custom Topic Picker ───');
+
+test('CSS defines .topic-picker-trigger styles', () => {
+    assert.ok(cssContent.includes('.topic-picker-trigger'),
+        'CSS should define .topic-picker-trigger');
+});
+
+test('CSS defines .topic-picker-dropdown styles', () => {
+    assert.ok(cssContent.includes('.topic-picker-dropdown'),
+        'CSS should define .topic-picker-dropdown');
+});
+
+test('CSS defines .topic-picker-option styles', () => {
+    assert.ok(cssContent.includes('.topic-picker-option'),
+        'CSS should define .topic-picker-option');
+});
+
+test('CSS defines .topic-picker-dropdown.open with animation', () => {
+    assert.ok(cssContent.includes('.topic-picker-dropdown.open'),
+        'CSS should define .topic-picker-dropdown.open');
+    assert.ok(cssContent.includes('scale(0.95)'),
+        'Dropdown should have scale animation');
+});
+
+test('HTML has custom topic picker elements', () => {
+    assert.ok(htmlContent.includes('id="topicPickerTrigger"'),
+        'HTML should have topicPickerTrigger');
+    assert.ok(htmlContent.includes('id="topicPickerDropdown"'),
+        'HTML should have topicPickerDropdown');
+    assert.ok(htmlContent.includes('topic-picker-label'),
+        'HTML should have topic-picker-label');
+});
+
+test('app.js has _populateTopicPicker method', () => {
+    assert.ok(appContent.includes('_populateTopicPicker('),
+        'Should define _populateTopicPicker');
+});
+
+test('app.js has _updateTopicPickerDisplay method', () => {
+    assert.ok(appContent.includes('_updateTopicPickerDisplay('),
+        'Should define _updateTopicPickerDisplay');
+});
+
+test('custom picker syncs with hidden select', () => {
+    const populateFn = appContent.substring(
+        appContent.indexOf('_populateTopicPicker('),
+        appContent.indexOf('};', appContent.indexOf('_populateTopicPicker(') + 300)
+    );
+    assert.ok(populateFn.includes("topicSelect") || populateFn.includes("sel.value"),
+        'Picker should sync value to hidden select');
+});
+
+test('custom picker has keyboard navigation', () => {
+    assert.ok(appContent.includes('_pickerKeyHandler'),
+        'Should have keyboard handler');
+    assert.ok(appContent.includes('ArrowDown') && appContent.includes('ArrowUp'),
+        'Should handle arrow keys');
+    assert.ok(appContent.includes("'Escape'"),
+        'Should handle Escape key');
+});
+
+test('newChat resets TopicSuggester', () => {
+    const newChatFn = appContent.substring(
+        appContent.indexOf('newChat()'),
+        appContent.indexOf('async sendMessage()')
+    );
+    assert.ok(newChatFn.includes('TopicSuggester.reset()'),
+        'newChat should call TopicSuggester.reset()');
+    assert.ok(newChatFn.includes('_updateTopicPickerDisplay(null)'),
+        'newChat should reset picker display');
+});
+
+test('sendMessage hides topic suggestion and picker', () => {
+    const startIdx = appContent.indexOf('async sendMessage()');
+    const sendFn = appContent.substring(startIdx, startIdx + 4000);
+    assert.ok(sendFn.includes('_hideTopicSuggestion'),
+        'sendMessage should hide topic suggestion');
+    assert.ok(sendFn.includes('topicPickerEl'),
+        'sendMessage should hide topic picker');
+});
+
+test('debounced input handler checks welcome mode', () => {
+    assert.ok(appContent.includes("welcome-mode") && appContent.includes('TopicSuggester.onInputChange'),
+        'Input handler should check welcome-mode and call TopicSuggester');
+});
+
+test('native select is hidden in HTML', () => {
+    assert.ok(htmlContent.includes('id="topicSelect"') && htmlContent.includes('style="display:none;"'),
+        'Native select should be hidden');
+});
+
+test('topic picker hidden in baseline mode CSS', () => {
+    assert.ok(cssContent.includes('baseline-mode .topic-picker') ||
+        cssContent.includes('baseline-mode .topic-suggestion'),
+        'Picker and suggestion should be hidden in baseline mode');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Topic Suggestion: Cosine Similarity (client-side)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\n─── Topic Suggestion: Client-side Cosine Similarity ───');
+
+test('app.js contains _cosineSimilarity method', () => {
+    assert.ok(appContent.includes('_cosineSimilarity('),
+        'app.js should define _cosineSimilarity');
+});
+
+test('cosine similarity: identical vectors = 1', () => {
+    const a = [1, 2, 3];
+    let dot = 0, normA = 0, normB = 0;
+    for (let i = 0; i < a.length; i++) {
+        dot += a[i] * a[i]; normA += a[i] * a[i]; normB += a[i] * a[i];
+    }
+    const sim = dot / (Math.sqrt(normA) * Math.sqrt(normB));
+    assert.ok(Math.abs(sim - 1.0) < 1e-7, `Should be ~1.0, got ${sim}`);
+});
+
+test('cosine similarity: orthogonal vectors = 0', () => {
+    const a = [1, 0], b = [0, 1];
+    let dot = 0, normA = 0, normB = 0;
+    for (let i = 0; i < a.length; i++) {
+        dot += a[i] * b[i]; normA += a[i] * a[i]; normB += b[i] * b[i];
+    }
+    const sim = dot / (Math.sqrt(normA) * Math.sqrt(normB));
+    assert.ok(Math.abs(sim) < 1e-7, `Should be ~0, got ${sim}`);
 });
 
 // ─── Summary ──────────────────────────────────────────────────────────────────

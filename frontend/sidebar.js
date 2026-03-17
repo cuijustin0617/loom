@@ -9,6 +9,7 @@ const Sidebar = {
     this._initStatusDrag();
     this._initStatusUpdate();
     this._initMergeDialog();
+    this._initMoveDialog();
     this._initShuffle();
     this._initModuleCollapse();
   },
@@ -373,6 +374,7 @@ const Sidebar = {
           const open = stepsEl.style.display !== 'none';
           stepsEl.style.display = open ? 'none' : 'block';
           chevron?.classList.toggle('expanded', !open);
+          StudyLog.event('thread_toggled', { topicId: this.currentTopicId, threadIdx: parseInt(ti), expanded: !open });
         }
       });
     });
@@ -728,18 +730,38 @@ const Sidebar = {
     module.style.display = 'block';
     container.innerHTML = '';
     const chatId = Storage.getCurrentChatId();
+
+    // Group connections by chatId so the same past chat shows one card
+    const grouped = {};
+    const groupOrder = [];
     connectionsJson.forEach(conn => {
       StudyLog.event('module2_connection_shown', { chatId, connectionChatId: conn.chatId });
+      const key = conn.chatId || conn.id;
+      if (!grouped[key]) {
+        grouped[key] = [];
+        groupOrder.push(key);
+      }
+      grouped[key].push(conn);
+    });
+
+    groupOrder.forEach(key => {
+      const conns = grouped[key];
+      const first = conns[0];
       const card = document.createElement('div');
       card.className = 'conn-sidebar-card';
-      card.dataset.connId = conn.id;
-      const title = Utils.escapeHtml(conn.chatTitle || 'Past chat');
-      const userAsked = conn.userAsked ? Utils.escapeHtml(conn.userAsked) : '';
-      const aiCovered = conn.aiCovered ? Utils.escapeHtml(conn.aiCovered) : '';
-      const insight = Utils.escapeHtml(conn.text || '');
+      card.dataset.connId = first.id;
+      const title = Utils.escapeHtml(first.chatTitle || 'Past chat');
+      const userAsked = first.userAsked ? Utils.escapeHtml(first.userAsked) : '';
+      const aiCovered = first.aiCovered ? Utils.escapeHtml(first.aiCovered) : '';
       let summaryHtml = '';
       if (userAsked) summaryHtml += `<div class="conn-sb-row"><span class="conn-sb-label">Asked</span><span class="conn-sb-value">${userAsked}</span></div>`;
       if (aiCovered) summaryHtml += `<div class="conn-sb-row"><span class="conn-sb-label">Learned</span><span class="conn-sb-value">${aiCovered}</span></div>`;
+
+      const insightsHtml = conns.map(c => {
+        const insight = Utils.escapeHtml(c.text || '');
+        return `<div class="conn-sb-insight-item" data-conn-id="${c.id}">${insight}</div>`;
+      }).join('');
+
       card.innerHTML = `
         <div class="conn-sb-header">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
@@ -747,19 +769,38 @@ const Sidebar = {
             <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
           </svg>
           <span class="conn-sb-title">${title}</span>
+          ${conns.length > 1 ? `<span class="conn-sb-count">${conns.length}</span>` : ''}
         </div>
         ${summaryHtml ? `<div class="conn-sb-summary">${summaryHtml}</div>` : ''}
-        <div class="conn-sb-insight">${insight}</div>
+        <div class="conn-sb-insights">${insightsHtml}</div>
       `;
 
+      // Bind hover/click per-insight for cross-referencing with markers
+      card.querySelectorAll('.conn-sb-insight-item').forEach(item => {
+        const connId = item.dataset.connId;
+        item.addEventListener('mouseenter', () => this._highlightMarker(connId, true));
+        item.addEventListener('mouseleave', () => this._highlightMarker(connId, false));
+        item.addEventListener('click', (e) => {
+          e.stopPropagation();
+          StudyLog.event('connection_sidebar_card_clicked', { connId, chatId, connectionChatId: first.chatId || '' });
+          const marker = document.querySelector(`.conn-marker.resolved[data-conn-id="${connId}"]`);
+          if (marker) {
+            marker.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            App._showConnCard(marker);
+          }
+        });
+      });
+
+      // Card-level hover highlights first connection's marker
       card.addEventListener('mouseenter', () => {
-        this._highlightMarker(conn.id, true);
+        conns.forEach(c => this._highlightMarker(c.id, true));
       });
       card.addEventListener('mouseleave', () => {
-        this._highlightMarker(conn.id, false);
+        conns.forEach(c => this._highlightMarker(c.id, false));
       });
       card.addEventListener('click', () => {
-        const marker = document.querySelector(`.conn-marker.resolved[data-conn-id="${conn.id}"]`);
+        StudyLog.event('connection_sidebar_card_clicked', { connId: first.id, chatId, connectionChatId: first.chatId || '' });
+        const marker = document.querySelector(`.conn-marker.resolved[data-conn-id="${first.id}"]`);
         if (marker) {
           marker.scrollIntoView({ behavior: 'smooth', block: 'center' });
           App._showConnCard(marker);
@@ -878,6 +919,7 @@ const Sidebar = {
 
   _initMergeDialog() {
     document.getElementById('mergeCancelBtn').addEventListener('click', () => {
+      StudyLog.event('topic_merge_cancelled', { sourceTopicId: App._mergeSourceTopicId || null });
       document.getElementById('mergeTopicDialog').style.display = 'none';
     });
 
@@ -885,8 +927,24 @@ const Sidebar = {
       const targetId = document.getElementById('mergeTargetSelect').value;
       const sourceTopicId = App._mergeSourceTopicId;
       if (!targetId || !sourceTopicId) return;
+      StudyLog.event('topic_merge_confirmed', { sourceTopicId, targetTopicId: targetId });
       document.getElementById('mergeTopicDialog').style.display = 'none';
       await App._mergeTopics(targetId, sourceTopicId);
+    });
+  },
+
+  _initMoveDialog() {
+    document.getElementById('moveChatCancelBtn').addEventListener('click', () => {
+      document.getElementById('moveChatDialog').style.display = 'none';
+    });
+
+    document.getElementById('moveChatConfirmBtn').addEventListener('click', () => {
+      const targetId = document.getElementById('moveChatTargetSelect').value;
+      const chatId = App._moveChatId;
+      const oldTopicId = App._moveChatOldTopicId;
+      if (!targetId || !chatId) return;
+      document.getElementById('moveChatDialog').style.display = 'none';
+      App._moveChat(chatId, targetId, oldTopicId);
     });
   },
 
@@ -927,6 +985,7 @@ const Sidebar = {
       const isCollapsed = label.classList.toggle('section-collapsed');
       itemsEl.classList.toggle('section-collapsed', isCollapsed);
       localStorage.setItem('loom_overviewCollapsed', isCollapsed);
+      StudyLog.event('overview_section_toggled', { section: sectionKey, collapsed: isCollapsed });
     });
   },
 
@@ -937,5 +996,6 @@ const Sidebar = {
     const collapsed = body.classList.toggle('collapsed');
     if (btn) btn.classList.toggle('collapsed', collapsed);
     localStorage.setItem('loom_moduleCollapse_' + moduleId, collapsed);
+    StudyLog.event('module_collapsed', { moduleId, collapsed });
   },
 };

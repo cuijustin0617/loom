@@ -104,6 +104,7 @@ class TestNewDirectionsPrompt:
         result = SIDEBAR_NEW_DIRECTIONS_PROMPT.format(
             topic_name="Fitness", topic_status="Working out",
             covered_concepts="- Cardio", current_summary="Asking about protein",
+            previously_suggested="None",
         )
         assert "Fitness" in result
         assert "Cardio" in result
@@ -112,6 +113,7 @@ class TestNewDirectionsPrompt:
         result = SIDEBAR_NEW_DIRECTIONS_PROMPT.format(
             topic_name="T", topic_status="S",
             covered_concepts="None", current_summary="test",
+            previously_suggested="None",
         )
         assert "newDirections" in result
 
@@ -119,6 +121,7 @@ class TestNewDirectionsPrompt:
         result = SIDEBAR_NEW_DIRECTIONS_PROMPT.format(
             topic_name="T", topic_status="S",
             covered_concepts="None", current_summary="test",
+            previously_suggested="None",
         )
         assert '"title"' in result
         assert '"question"' in result
@@ -127,6 +130,7 @@ class TestNewDirectionsPrompt:
         result = SIDEBAR_NEW_DIRECTIONS_PROMPT.format(
             topic_name="T", topic_status="S",
             covered_concepts="None yet.", current_summary="test",
+            previously_suggested="None",
         )
         assert "None yet." in result
 

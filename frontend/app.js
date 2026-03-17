@@ -5,13 +5,517 @@ const API_BASE = '';  // same origin
 // Global condition flag set after login
 let STUDY_CONDITION = 'loom';
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// TopicSuggester — keyword-first hybrid similarity search for topic suggestions
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const TopicSuggester = {
+  // Tunable thresholds
+  KEYWORD_CONFIDENT: 0.45,
+  KEYWORD_AMBIGUOUS: 0.2,
+  COMBINED_THRESHOLD: 0.35,
+  EMBEDDING_ONLY_THRESHOLD: 0.45,
+  KEYWORD_ONLY_THRESHOLD: 0.35,
+  MIN_QUERY_LENGTH: 12,
+  DEBOUNCE_MS: 300,
+  KEYWORD_WEIGHT: 0.4,
+  EMBEDDING_WEIGHT: 0.6,
+
+  STOP_WORDS: new Set([
+    'a','an','the','and','or','but','in','on','at','to','for','of','with','by',
+    'from','is','it','as','be','was','are','were','been','being','have','has',
+    'had','do','does','did','will','would','could','should','may','might','can',
+    'this','that','these','those','i','me','my','we','our','you','your','he',
+    'she','they','them','their','its','not','no','so','if','then','than','too',
+    'very','just','about','up','out','how','what','when','where','which','who',
+    'why','all','each','some','any','few','more','most','am','into','also',
+  ]),
+
+  _keywordIndex: {},
+  _idfWeights: {},
+  _embeddingCache: {},
+  _embeddingsReady: false,
+  _abortController: null,
+  _debounceTimer: null,
+  _suggestionDismissed: false,
+  _currentSuggestedTopicId: null,
+
+  // ── Tokenization ───────────────────────────────────────────────────────
+
+  _tokenize(text) {
+    return text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)
+      .filter(t => t.length > 1 && !this.STOP_WORDS.has(t));
+  },
+
+  _bigrams(tokens) {
+    const bg = [];
+    for (let i = 0; i < tokens.length - 1; i++) {
+      bg.push(tokens[i] + ' ' + tokens[i + 1]);
+    }
+    return bg;
+  },
+
+  // ── Topic Document Builder ─────────────────────────────────────────────
+
+  _buildTopicDocument(topic) {
+    const parts = [topic.name];
+    if (topic.statusSummary) {
+      const s = topic.statusSummary;
+      if (Array.isArray(s.overview)) parts.push(...s.overview);
+      if (Array.isArray(s.threads)) {
+        s.threads.forEach(t => { if (t.label) parts.push(t.label); });
+      }
+    }
+    return parts.join(' ');
+  },
+
+  _simpleHash(str) {
+    let h = 0;
+    for (let i = 0; i < str.length; i++) {
+      h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+    }
+    return h;
+  },
+
+  // ── Keyword Index ──────────────────────────────────────────────────────
+
+  rebuildKeywordIndex() {
+    const topics = Storage.getTopics().filter(t => t.name !== 'Unassigned');
+    this._keywordIndex = {};
+    const docFreq = {};
+
+    topics.forEach(t => {
+      const doc = this._buildTopicDocument(t);
+      const tokens = this._tokenize(doc);
+      const tokenSet = new Set(tokens);
+      const bigrams = new Set(this._bigrams(tokens));
+      this._keywordIndex[t.id] = { tokens: tokenSet, bigrams, doc, hash: this._simpleHash(doc) };
+      tokenSet.forEach(tok => { docFreq[tok] = (docFreq[tok] || 0) + 1; });
+    });
+
+    const numDocs = topics.length || 1;
+    this._idfWeights = {};
+    Object.keys(docFreq).forEach(tok => {
+      this._idfWeights[tok] = Math.log(numDocs / docFreq[tok]) + 1;
+    });
+  },
+
+  // ── Keyword Scoring ────────────────────────────────────────────────────
+
+  scoreKeyword(queryText) {
+    const queryTokens = this._tokenize(queryText);
+    if (queryTokens.length === 0) return [];
+    const queryBigrams = this._bigrams(queryTokens);
+
+    const results = [];
+    for (const [topicId, idx] of Object.entries(this._keywordIndex)) {
+      let score = 0;
+      let totalWeight = 0;
+      queryTokens.forEach(qt => {
+        const w = this._idfWeights[qt] || 1;
+        totalWeight += w;
+        if (idx.tokens.has(qt)) score += w;
+      });
+      if (totalWeight > 0) score /= totalWeight;
+
+      // Bigram bonus: up to 30% extra
+      if (queryBigrams.length > 0) {
+        let bigramHits = 0;
+        queryBigrams.forEach(bg => { if (idx.bigrams.has(bg)) bigramHits++; });
+        score += 0.3 * (bigramHits / queryBigrams.length);
+      }
+
+      score = Math.min(score, 1.0);
+      results.push({ topicId, score });
+    }
+
+    results.sort((a, b) => b.score - a.score);
+    return results;
+  },
+
+  // ── Cosine Similarity (client-side) ────────────────────────────────────
+
+  _cosineSimilarity(a, b) {
+    if (!a || !b || a.length !== b.length) return 0;
+    let dot = 0, normA = 0, normB = 0;
+    for (let i = 0; i < a.length; i++) {
+      dot += a[i] * b[i];
+      normA += a[i] * a[i];
+      normB += b[i] * b[i];
+    }
+    normA = Math.sqrt(normA);
+    normB = Math.sqrt(normB);
+    if (normA === 0 || normB === 0) return 0;
+    return dot / (normA * normB);
+  },
+
+  // ── Embedding Cache ────────────────────────────────────────────────────
+
+  async refreshTopicEmbeddings() {
+    const topics = Storage.getTopics().filter(t => t.name !== 'Unassigned');
+    if (topics.length === 0) return;
+
+    const toEmbed = [];
+    const toEmbedIds = [];
+    topics.forEach(t => {
+      const idx = this._keywordIndex[t.id];
+      if (!idx) return;
+      const cached = this._embeddingCache[t.id];
+      if (cached && cached.hash === idx.hash) return;
+      toEmbed.push(idx.doc);
+      toEmbedIds.push(t.id);
+    });
+
+    if (toEmbed.length === 0) {
+      this._embeddingsReady = Object.keys(this._embeddingCache).length > 0;
+      return;
+    }
+
+    try {
+      const resp = await fetch(`${API_BASE}/api/embed/batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ texts: toEmbed }),
+      });
+      if (!resp.ok) throw new Error('Batch embed failed');
+      const data = await resp.json();
+      data.embeddings.forEach((emb, i) => {
+        const topicId = toEmbedIds[i];
+        this._embeddingCache[topicId] = {
+          embedding: emb,
+          hash: this._keywordIndex[topicId].hash,
+        };
+      });
+      this._embeddingsReady = true;
+    } catch (e) {
+      console.warn('Topic embedding refresh failed:', e);
+    }
+  },
+
+  scoreEmbedding(queryEmbedding) {
+    const results = [];
+    for (const [topicId, cached] of Object.entries(this._embeddingCache)) {
+      const score = this._cosineSimilarity(queryEmbedding, cached.embedding);
+      results.push({ topicId, score });
+    }
+    results.sort((a, b) => b.score - a.score);
+    return results;
+  },
+
+  // ── Hybrid Ranking ─────────────────────────────────────────────────────
+
+  async rankTopics(queryText) {
+    const kwResults = this.scoreKeyword(queryText);
+    if (kwResults.length === 0) return null;
+
+    const topKw = kwResults[0];
+
+    // High-confidence keyword match — return immediately
+    if (topKw.score >= this.KEYWORD_CONFIDENT) {
+      return { topicId: topKw.topicId, score: topKw.score, method: 'keyword' };
+    }
+
+    // Try embedding refinement
+    if (this._embeddingsReady) {
+      if (this._abortController) this._abortController.abort();
+      this._abortController = new AbortController();
+
+      try {
+        const resp = await fetch(`${API_BASE}/api/embed`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: queryText }),
+          signal: this._abortController.signal,
+        });
+        if (!resp.ok) throw new Error('Embed failed');
+        const data = await resp.json();
+        const embResults = this.scoreEmbedding(data.embedding);
+
+        if (topKw.score >= this.KEYWORD_AMBIGUOUS && embResults.length > 0) {
+          // Combine scores for all topics, pick best combined
+          const combined = this._combineScores(kwResults, embResults);
+          if (combined && combined.score >= this.COMBINED_THRESHOLD) {
+            return { ...combined, method: 'hybrid' };
+          }
+        } else if (embResults.length > 0 && embResults[0].score >= this.EMBEDDING_ONLY_THRESHOLD) {
+          return { topicId: embResults[0].topicId, score: embResults[0].score, method: 'embedding' };
+        }
+      } catch (e) {
+        if (e.name === 'AbortError') return null;
+        console.warn('Embedding ranking failed, using keyword only:', e);
+      }
+    }
+
+    // Fallback: keyword only with higher threshold
+    if (topKw.score >= this.KEYWORD_ONLY_THRESHOLD) {
+      return { topicId: topKw.topicId, score: topKw.score, method: 'keyword-fallback' };
+    }
+
+    return null;
+  },
+
+  _combineScores(kwResults, embResults) {
+    const embMap = {};
+    embResults.forEach(r => { embMap[r.topicId] = r.score; });
+
+    let best = null;
+    kwResults.forEach(kw => {
+      const emb = embMap[kw.topicId] || 0;
+      const combined = this.KEYWORD_WEIGHT * kw.score + this.EMBEDDING_WEIGHT * emb;
+      if (!best || combined > best.score) {
+        best = { topicId: kw.topicId, score: combined };
+      }
+    });
+    return best;
+  },
+
+  // ── Suggestion UI ──────────────────────────────────────────────────────
+
+  _showTopicSuggestion(topicId) {
+    const topic = Storage.getTopic(topicId);
+    if (!topic) return;
+    const el = document.getElementById('topicSuggestion');
+    if (!el) return;
+
+    const tc = Utils.getTopicColor(topic);
+    this._currentSuggestedTopicId = topicId;
+
+    el.innerHTML = `
+      <span class="topic-suggestion-dot" style="background:${tc.color}"></span>
+      <span class="topic-suggestion-text">Looks like <strong>${Utils.escapeHtml(topic.name)}</strong></span>
+      <button class="topic-suggestion-accept" style="background:${tc.light};color:${tc.color}">Select topic</button>
+      <button class="topic-suggestion-dismiss">&times;</button>
+    `;
+    el.style.background = tc.light;
+
+    el.querySelector('.topic-suggestion-accept').addEventListener('click', () => {
+      this._acceptSuggestion(topicId);
+    });
+    el.querySelector('.topic-suggestion-dismiss').addEventListener('click', () => {
+      this._dismissSuggestion();
+    });
+
+    // Trigger reflow then animate in
+    el.classList.remove('hiding');
+    el.style.display = 'flex';
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => el.classList.add('visible'));
+    });
+  },
+
+  _hideTopicSuggestion() {
+    const el = document.getElementById('topicSuggestion');
+    if (!el || !el.classList.contains('visible')) {
+      if (el) { el.style.display = 'none'; el.classList.remove('visible', 'hiding'); }
+      return;
+    }
+    el.classList.add('hiding');
+    el.classList.remove('visible');
+    setTimeout(() => {
+      el.style.display = 'none';
+      el.classList.remove('hiding');
+    }, 150);
+    this._currentSuggestedTopicId = null;
+  },
+
+  _acceptSuggestion(topicId) {
+    App.selectedTopicId = topicId;
+    // Sync hidden select
+    const sel = document.getElementById('topicSelect');
+    if (sel) sel.value = topicId;
+    // Update custom picker
+    App._updateTopicPickerDisplay(topicId);
+    this._hideTopicSuggestion();
+    Utils.showToast('Topic selected', 'success');
+    StudyLog.event('topic_suggestion_accepted', { topicId });
+  },
+
+  _dismissSuggestion() {
+    this._suggestionDismissed = true;
+    this._hideTopicSuggestion();
+    StudyLog.event('topic_suggestion_dismissed', { topicId: this._currentSuggestedTopicId });
+  },
+
+  // ── Debounced Handler ──────────────────────────────────────────────────
+
+  onInputChange(text) {
+    clearTimeout(this._debounceTimer);
+
+    if (this._abortController) {
+      this._abortController.abort();
+      this._abortController = null;
+    }
+
+    if (text.length < this.MIN_QUERY_LENGTH) {
+      this._hideTopicSuggestion();
+      return;
+    }
+
+    if (this._suggestionDismissed) return;
+    if (App.selectedTopicId) return;
+
+    const topics = Storage.getTopics().filter(t => t.name !== 'Unassigned');
+    if (topics.length === 0) return;
+
+    this._debounceTimer = setTimeout(async () => {
+      const result = await this.rankTopics(text);
+      if (result && !this._suggestionDismissed && !App.selectedTopicId) {
+        this._showTopicSuggestion(result.topicId);
+      } else {
+        this._hideTopicSuggestion();
+      }
+    }, this.DEBOUNCE_MS);
+  },
+
+  reset() {
+    this._suggestionDismissed = false;
+    this._currentSuggestedTopicId = null;
+    clearTimeout(this._debounceTimer);
+    if (this._abortController) {
+      this._abortController.abort();
+      this._abortController = null;
+    }
+    this._hideTopicSuggestion();
+  },
+
+  // ── Custom Topic Picker (dropdown) ─────────────────────────────────────
+
+  initPicker() {
+    const trigger = document.getElementById('topicPickerTrigger');
+    const dropdown = document.getElementById('topicPickerDropdown');
+    if (!trigger || !dropdown) return;
+
+    trigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (dropdown.classList.contains('open')) {
+        this._closePicker();
+      } else {
+        this._openPicker();
+      }
+    });
+
+    trigger.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        trigger.click();
+      } else if (e.key === 'Escape') {
+        this._closePicker();
+      }
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('#topicPicker')) {
+        this._closePicker();
+      }
+    });
+  },
+
+  _openPicker() {
+    const dropdown = document.getElementById('topicPickerDropdown');
+    const trigger = document.getElementById('topicPickerTrigger');
+    if (!dropdown || !trigger) return;
+
+    StudyLog.event('topic_picker_opened', {});
+    this._populateTopicPicker();
+    trigger.classList.add('open');
+    dropdown.style.display = 'block';
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => dropdown.classList.add('open'));
+    });
+
+    this._pickerFocusIdx = -1;
+    dropdown.addEventListener('keydown', this._pickerKeyHandler);
+  },
+
+  _closePicker() {
+    const dropdown = document.getElementById('topicPickerDropdown');
+    const trigger = document.getElementById('topicPickerTrigger');
+    if (!dropdown || !trigger) return;
+
+    dropdown.classList.remove('open');
+    trigger.classList.remove('open');
+    setTimeout(() => { dropdown.style.display = 'none'; }, 150);
+    dropdown.removeEventListener('keydown', this._pickerKeyHandler);
+  },
+
+  _pickerFocusIdx: -1,
+
+  _pickerKeyHandler(e) {
+    const options = document.querySelectorAll('.topic-picker-option');
+    if (!options.length) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      TopicSuggester._pickerFocusIdx = Math.min(TopicSuggester._pickerFocusIdx + 1, options.length - 1);
+      options.forEach(o => o.classList.remove('focused'));
+      options[TopicSuggester._pickerFocusIdx].classList.add('focused');
+      options[TopicSuggester._pickerFocusIdx].scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      TopicSuggester._pickerFocusIdx = Math.max(TopicSuggester._pickerFocusIdx - 1, 0);
+      options.forEach(o => o.classList.remove('focused'));
+      options[TopicSuggester._pickerFocusIdx].classList.add('focused');
+      options[TopicSuggester._pickerFocusIdx].scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (TopicSuggester._pickerFocusIdx >= 0) {
+        StudyLog.event('topic_picker_keyboard_select', { key: 'Enter', index: TopicSuggester._pickerFocusIdx });
+        options[TopicSuggester._pickerFocusIdx].click();
+      }
+    } else if (e.key === 'Escape') {
+      TopicSuggester._closePicker();
+    }
+  },
+
+  _populateTopicPicker() {
+    const dropdown = document.getElementById('topicPickerDropdown');
+    if (!dropdown) return;
+
+    const topics = Storage.getTopics().filter(t => t.name !== 'Unassigned');
+    const currentVal = App.selectedTopicId || '';
+
+    let html = `<div class="topic-picker-option${!currentVal ? ' selected' : ''}" data-value="">
+      <span class="topic-picker-option-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg></span>
+      <span class="topic-picker-option-name">Auto-detect</span>
+    </div>`;
+
+    topics.forEach(t => {
+      const tc = Utils.getTopicColor(t);
+      const sel = t.id === currentVal ? ' selected' : '';
+      html += `<div class="topic-picker-option${sel}" data-value="${t.id}">
+        <span class="topic-picker-option-dot" style="background:${tc.color}"></span>
+        <span class="topic-picker-option-name">${Utils.escapeHtml(t.name)}</span>
+      </div>`;
+    });
+
+    dropdown.innerHTML = html;
+
+    dropdown.querySelectorAll('.topic-picker-option').forEach(opt => {
+      opt.addEventListener('click', () => {
+        const val = opt.dataset.value;
+        const topicName = opt.querySelector('.topic-picker-option-name')?.textContent || '';
+        StudyLog.event('topic_picker_selected', { topicId: val || null, topicName });
+        App.selectedTopicId = val || null;
+        const sel = document.getElementById('topicSelect');
+        if (sel) sel.value = val;
+        App._updateTopicPickerDisplay(val || null);
+        this._closePicker();
+        if (val) {
+          this._suggestionDismissed = true;
+          this._hideTopicSuggestion();
+        }
+      });
+    });
+  },
+};
+
 const App = {
   msgCountSinceRefresh: 0,
   currentChatId: null,
   inactivityTimer: null,
   pendingSummarize: false,
   pendingAttachments: [],
-  useSearch: false,
+  useSearch: true,
   selectedTopicId: null,
 
   async init() {
@@ -73,6 +577,7 @@ const App = {
 
   _enterApp() {
     STUDY_CONDITION = Storage.getCondition();
+    StudyLog.init();
     document.getElementById('loginOverlay').style.display = 'none';
     document.getElementById('appContainer').style.display = 'flex';
 
@@ -114,7 +619,7 @@ const App = {
   _bindEvents() {
     document.getElementById('sendBtn').addEventListener('click', () => this.sendMessage());
     document.getElementById('chatInput').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
         this.sendMessage();
       }
@@ -136,6 +641,7 @@ const App = {
       btn.addEventListener('click', () => {
         document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
+        StudyLog.event('view_switched', { view: btn.dataset.view });
         this._renderChatList(btn.dataset.view);
       });
     });
@@ -180,8 +686,10 @@ const App = {
       e.target.value = '';
     });
 
-    // Google Search grounding toggle
+    // Google Search grounding toggle (on by default)
     const searchBtn = document.getElementById('searchToggleBtn');
+    searchBtn.classList.add('active');
+    searchBtn.title = 'Google Search ON';
     searchBtn.addEventListener('click', () => {
       this.useSearch = !this.useSearch;
       searchBtn.classList.toggle('active', this.useSearch);
@@ -217,10 +725,22 @@ const App = {
     Storage.setChatModel('gemini-3-flash-preview');
     Storage.setSidebarModel('gemini-3-flash-preview');
 
-    // Topic selector in input bar
+    // Topic selector in input bar (hidden, synced by custom picker)
     const topicSel = document.getElementById('topicSelect');
     topicSel.addEventListener('change', () => {
       this.selectedTopicId = topicSel.value || null;
+    });
+
+    // Custom topic picker
+    TopicSuggester.initPicker();
+
+    // Topic suggestion: debounced input handler
+    document.getElementById('chatInput').addEventListener('input', () => {
+      const mainContent = document.getElementById('mainContent');
+      if (!mainContent.classList.contains('welcome-mode')) return;
+      if (STUDY_CONDITION !== 'loom') return;
+      const text = document.getElementById('chatInput').value;
+      TopicSuggester.onInputChange(text);
     });
   },
 
@@ -289,6 +809,7 @@ const App = {
       }
 
       const collapsed = sidebar.classList.toggle('collapsed');
+      StudyLog.event('sidebar_collapsed', { side, collapsed });
       const svg = btn.querySelector('svg');
       if (side === 'left') {
         svg.innerHTML = collapsed ? svgRight : svgLeft;
@@ -323,6 +844,37 @@ const App = {
     });
     sel.value = prev || '';
     this.selectedTopicId = sel.value || null;
+
+    // Rebuild keyword index and refresh embeddings in the background
+    TopicSuggester.rebuildKeywordIndex();
+    TopicSuggester.refreshTopicEmbeddings();
+  },
+
+  _updateTopicPickerDisplay(topicId) {
+    const label = document.getElementById('topicPickerLabel');
+    const dot = document.getElementById('topicPickerDot');
+    const icon = document.querySelector('.topic-picker-icon');
+    const trigger = document.getElementById('topicPickerTrigger');
+    if (!label || !dot || !trigger) return;
+
+    if (!topicId) {
+      label.textContent = 'Topic';
+      dot.style.display = 'none';
+      if (icon) icon.style.display = '';
+      trigger.classList.remove('topic-selected');
+      return;
+    }
+
+    const topic = Storage.getTopic(topicId);
+    if (!topic) return;
+    const tc = Utils.getTopicColor(topic);
+    label.textContent = topic.name;
+    dot.style.display = 'block';
+    dot.style.background = tc.color;
+    if (icon) icon.style.display = 'none';
+    trigger.classList.add('topic-selected');
+    trigger.style.color = tc.color;
+    trigger.style.background = tc.light;
   },
 
   // ── Chat Operations ───────────────────────────────────────────────────
@@ -336,6 +888,14 @@ const App = {
     this.selectedTopicId = null;
     const topicSel = document.getElementById('topicSelect');
     if (topicSel) topicSel.value = '';
+    this._updateTopicPickerDisplay(null);
+    TopicSuggester.reset();
+    this.useSearch = true;
+    const searchBtn = document.getElementById('searchToggleBtn');
+    if (searchBtn) {
+      searchBtn.classList.add('active');
+      searchBtn.title = 'Google Search ON';
+    }
     Sidebar.hide();
     this._renderChat(chat.id);
     this._renderChatList();
@@ -365,7 +925,10 @@ const App = {
       this.clearContextBlock();
     }
 
-    if (!content) return;
+    if (!content && this.pendingAttachments.length === 0) return;
+    if (!content && this.pendingAttachments.length > 0) {
+      content = 'Please describe or analyze the attached file(s).';
+    }
 
     input.value = '';
     input.style.height = 'auto';
@@ -383,6 +946,7 @@ const App = {
         chat.topicId = this.selectedTopicId;
         chat.lastActive = Utils.timestamp();
         Storage.saveChat(chat);
+        StudyLog.event('topic_assigned', { chatId: this.currentChatId, topicId: this.selectedTopicId, assignMethod: 'manual' });
         const topic = Storage.getTopic(this.selectedTopicId);
         if (topic) {
           topic.lastActive = Utils.timestamp();
@@ -429,6 +993,9 @@ const App = {
     if (welcomeGreeting) welcomeGreeting.remove();
     const topicSelEl = document.getElementById('topicSelect');
     if (topicSelEl) topicSelEl.style.display = 'none';
+    const topicPickerEl = document.getElementById('topicPicker');
+    if (topicPickerEl) topicPickerEl.style.display = 'none';
+    TopicSuggester._hideTopicSuggestion();
 
     document.getElementById('sendBtn').disabled = true;
 
@@ -640,6 +1207,37 @@ const App = {
     }
     flushCurrent();
 
+    // Fallback: if only 1 chunk but text has multiple paragraph blocks, re-split
+    // so plain-text replies without headers still get tagging
+    if (chunks.length <= 1 && chunks.length > 0) {
+      const paragraphs = chunks[0].split(/\n\n+/).filter(p => p.trim());
+      if (paragraphs.length >= 2) {
+        const totalLines = paragraphs.reduce((sum, p) => sum + countLines(p), 0);
+        if (totalLines >= 6) {
+          const reChunks = [];
+          let acc = [];
+          let accLines = 0;
+          for (const para of paragraphs) {
+            acc.push(para);
+            accLines += countLines(para);
+            if (accLines >= MIN_LINES) {
+              reChunks.push(acc.join('\n\n'));
+              acc = [];
+              accLines = 0;
+            }
+          }
+          if (acc.length > 0) {
+            if (reChunks.length > 0 && accLines < 2) {
+              reChunks[reChunks.length - 1] += '\n\n' + acc.join('\n\n');
+            } else {
+              reChunks.push(acc.join('\n\n'));
+            }
+          }
+          if (reChunks.length >= 2) return reChunks;
+        }
+      }
+    }
+
     if (chunks.length > 1) {
       const lastLines = countLines(chunks[chunks.length - 1]);
       if (lastLines < 3) {
@@ -666,8 +1264,11 @@ const App = {
   },
 
   _renderChunkedContent(text, msgId, chunkLabels) {
-    const chunks = this._splitIntoChunks(text);
-    if (chunks.length <= 1) {
+    let chunks = this._splitIntoChunks(text);
+    // Always allow tagging — if splitter produced 0 or 1 chunks, use the whole text as a single chunk
+    if (chunks.length === 0 && text && text.trim()) {
+      chunks = [text.trim()];
+    } else if (chunks.length === 0) {
       return { html: Utils.renderMarkdown(text), chunked: false };
     }
 
@@ -772,8 +1373,7 @@ const App = {
   },
 
   _parseConnectionMarkers(html) {
-    // Wrap the preceding word(s) before {~N} so the marker has visible text to underline
-    return html.replace(/((?:\S+\s+){0,2}\S+)\{~(\d+)\}/g,
+    return html.replace(/((?:\S+\s+){0,2}\S+)\s*\{~(\d+)\}/g,
       '<span class="conn-marker loading" data-conn-id="$2">$1<span class="conn-dots"></span></span>');
   },
 
@@ -1025,6 +1625,9 @@ const App = {
   },
 
   _hideConnCard() {
+    if (this._connCardEl && this._connCardEl.classList.contains('visible')) {
+      StudyLog.event('connection_card_closed', { chatId: this.currentChatId });
+    }
     if (this._connCardEl) this._connCardEl.classList.remove('visible');
     this._connCardMarker = null;
     if (this._connScrollHandler) {
@@ -1039,9 +1642,11 @@ const App = {
       marker.style.cursor = 'pointer';
       marker.addEventListener('click', (e) => {
         e.stopPropagation();
+        StudyLog.event('connection_marker_clicked', { connId: marker.dataset.connId, chatId: this.currentChatId });
         this._showConnCard(marker);
       });
       marker.addEventListener('mouseenter', () => {
+        StudyLog.event('connection_marker_hovered', { connId: marker.dataset.connId, chatId: this.currentChatId });
         Sidebar.highlightSidebarCard(marker.dataset.connId, true);
       });
       marker.addEventListener('mouseleave', () => {
@@ -1074,7 +1679,7 @@ const App = {
         chat.topicId = unassigned.id;
         chat.lastActive = Utils.timestamp();
         Storage.saveChat(chat);
-        StudyLog.event('topic_assigned', { chatId: this.currentChatId, topicId: unassigned.id, isAutoDetected: true, isOneOff: true });
+        StudyLog.event('topic_assigned', { chatId: this.currentChatId, topicId: unassigned.id, assignMethod: 'auto', isOneOff: true });
       }
       this._renderChatList();
       return;
@@ -1103,7 +1708,7 @@ const App = {
         chat.topicId = topicId;
         chat.lastActive = Utils.timestamp();
         Storage.saveChat(chat);
-        StudyLog.event('topic_assigned', { chatId: this.currentChatId, topicId, isAutoDetected: true });
+        StudyLog.event('topic_assigned', { chatId: this.currentChatId, topicId, assignMethod: 'auto' });
       }
 
       const topic = Storage.getTopic(topicId);
@@ -1289,6 +1894,7 @@ const App = {
     );
     if (candidateChats.length < 2) return;
 
+    StudyLog.event('topic_auto_detect_triggered', { candidateCount: candidateChats.length });
     try {
       const resp = await fetch(`${API_BASE}/api/topic/detect`, {
         method: 'POST',
@@ -1419,6 +2025,9 @@ const App = {
   },
 
   clearContextBlock() {
+    if (document.getElementById('contextBlock').style.display !== 'none') {
+      StudyLog.event('context_block_closed', { chatId: this.currentChatId });
+    }
     document.getElementById('contextBlock').style.display = 'none';
     document.getElementById('contextFullText').value = '';
     document.getElementById('contextCompact').textContent = '';
@@ -1430,9 +2039,11 @@ const App = {
     if (fullDiv.style.display === 'none') {
       fullDiv.style.display = 'block';
       btn.textContent = 'Collapse';
+      StudyLog.event('context_block_toggled', { expanded: true });
     } else {
       fullDiv.style.display = 'none';
       btn.textContent = 'Expand';
+      StudyLog.event('context_block_toggled', { expanded: false });
     }
   },
 
@@ -1450,14 +2061,18 @@ const App = {
     msgContainer.innerHTML = '';
 
     const topicSel = document.getElementById('topicSelect');
+    const topicPickerEl = document.getElementById('topicPicker');
     if (messages.length === 0) {
       mainContent.classList.add('welcome-mode');
       this._renderWelcome(msgContainer);
       if (topicSel) topicSel.style.display = '';
+      if (topicPickerEl) topicPickerEl.style.display = '';
+      TopicSuggester.reset();
     } else {
       mainContent.classList.remove('welcome-mode');
       messages.forEach(m => this._appendMessage(m));
       if (topicSel) topicSel.style.display = 'none';
+      if (topicPickerEl) topicPickerEl.style.display = 'none';
     }
 
     if (STUDY_CONDITION === 'baseline') {
@@ -1588,7 +2203,10 @@ const App = {
       card.addEventListener('click', () => {
         const idx = parseInt(card.dataset.suggestionIdx, 10);
         const s = suggestions[idx];
-        if (s) this._startSuggestedChat(s);
+        if (s) {
+          StudyLog.event('welcome_suggestion_clicked', { topicId: s.topicId, topicName: s.topicName, question: s.question });
+          this._startSuggestedChat(s);
+        }
       });
     });
   },
@@ -1784,6 +2402,8 @@ const App = {
       el.querySelectorAll('.ctx-tag').forEach(tag => {
         tag.addEventListener('click', () => {
           const idx = parseInt(tag.dataset.ctxIdx);
+          const mod = visibleModules[idx];
+          StudyLog.event('context_tag_clicked', { type: mod?.type || '', label: mod?.label || '' });
           const panel = el.querySelector('.ctx-detail-panel');
           if (panel.classList.contains('visible') && panel.dataset.activeIdx === String(idx)) {
             panel.classList.remove('visible');
@@ -1885,7 +2505,15 @@ const App = {
         const title = document.createElement('div');
         title.className = 'chat-list-group-title';
         title.dataset.topicId = topic.id;
-        title.innerHTML = `<span>${Utils.escapeHtml(topic.name)}</span>`;
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = topic.name;
+        title.appendChild(nameSpan);
+
+        nameSpan.addEventListener('dblclick', (e) => {
+          e.stopPropagation();
+          this._startTopicRename(nameSpan, topic.id);
+        });
+
         if (realTopics.length > 1) {
           title.draggable = true;
           title.addEventListener('dragstart', (e) => {
@@ -1907,6 +2535,7 @@ const App = {
             title.classList.remove('topic-drop-target');
             const draggedTopicId = e.dataTransfer.getData('text/topic-id');
             if (draggedTopicId && draggedTopicId !== topic.id) {
+              StudyLog.event('topic_merge_drag', { sourceTopicId: draggedTopicId, targetTopicId: topic.id });
               this._mergeTopics(draggedTopicId, topic.id);
             }
           });
@@ -1918,6 +2547,7 @@ const App = {
           mergeBtn.draggable = false;
           mergeBtn.addEventListener('click', (e) => {
             e.stopPropagation();
+            StudyLog.event('topic_merge_dialog_opened', { topicId: topic.id, topicName: topic.name });
             this._openMergeDialog(topic.id);
           });
           title.appendChild(mergeBtn);
@@ -1949,6 +2579,14 @@ const App = {
     const topic = chat.topicId ? Storage.getTopic(chat.topicId) : null;
     const tc = (topic && topic.name !== 'Unassigned') ? Utils.getTopicColor(topic) : { color: '#ccc' };
 
+    const moveBtn = STUDY_CONDITION === 'loom'
+      ? `<button class="chat-move-btn" title="Move to topic">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
+            <path d="M15 3h6v6"/><path d="M10 14L21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+          </svg>
+        </button>`
+      : '';
+
     const unassignBtn = chat.topicId && STUDY_CONDITION === 'loom'
       ? `<button class="chat-unassign-btn" title="Remove from topic">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
@@ -1964,6 +2602,7 @@ const App = {
         ${chat.summary ? `<div class="chat-item-summary">${Utils.escapeHtml(Utils.truncate(chat.summary, 50))}</div>` : ''}
       </div>
       <div class="chat-item-actions">
+        ${moveBtn}
         ${unassignBtn}
         <button class="chat-delete-btn" title="Delete chat">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
@@ -1973,6 +2612,14 @@ const App = {
         </button>
       </div>
     `;
+
+    const moveBtnEl = el.querySelector('.chat-move-btn');
+    if (moveBtnEl) {
+      moveBtnEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._showMoveDropdown(moveBtnEl, chat.id, chat.topicId);
+      });
+    }
 
     const unassignEl = el.querySelector('.chat-unassign-btn');
     if (unassignEl) {
@@ -1989,6 +2636,8 @@ const App = {
     });
 
     el.addEventListener('click', () => {
+      const currentView = document.querySelector('.toggle-btn.active')?.dataset?.view || 'recent';
+      StudyLog.event('chat_selected', { chatId: chat.id, topicId: chat.topicId || null, view: currentView });
       this._summarizeCurrentChat();
       this.msgCountSinceRefresh = 0;
       this._renderChat(chat.id);
@@ -2017,6 +2666,64 @@ const App = {
     this._renderChatList();
     StudyLog.event('chat_unassigned', { chatId, topicId });
     Utils.showToast('Chat removed from topic', 'info');
+  },
+
+  _showMoveDropdown(anchorEl, chatId, currentTopicId) {
+    const chat = Storage.getChat(chatId);
+    if (!chat) return;
+
+    const topics = Storage.getTopics().filter(t =>
+      t.id !== currentTopicId && t.name !== 'Unassigned'
+    );
+    if (topics.length === 0) {
+      Utils.showToast('No other topics to move to', 'info');
+      return;
+    }
+
+    this._moveChatId = chatId;
+    this._moveChatOldTopicId = currentTopicId;
+    document.getElementById('moveChatTitle').textContent = chat.title || 'Untitled chat';
+    const select = document.getElementById('moveChatTargetSelect');
+    select.innerHTML = '';
+    topics.forEach(t => {
+      const opt = document.createElement('option');
+      opt.value = t.id;
+      opt.textContent = t.name;
+      select.appendChild(opt);
+    });
+    document.getElementById('moveChatDialog').style.display = 'flex';
+  },
+
+  _moveChat(chatId, newTopicId, oldTopicId) {
+    const chat = Storage.getChat(chatId);
+    if (!chat) return;
+    const oldId = oldTopicId || chat.topicId;
+    chat.topicId = newTopicId;
+    chat.lastActive = Utils.timestamp();
+    Storage.saveChat(chat);
+
+    const newTopic = Storage.getTopic(newTopicId);
+    if (newTopic) {
+      newTopic.lastActive = Utils.timestamp();
+      Storage.saveTopic(newTopic);
+    }
+
+    if (oldId) {
+      const remaining = Storage.getChatsByTopic(oldId);
+      if (remaining.length === 0) {
+        Storage.deleteTopic(oldId);
+      }
+    }
+
+    if (chatId === this.currentChatId && newTopic && newTopic.name !== 'Unassigned') {
+      Sidebar.show(newTopicId);
+    }
+
+    this._renderChatList();
+    this._populateTopicSelector();
+    const topicName = newTopic ? newTopic.name : 'topic';
+    StudyLog.event('chat_moved', { chatId, oldTopicId: oldId, newTopicId });
+    Utils.showToast(`Moved to "${topicName}"`, 'success');
   },
 
   _deleteChat(chatId, topicId) {
@@ -2048,6 +2755,85 @@ const App = {
   _highlightActiveChat(chatId) {
     document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
     // Re-highlight happens on re-render
+  },
+
+  // ── Rename Topic ──────────────────────────────────────────────────────
+
+  _startTopicRename(spanEl, topicId) {
+    const topic = Storage.getTopic(topicId);
+    if (!topic) return;
+    const original = topic.name;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'topic-rename-input';
+    input.value = original;
+    spanEl.replaceWith(input);
+    input.focus();
+    input.select();
+    const save = () => {
+      const val = input.value.trim();
+      if (val && val !== original) {
+        this._renameTopic(topicId, val, original);
+      } else {
+        this._renderChatList();
+      }
+    };
+    input.addEventListener('blur', save);
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
+      if (ev.key === 'Escape') { input.value = original; input.blur(); }
+    });
+  },
+
+  async _renameTopic(topicId, newName, oldName) {
+    const topic = Storage.getTopic(topicId);
+    if (!topic) return;
+    topic.name = newName;
+    topic.lastActive = Utils.timestamp();
+    Storage.saveTopic(topic);
+    this._renderChatList();
+    this._populateTopicSelector();
+    if (Sidebar.currentTopicId === topicId) {
+      document.getElementById('statusTopicName').textContent = newName;
+      const badge = document.getElementById('topicBadge');
+      if (badge) badge.textContent = newName;
+    }
+    StudyLog.event('topic_renamed', { topicId, oldName, newName });
+    Utils.showToast(`Renamed to "${newName}"`, 'success');
+
+    // Check if overview needs adjusting for the name change
+    const overview = topic.statusSummary?.overview;
+    if (overview && overview.length > 0) {
+      try {
+        const resp = await fetch(`${API_BASE}/api/topic/rename-check`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            oldName,
+            newName,
+            overview,
+            model: Storage.getSidebarModel(),
+          }),
+        });
+        const data = await resp.json();
+        if (data.needsUpdate && data.overview) {
+          const freshTopic = Storage.getTopic(topicId);
+          if (freshTopic && freshTopic.statusSummary) {
+            freshTopic.statusSummary.overview = data.overview;
+            freshTopic.statusLastUpdated = Utils.timestamp();
+            if (freshTopic.sidebarCache?.statusUpdate) {
+              freshTopic.sidebarCache.statusUpdate.overview = data.overview;
+            }
+            Storage.saveTopic(freshTopic);
+            if (Sidebar.currentTopicId === topicId) {
+              Sidebar._renderStatus(freshTopic.statusSummary);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Topic rename overview check failed:', e);
+      }
+    }
   },
 
   // ── Merge Topics (from left sidebar) ─────────────────────────────────

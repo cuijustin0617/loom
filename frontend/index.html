@@ -121,6 +121,7 @@
       </div>
 
       <div class="chat-input-container">
+        <div class="topic-suggestion" id="topicSuggestion"></div>
         <div class="chat-input" id="chatInputArea">
           <div class="input-attachments" id="inputAttachments"></div>
           <div class="input-row">
@@ -131,9 +132,18 @@
               </svg>
             </button>
             <textarea id="chatInput" rows="1" placeholder="Ask a question..."></textarea>
-            <select class="input-topic-select" id="topicSelect" title="Assign to topic">
+            <select class="input-topic-select" id="topicSelect" title="Assign to topic" style="display:none;">
               <option value="">Auto-detect</option>
             </select>
+            <div class="topic-picker" id="topicPicker">
+              <button class="topic-picker-trigger" id="topicPickerTrigger" type="button" title="Assign to topic">
+                <span class="topic-picker-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg></span>
+                <span class="topic-picker-dot" id="topicPickerDot"></span>
+                <span class="topic-picker-label" id="topicPickerLabel">Topic</span>
+                <svg class="topic-picker-chevron" viewBox="0 0 10 6" width="8" height="5"><path d="M1 1L5 5L9 1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+              </button>
+              <div class="topic-picker-dropdown" id="topicPickerDropdown"></div>
+            </div>
             <button class="search-btn" id="searchToggleBtn" title="Google Search grounding">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
                 <circle cx="11" cy="11" r="8" />
@@ -321,6 +331,23 @@
       <div class="dialog-actions">
         <button class="btn-cancel" id="mergeCancelBtn">Cancel</button>
         <button class="btn-save" id="mergeConfirmBtn">Merge</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Move Chat to Topic Dialog -->
+  <div class="dialog-overlay" id="moveChatDialog" style="display:none;">
+    <div class="dialog">
+      <h3>Move Chat to Topic</h3>
+      <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;">Select a topic to move this chat into.</p>
+      <label>Chat:</label>
+      <div id="moveChatTitle" style="font-weight:600;margin-bottom:8px;"></div>
+      <label>Move to:</label>
+      <select id="moveChatTargetSelect"
+        style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;font-family:inherit;"></select>
+      <div class="dialog-actions">
+        <button class="btn-cancel" id="moveChatCancelBtn">Cancel</button>
+        <button class="btn-save" id="moveChatConfirmBtn">Move</button>
       </div>
     </div>
   </div>

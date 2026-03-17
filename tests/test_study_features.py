@@ -1201,3 +1201,233 @@ class TestHelperFunctions:
     def test_hash_password_length(self):
         from main import _hash_password
         assert len(_hash_password("test")) == 64
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Backup Mechanism Tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestBackupMechanism:
+    def test_backup_creates_json_file(self, isolate_db, tmp_path):
+        client = _client()
+        client.post("/api/log", json={
+            "userId": "u1", "condition": "loom",
+            "eventType": "test_event", "data": {"key": "val"},
+        })
+        from main import _backup_events_to_json
+        _backup_events_to_json()
+        backup_dir = tmp_path / "backups"
+        assert backup_dir.exists()
+        backups = list(backup_dir.glob("events_backup_*.json"))
+        assert len(backups) >= 1
+
+    def test_backup_contains_all_events(self, isolate_db, tmp_path):
+        client = _client()
+        for i in range(5):
+            client.post("/api/log", json={
+                "userId": "u1", "condition": "loom",
+                "eventType": f"evt_{i}", "data": {},
+            })
+        from main import _backup_events_to_json
+        _backup_events_to_json()
+        backup_dir = tmp_path / "backups"
+        backups = sorted(backup_dir.glob("events_backup_*.json"))
+        data = json.loads(backups[-1].read_text())
+        assert len(data) == 5
+
+    def test_backup_keeps_only_last_10(self, isolate_db, tmp_path):
+        from main import _backup_events_to_json
+        client = _client()
+        client.post("/api/log", json={
+            "userId": "u1", "condition": "loom", "eventType": "e", "data": {},
+        })
+        import time as _time
+        for i in range(15):
+            _backup_events_to_json()
+            _time.sleep(0.01)
+        backup_dir = tmp_path / "backups"
+        backups = list(backup_dir.glob("events_backup_*.json"))
+        assert len(backups) <= 10
+
+    def test_auto_backup_every_50_events(self, isolate_db, tmp_path):
+        client = _client()
+        for i in range(50):
+            client.post("/api/log", json={
+                "userId": "u1", "condition": "loom",
+                "eventType": "bulk_event", "data": {"idx": i},
+            })
+        backup_dir = tmp_path / "backups"
+        if backup_dir.exists():
+            backups = list(backup_dir.glob("events_backup_*.json"))
+            assert len(backups) >= 1
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Admin Endpoint Tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestAdminBackupEndpoint:
+    def test_manual_backup_endpoint(self, isolate_db, tmp_path):
+        client = _client()
+        client.post("/api/log", json={
+            "userId": "u1", "condition": "loom", "eventType": "e", "data": {},
+        })
+        resp = client.get("/api/admin/backup")
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+        backup_dir = tmp_path / "backups"
+        assert backup_dir.exists()
+
+
+class TestAdminEventsSummary:
+    def test_summary_returns_counts(self, isolate_db):
+        client = _client()
+        for _ in range(3):
+            client.post("/api/log", json={
+                "userId": "u1", "condition": "loom",
+                "eventType": "query_sent", "data": {},
+            })
+        for _ in range(2):
+            client.post("/api/log", json={
+                "userId": "u1", "condition": "loom",
+                "eventType": "chat_created", "data": {},
+            })
+        resp = client.get("/api/admin/events/summary")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 5
+        summary = data["summary"]
+        assert any(s["eventType"] == "query_sent" and s["count"] == 3 for s in summary)
+        assert any(s["eventType"] == "chat_created" and s["count"] == 2 for s in summary)
+
+    def test_summary_groups_by_user(self, isolate_db):
+        client = _client()
+        client.post("/api/log", json={
+            "userId": "u1", "condition": "loom", "eventType": "e", "data": {},
+        })
+        client.post("/api/log", json={
+            "userId": "u2", "condition": "baseline", "eventType": "e", "data": {},
+        })
+        resp = client.get("/api/admin/events/summary")
+        data = resp.json()
+        assert data["total"] == 2
+        user_ids = {s["userId"] for s in data["summary"]}
+        assert "u1" in user_ids
+        assert "u2" in user_ids
+
+    def test_empty_summary(self, isolate_db):
+        resp = _client().get("/api/admin/events/summary")
+        data = resp.json()
+        assert data["total"] == 0
+        assert data["summary"] == []
+
+
+class TestAdminExport:
+    def test_export_returns_all_events(self, isolate_db):
+        client = _client()
+        for i in range(3):
+            client.post("/api/log", json={
+                "userId": "u1", "condition": "loom",
+                "eventType": f"evt_{i}", "data": {"i": i},
+            })
+        resp = client.get("/api/admin/export")
+        assert resp.status_code == 200
+        events = resp.json()
+        assert len(events) == 3
+        assert events[0]["eventType"] == "evt_0"
+        assert events[2]["eventType"] == "evt_2"
+
+    def test_export_has_content_disposition_header(self, isolate_db):
+        _client().post("/api/log", json={
+            "userId": "u1", "condition": "loom", "eventType": "e", "data": {},
+        })
+        resp = _client().get("/api/admin/export")
+        assert "content-disposition" in resp.headers
+        assert "loom_events_" in resp.headers["content-disposition"]
+
+    def test_export_empty_returns_empty_list(self, isolate_db):
+        resp = _client().get("/api/admin/export")
+        assert resp.json() == []
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# New Event Types — Logging Validation
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestNewEventTypes:
+    """Verify all new event types can be stored and retrieved correctly."""
+
+    NEW_EVENTS = [
+        ("chat_selected", {"chatId": "c1", "topicId": "t1", "view": "recent"}),
+        ("chat_selected", {"chatId": "c2", "topicId": "t2", "view": "topics"}),
+        ("view_switched", {"view": "topics"}),
+        ("topic_auto_detect_triggered", {"candidateCount": 5}),
+        ("topic_assigned", {"chatId": "c1", "topicId": "t1", "assignMethod": "manual"}),
+        ("topic_assigned", {"chatId": "c2", "topicId": "t2", "assignMethod": "auto"}),
+        ("topic_picker_opened", {}),
+        ("topic_picker_selected", {"topicId": "t1", "topicName": "ML"}),
+        ("topic_picker_keyboard_select", {"key": "Enter", "index": 0}),
+        ("topic_merge_drag", {"sourceTopicId": "t1", "targetTopicId": "t2"}),
+        ("topic_merge_dialog_opened", {"topicId": "t1", "topicName": "ML"}),
+        ("topic_merge_confirmed", {"sourceTopicId": "t1", "targetTopicId": "t2"}),
+        ("topic_merge_cancelled", {"sourceTopicId": "t1"}),
+        ("overview_section_toggled", {"section": "overview", "collapsed": True}),
+        ("thread_toggled", {"topicId": "t1", "threadIdx": 0, "expanded": True}),
+        ("module_collapsed", {"moduleId": "moduleStatus", "collapsed": True}),
+        ("module_collapsed", {"moduleId": "moduleConnections", "collapsed": False}),
+        ("module_collapsed", {"moduleId": "moduleDirections", "collapsed": True}),
+        ("connection_marker_hovered", {"connId": "1", "chatId": "c1"}),
+        ("connection_marker_clicked", {"connId": "1", "chatId": "c1"}),
+        ("connection_sidebar_card_clicked", {"connId": "1", "chatId": "c1", "connectionChatId": "c2"}),
+        ("connection_card_closed", {"chatId": "c1"}),
+        ("welcome_suggestion_clicked", {"topicId": "t1", "topicName": "ML", "question": "What is X?"}),
+        ("context_block_closed", {"chatId": "c1"}),
+        ("context_block_toggled", {"expanded": True}),
+        ("context_block_toggled", {"expanded": False}),
+        ("sidebar_collapsed", {"side": "left", "collapsed": True}),
+        ("sidebar_collapsed", {"side": "right", "collapsed": False}),
+        ("context_tag_clicked", {"type": "status", "label": "Status: ML"}),
+    ]
+
+    def test_all_new_events_can_be_stored(self, isolate_db):
+        client = _client()
+        for evt_type, data in self.NEW_EVENTS:
+            resp = client.post("/api/log", json={
+                "userId": "test_user", "condition": "loom",
+                "eventType": evt_type, "data": data,
+            })
+            assert resp.status_code == 200, f"Failed to log {evt_type}"
+
+    def test_all_new_events_can_be_retrieved(self, isolate_db):
+        client = _client()
+        for evt_type, data in self.NEW_EVENTS:
+            client.post("/api/log", json={
+                "userId": "test_user", "condition": "loom",
+                "eventType": evt_type, "data": data,
+            })
+        resp = client.get("/api/admin/events", params={"userId": "test_user"})
+        events = resp.json()
+        assert len(events) == len(self.NEW_EVENTS)
+
+    def test_event_data_roundtrip(self, isolate_db):
+        client = _client()
+        test_data = {"topicId": "t1", "assignMethod": "manual", "nested": {"key": "val"}}
+        client.post("/api/log", json={
+            "userId": "u1", "condition": "loom",
+            "eventType": "topic_assigned", "data": test_data,
+        })
+        events = client.get("/api/admin/events", params={"userId": "u1"}).json()
+        assert events[0]["data"] == test_data
+
+    def test_summary_counts_new_event_types(self, isolate_db):
+        client = _client()
+        for _ in range(3):
+            client.post("/api/log", json={
+                "userId": "u1", "condition": "loom",
+                "eventType": "module_collapsed", "data": {"moduleId": "moduleStatus"},
+            })
+        resp = client.get("/api/admin/events/summary")
+        summary = resp.json()["summary"]
+        mc = next((s for s in summary if s["eventType"] == "module_collapsed"), None)
+        assert mc is not None
+        assert mc["count"] == 3

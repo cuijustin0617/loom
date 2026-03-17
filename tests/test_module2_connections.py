@@ -696,14 +696,14 @@ class TestParseConnectionMarkersJS:
 
     def test_creates_conn_marker_span(self):
         js = self._get_js()
-        parse_start = js.index('_parseConnectionMarkers')
+        parse_start = js.index('_parseConnectionMarkers(html)')
         parse_section = js[parse_start:parse_start + 300]
         assert 'conn-marker' in parse_section
         assert 'loading' in parse_section
 
     def test_stores_conn_id_as_data_attribute(self):
         js = self._get_js()
-        parse_start = js.index('_parseConnectionMarkers')
+        parse_start = js.index('_parseConnectionMarkers(html)')
         parse_section = js[parse_start:parse_start + 300]
         assert 'data-conn-id' in parse_section
 

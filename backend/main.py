@@ -31,6 +31,7 @@ from prompts import (
     TOPIC_AUTO_DETECT_PROMPT,
     BASELINE_PERSONAL_DETAILS_PROMPT,
     OVERVIEW_AI_EDIT_PROMPT,
+    TOPIC_RENAME_CHECK_PROMPT,
 )
 
 load_dotenv()
@@ -157,6 +158,10 @@ class EmbedRequest(BaseModel):
     text: str
 
 
+class BatchEmbedRequest(BaseModel):
+    texts: list[str]
+
+
 class RankRequest(BaseModel):
     queryEmbedding: list[float]
     candidates: list[dict]
@@ -173,6 +178,13 @@ class OverviewAiEditRequest(BaseModel):
     topicName: str
     overview: list[str] = []
     instruction: str
+    model: str | None = None
+
+
+class TopicRenameCheckRequest(BaseModel):
+    oldName: str
+    newName: str
+    overview: list[str] = []
     model: str | None = None
 
 
@@ -563,6 +575,13 @@ async def embed_text(req: EmbedRequest):
     return {"embedding": embedding}
 
 
+@app.post("/api/embed/batch")
+async def batch_embed(req: BatchEmbedRequest):
+    """Batch-embed multiple texts in one call."""
+    embeddings = await embedder.embed_texts(req.texts)
+    return {"embeddings": embeddings}
+
+
 @app.post("/api/rank")
 async def rank_candidates(req: RankRequest):
     """Rank candidates by cosine similarity. Pure math, no LLM call."""
@@ -612,6 +631,32 @@ async def ai_edit_overview(req: OverviewAiEditRequest):
     return {"overview": overview}
 
 
+@app.post("/api/topic/rename-check")
+async def topic_rename_check(req: TopicRenameCheckRequest):
+    """Check if overview needs updating after a topic rename."""
+    if not req.overview:
+        return {"needsUpdate": False, "overview": []}
+    current_overview = "\n".join(f"- {pt}" for pt in req.overview)
+    system_prompt = TOPIC_RENAME_CHECK_PROMPT.format(
+        old_name=req.oldName,
+        new_name=req.newName,
+        current_overview=current_overview,
+    )
+    try:
+        result = await llm.chat(
+            [{"role": "user", "content": "Check if overview needs updating."}],
+            system_prompt,
+            json_mode=True,
+            model=req.model,
+        )
+    except Exception as e:
+        raise HTTPException(500, f"LLM error: {str(e)}")
+    return {
+        "needsUpdate": result.get("needsUpdate", False),
+        "overview": result.get("overview", req.overview),
+    }
+
+
 @app.post("/api/topic/detect")
 async def detect_topics(req: TopicDetectRequest):
     """Auto-detect topic clusters from unassigned chats."""
@@ -644,8 +689,35 @@ async def log_event(req: LogEvent):
         (req.userId, req.condition, req.eventType, json.dumps(req.data), ts),
     )
     conn.commit()
+    row_count = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
     conn.close()
+    # Auto-backup every 50 events
+    if row_count % 50 == 0:
+        _backup_events_to_json()
     return {"ok": True}
+
+
+def _backup_events_to_json():
+    """Write all events to a timestamped JSON backup file."""
+    backup_dir = DATA_DIR / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    conn = _get_db()
+    rows = conn.execute(
+        "SELECT user_id, condition, event_type, event_data, timestamp FROM events ORDER BY id"
+    ).fetchall()
+    conn.close()
+    events = [
+        {"userId": r[0], "condition": r[1], "eventType": r[2],
+         "data": json.loads(r[3]), "timestamp": r[4]}
+        for r in rows
+    ]
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    filepath = backup_dir / f"events_backup_{ts}.json"
+    filepath.write_text(json.dumps(events, indent=2))
+    # Keep only last 10 backups
+    backups = sorted(backup_dir.glob("events_backup_*.json"))
+    for old in backups[:-10]:
+        old.unlink(missing_ok=True)
 
 
 # ── Data Sync ─────────────────────────────────────────────────────────────────
@@ -765,6 +837,49 @@ async def admin_users():
     ).fetchall()
     conn.close()
     return [{"userId": r[0], "condition": r[1]} for r in rows]
+
+
+@app.get("/api/admin/backup")
+async def admin_backup():
+    """Trigger a manual backup and return the file path."""
+    _backup_events_to_json()
+    return {"ok": True, "backupDir": str(DATA_DIR / "backups")}
+
+
+@app.get("/api/admin/events/summary")
+async def admin_events_summary():
+    """Return event counts grouped by user and event_type for quick overview."""
+    conn = _get_db()
+    rows = conn.execute(
+        "SELECT user_id, condition, event_type, COUNT(*) as cnt "
+        "FROM events GROUP BY user_id, condition, event_type ORDER BY user_id, event_type"
+    ).fetchall()
+    total = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+    conn.close()
+    summary = [
+        {"userId": r[0], "condition": r[1], "eventType": r[2], "count": r[3]}
+        for r in rows
+    ]
+    return {"total": total, "summary": summary}
+
+
+@app.get("/api/admin/export")
+async def admin_export():
+    """Export all events as downloadable JSON."""
+    conn = _get_db()
+    rows = conn.execute(
+        "SELECT user_id, condition, event_type, event_data, timestamp FROM events ORDER BY id"
+    ).fetchall()
+    conn.close()
+    events = [
+        {"userId": r[0], "condition": r[1], "eventType": r[2],
+         "data": json.loads(r[3]), "timestamp": r[4]}
+        for r in rows
+    ]
+    return JSONResponse(
+        content=events,
+        headers={"Content-Disposition": f"attachment; filename=loom_events_{time.strftime('%Y%m%d')}.json"},
+    )
 
 
 # Serve frontend

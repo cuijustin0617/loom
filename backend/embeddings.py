@@ -17,6 +17,17 @@ class EmbeddingService:
         else:
             raise ValueError(f"Unknown embedding provider: {self.provider}")
 
+    async def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        """Batch-embed multiple texts. Uses native batch API when available."""
+        if not texts:
+            return []
+        if self.provider == "openai":
+            return await self._openai_embed_batch(texts)
+        elif self.provider == "gemini":
+            return [await self._gemini_embed(t) for t in texts]
+        else:
+            raise ValueError(f"Unknown embedding provider: {self.provider}")
+
     async def _openai_embed(self, text: str) -> list[float]:
         from openai import AsyncOpenAI
 
@@ -25,6 +36,16 @@ class EmbeddingService:
             model="text-embedding-3-small", input=text
         )
         return response.data[0].embedding
+
+    async def _openai_embed_batch(self, texts: list[str]) -> list[list[float]]:
+        from openai import AsyncOpenAI
+
+        client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        response = await client.embeddings.create(
+            model="text-embedding-3-small", input=texts
+        )
+        idx_emb = sorted(response.data, key=lambda d: d.index)
+        return [d.embedding for d in idx_emb]
 
     async def _gemini_embed(self, text: str) -> list[float]:
         from google import genai

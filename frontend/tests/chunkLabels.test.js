@@ -50,6 +50,37 @@ function _splitIntoChunks(text) {
   }
   flushCurrent();
 
+  // Fallback: if only 1 chunk but text has multiple paragraph blocks, re-split
+  // so plain-text replies without headers still get tagging
+  if (chunks.length <= 1 && chunks.length > 0) {
+    const paragraphs = chunks[0].split(/\n\n+/).filter(p => p.trim());
+    if (paragraphs.length >= 2) {
+      const totalLines = paragraphs.reduce((sum, p) => sum + countLines(p), 0);
+      if (totalLines >= 6) {
+        const reChunks = [];
+        let acc = [];
+        let accLines = 0;
+        for (const para of paragraphs) {
+          acc.push(para);
+          accLines += countLines(para);
+          if (accLines >= MIN_LINES) {
+            reChunks.push(acc.join('\n\n'));
+            acc = [];
+            accLines = 0;
+          }
+        }
+        if (acc.length > 0) {
+          if (reChunks.length > 0 && accLines < 2) {
+            reChunks[reChunks.length - 1] += '\n\n' + acc.join('\n\n');
+          } else {
+            reChunks.push(acc.join('\n\n'));
+          }
+        }
+        if (reChunks.length >= 2) return reChunks;
+      }
+    }
+  }
+
   if (chunks.length > 1) {
     const lastLines = countLines(chunks[chunks.length - 1]);
     if (lastLines < 3) {
@@ -376,6 +407,59 @@ test('inject labels preserves original content structure', () => {
 
 test('inject labels on empty content returns empty', () => {
   assert.strictEqual(_injectChunkLabels('', { '0': 'understood' }), '');
+});
+
+// ── Plain-text (no headers) chunking ──────────────────────────────────────────
+
+test('plain-text paragraphs with no headers produce >= 2 chunks when >= 6 lines', () => {
+  const text = `First paragraph with some interesting content about the topic.
+This continues for a bit to establish context.
+
+Second paragraph explores a different aspect of the subject matter.
+It adds more detail to help the reader understand.
+
+Third paragraph wraps up with conclusions and observations.
+There is enough content here for splitting.`;
+
+  const chunks = _splitIntoChunks(text);
+  assert.ok(chunks.length >= 2,
+    `Plain-text with 3 paragraphs (8+ lines) should produce >= 2 chunks, got ${chunks.length}`);
+});
+
+test('plain-text with 4 paragraphs produces multiple chunks', () => {
+  const text = `Paragraph one discusses the fundamentals of the topic at hand.
+It provides necessary background information.
+
+Paragraph two goes deeper into specific details and examples.
+These help illustrate the concepts introduced earlier.
+
+Paragraph three explores implications and applications.
+The real-world relevance becomes clear here.
+
+Paragraph four concludes with a summary of key takeaways.
+The reader should now have a solid understanding.`;
+
+  const chunks = _splitIntoChunks(text);
+  assert.ok(chunks.length >= 2,
+    `4 paragraphs without headers should produce >= 2 chunks, got ${chunks.length}`);
+});
+
+test('very short plain text (< 6 lines) stays as single chunk', () => {
+  const text = `A short reply.
+
+Just two brief lines.`;
+
+  const chunks = _splitIntoChunks(text);
+  assert.ok(chunks.length <= 1,
+    `Very short text should remain as 1 chunk, got ${chunks.length}`);
+});
+
+test('single paragraph plain text stays as single chunk', () => {
+  const text = `This is just one paragraph with a few lines of text that discusses something but there are no paragraph breaks at all so it should remain as one chunk.`;
+
+  const chunks = _splitIntoChunks(text);
+  assert.ok(chunks.length <= 1,
+    `Single paragraph should remain as 1 chunk, got ${chunks.length}`);
 });
 
 test('real-world markdown response chunking', () => {
