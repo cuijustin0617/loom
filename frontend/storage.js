@@ -12,7 +12,7 @@ const Storage = {
 
   setUser(userId, condition) {
     this._userId = userId;
-    this._condition = condition || (userId.toLowerCase().startsWith('baseline') ? 'baseline' : 'loom');
+    this._condition = 'loom';
     localStorage.setItem('loom_currentUser', userId);
     localStorage.setItem('loom_currentCondition', this._condition);
   },

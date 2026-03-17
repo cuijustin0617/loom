@@ -231,9 +231,6 @@ def _hash_password(password: str) -> str:
 
 
 def _parse_condition(user_id: str) -> str:
-    lower = user_id.lower()
-    if lower.startswith("baseline"):
-        return "baseline"
     return "loom"
 
 
@@ -880,6 +877,444 @@ async def admin_export():
         content=events,
         headers={"Content-Disposition": f"attachment; filename=loom_events_{time.strftime('%Y%m%d')}.json"},
     )
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_dashboard():
+    """Serve the log viewer dashboard."""
+    return HTMLResponse(_ADMIN_HTML, headers={"Cache-Control": "no-cache"})
+
+
+_ADMIN_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Loom Study Logs</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #f8f9fb;
+    --surface: #ffffff;
+    --border: #e8eaed;
+    --border-soft: #f0f1f3;
+    --text: #1a1d23;
+    --text-secondary: #6b7280;
+    --text-muted: #9ca3af;
+    --accent: #5b6af0;
+    --accent-light: #eef0fe;
+    --loom-color: #5b6af0;
+    --loom-bg: #eef0fe;
+    --baseline-color: #0d9488;
+    --baseline-bg: #f0fdf9;
+    --shadow: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+    --shadow-md: 0 4px 12px rgba(0,0,0,.07);
+  }
+  body {
+    font-family: "Inter", -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 28px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    box-shadow: var(--shadow);
+  }
+  .logo { display: flex; align-items: center; gap: 8px; }
+  .logo-icon {
+    width: 28px; height: 28px; border-radius: 7px;
+    background: var(--accent); display: flex; align-items: center; justify-content: center;
+    font-size: 14px; color: #fff;
+  }
+  header h1 { font-size: 15px; font-weight: 600; color: var(--text); letter-spacing: -.01em; }
+  .header-badge {
+    font-size: 11px; font-weight: 500;
+    background: var(--accent-light); color: var(--accent);
+    padding: 2px 8px; border-radius: 20px;
+  }
+  .spacer { flex: 1; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 5px;
+    border: 1px solid var(--border); background: var(--surface);
+    color: var(--text-secondary); padding: 5px 12px; border-radius: 7px;
+    font-size: 12px; font-weight: 500; cursor: pointer; text-decoration: none;
+    transition: all .15s;
+  }
+  .btn:hover { border-color: #c4c9f0; color: var(--accent); background: var(--accent-light); }
+  .btn-primary {
+    background: var(--accent); color: #fff; border-color: var(--accent);
+  }
+  .btn-primary:hover { background: #4a59e0; border-color: #4a59e0; color: #fff; }
+
+  .main { max-width: 1200px; margin: 0 auto; padding: 24px 28px; }
+
+  /* Stats row */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin-bottom: 24px;
+  }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    box-shadow: var(--shadow);
+  }
+  .stat-card .label {
+    font-size: 11px; font-weight: 500; text-transform: uppercase;
+    letter-spacing: .06em; color: var(--text-muted); margin-bottom: 6px;
+  }
+  .stat-card .value {
+    font-size: 28px; font-weight: 600; color: var(--text);
+    letter-spacing: -.02em; line-height: 1;
+  }
+  .stat-card .sub { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+
+  /* Card wrapper */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    margin-bottom: 20px;
+    overflow: hidden;
+  }
+  .card-header {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border-soft);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .card-title {
+    font-size: 12px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .07em; color: var(--text-secondary);
+  }
+
+  /* Toolbar / filters */
+  .filters {
+    padding: 14px 18px;
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    border-bottom: 1px solid var(--border-soft);
+    background: #fafbfc;
+  }
+  .filters select, .filters input {
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); padding: 5px 10px; border-radius: 7px;
+    font-size: 12px; font-family: inherit; outline: none;
+    transition: border-color .15s;
+  }
+  .filters select:focus, .filters input:focus { border-color: var(--accent); }
+  .filters input { width: 190px; }
+  .filter-count { font-size: 11px; color: var(--text-muted); margin-left: 2px; }
+
+  /* Frequency chart */
+  .freq-grid { padding: 16px 18px; display: flex; flex-direction: column; gap: 5px; }
+  .hm-row { display: flex; align-items: center; gap: 10px; }
+  .hm-label {
+    width: 240px; font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 11px; color: var(--text-secondary); text-align: right;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0;
+  }
+  .hm-track {
+    flex: 1; height: 8px; background: var(--border-soft); border-radius: 4px; overflow: hidden;
+  }
+  .hm-bar {
+    height: 100%; border-radius: 4px;
+    background: linear-gradient(90deg, var(--accent), #8b96f8);
+    transition: width .4s cubic-bezier(.4,0,.2,1);
+  }
+  .hm-count { font-size: 11px; color: var(--text-muted); min-width: 32px; }
+
+  /* Tables */
+  .scroll-table { overflow-y: auto; max-height: 55vh; }
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    position: sticky; top: 0; background: #fafbfc;
+    padding: 9px 14px; font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted);
+    border-bottom: 1px solid var(--border); text-align: left; z-index: 1;
+  }
+  td { padding: 8px 14px; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover td { background: #fafbfc; }
+
+  /* Tags / badges */
+  .tag {
+    display: inline-block; font-size: 11px; font-weight: 500;
+    padding: 2px 8px; border-radius: 5px; white-space: nowrap;
+  }
+  .tag.loom { background: var(--loom-bg); color: var(--loom-color); }
+  .tag.baseline { background: var(--baseline-bg); color: var(--baseline-color); }
+  .tag.evt {
+    background: #f3f4f6; color: var(--text-secondary);
+    font-family: "SF Mono", "Fira Code", monospace; font-size: 10.5px;
+  }
+  .pill {
+    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    margin-right: 6px; vertical-align: middle;
+  }
+  .pill.loom { background: var(--loom-color); }
+  .pill.baseline { background: var(--baseline-color); }
+
+  .user-cell { font-weight: 500; color: var(--text); }
+  .ts { color: var(--text-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .data-cell {
+    font-family: "SF Mono", "Fira Code", monospace; font-size: 11px;
+    color: #4b5563; max-width: 380px; word-break: break-all;
+  }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* Empty / loading states */
+  .empty-row td { text-align: center; color: var(--text-muted); padding: 32px; }
+  #loading {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-height: 300px; color: var(--text-muted); gap: 12px;
+  }
+  .spinner {
+    width: 24px; height: 24px; border: 2px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%;
+    animation: spin .7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Toast */
+  #toast {
+    position: fixed; bottom: 24px; right: 24px;
+    background: #111827; color: #fff;
+    padding: 10px 16px; border-radius: 8px; font-size: 12px;
+    box-shadow: var(--shadow-md); display: none; z-index: 999;
+    animation: fadeUp .2s ease;
+  }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  @media (max-width: 768px) {
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .main { padding: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">L</div>
+    <h1>Loom Study</h1>
+  </div>
+  <span class="header-badge" id="headerTotal">loading…</span>
+  <div class="spacer"></div>
+  <button class="btn" onclick="triggerBackup()">&#128190; Backup</button>
+  <a class="btn" href="/api/admin/export">&#8659; Export JSON</a>
+  <button class="btn" onclick="loadAll()">&#8635; Refresh</button>
+</header>
+
+<div class="main">
+  <div id="loading">
+    <div class="spinner"></div>
+    <span>Loading study data…</span>
+  </div>
+
+  <div id="app" style="display:none">
+
+    <div class="stats" id="statsRow"></div>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Event frequency</span>
+      </div>
+      <div class="freq-grid" id="heatmap"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Per-participant summary</span>
+      </div>
+      <div class="scroll-table">
+        <table>
+          <thead><tr>
+            <th>Participant</th><th>Condition</th>
+            <th>Sessions</th><th>Messages</th><th>Topics</th>
+            <th>Mod 1</th><th>Mod 2</th><th>Mod 3</th><th>Total</th>
+          </tr></thead>
+          <tbody id="summaryBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Raw event log</span>
+        <div class="spacer"></div>
+        <span class="filter-count" id="filterCount"></span>
+      </div>
+      <div class="filters">
+        <select id="userFilter" onchange="applyFilters()"><option value="">All participants</option></select>
+        <select id="eventFilter" onchange="applyFilters()"><option value="">All event types</option></select>
+        <input id="searchBox" placeholder="Search events…" oninput="applyFilters()">
+      </div>
+      <div class="scroll-table">
+        <table>
+          <thead><tr>
+            <th>Time</th><th>Participant</th><th>Condition</th><th>Event</th><th>Data</th>
+          </tr></thead>
+          <tbody id="eventBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+let _allEvents = [];
+let _summary = [];
+
+async function loadAll() {
+  document.getElementById('loading').style.display = 'flex';
+  document.getElementById('app').style.display = 'none';
+
+  const [evtResp, sumResp] = await Promise.all([
+    fetch('/api/admin/events'),
+    fetch('/api/admin/events/summary'),
+  ]);
+  _allEvents = await evtResp.json();
+  const sumData = await sumResp.json();
+  _summary = sumData.summary;
+
+  document.getElementById('headerTotal').textContent = `${_allEvents.length.toLocaleString()} events`;
+  populateFilters();
+  renderStats(sumData.total, _summary);
+  renderHeatmap(_allEvents);
+  renderSummaryTable(_allEvents);
+  applyFilters();
+
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+}
+
+function populateFilters() {
+  const users = [...new Set(_allEvents.map(e => e.userId))].sort();
+  const types = [...new Set(_allEvents.map(e => e.eventType))].sort();
+  document.getElementById('userFilter').innerHTML =
+    '<option value="">All participants</option>' + users.map(u => `<option>${u}</option>`).join('');
+  document.getElementById('eventFilter').innerHTML =
+    '<option value="">All event types</option>' + types.map(t => `<option>${t}</option>`).join('');
+}
+
+function renderStats(total, summary) {
+  const users = [...new Set(summary.map(s => s.userId))];
+  const loom = users.filter(u => summary.find(s => s.userId === u)?.condition === 'loom').length;
+  const baseline = users.filter(u => summary.find(s => s.userId === u)?.condition === 'baseline').length;
+  const sessions = summary.filter(s => s.eventType === 'session_start').reduce((a, s) => a + s.count, 0);
+  const msgs = summary.filter(s => s.eventType === 'query_sent').reduce((a, s) => a + s.count, 0);
+  document.getElementById('statsRow').innerHTML = [
+    ['Total events', total.toLocaleString(), ''],
+    ['Participants', users.length, `${loom} loom &nbsp;·&nbsp; ${baseline} baseline`],
+    ['Sessions', sessions, 'login events'],
+    ['Messages sent', msgs, 'query_sent'],
+  ].map(([l, v, s]) => `<div class="stat-card">
+    <div class="label">${l}</div>
+    <div class="value">${v}</div>
+    <div class="sub">${s}</div>
+  </div>`).join('');
+}
+
+function renderHeatmap(events) {
+  const counts = {};
+  events.forEach(e => counts[e.eventType] = (counts[e.eventType] || 0) + 1);
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const max = sorted[0]?.[1] || 1;
+  document.getElementById('heatmap').innerHTML = sorted.map(([type, cnt]) => `
+    <div class="hm-row">
+      <div class="hm-label">${type}</div>
+      <div class="hm-track"><div class="hm-bar" style="width:${Math.max(1, Math.round(cnt / max * 100))}%"></div></div>
+      <div class="hm-count">${cnt}</div>
+    </div>`).join('') || '<div style="color:var(--text-muted);padding:8px 0">No data</div>';
+}
+
+const MOD1 = ['summary_edited','summary_ai_edited','summary_updated','overview_section_toggled','thread_toggled'];
+const MOD2 = ['module2_connection_clicked','connection_marker_clicked','connection_sidebar_card_clicked'];
+const MOD3 = ['module3_direction_clicked','module3_direction_dragged','module3_direction_new_chat','module3_shuffled','welcome_suggestion_clicked'];
+const TOPIC = ['topic_created','topic_renamed','topic_assigned','topic_merge_confirmed','topic_merge_drag'];
+
+function renderSummaryTable(events) {
+  const users = [...new Set(events.map(e => e.userId))].sort();
+  const rows = users.map(u => {
+    const ue = events.filter(e => e.userId === u);
+    const cond = ue[0]?.condition || '';
+    const get = (types) => ue.filter(e => types.includes(e.eventType)).length;
+    return `<tr>
+      <td class="user-cell"><span class="pill ${cond}"></span>${u}</td>
+      <td><span class="tag ${cond}">${cond}</span></td>
+      <td class="num">${get(['session_start'])}</td>
+      <td class="num">${get(['query_sent'])}</td>
+      <td class="num">${get(TOPIC)}</td>
+      <td class="num">${get(MOD1)}</td>
+      <td class="num">${get(MOD2)}</td>
+      <td class="num">${get(MOD3)}</td>
+      <td class="num" style="font-weight:600">${ue.length}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('summaryBody').innerHTML =
+    rows || '<tr class="empty-row"><td colspan="9">No participants yet</td></tr>';
+}
+
+function applyFilters() {
+  const user = document.getElementById('userFilter').value;
+  const type = document.getElementById('eventFilter').value;
+  const search = document.getElementById('searchBox').value.toLowerCase();
+  const filtered = _allEvents.filter(e =>
+    (!user || e.userId === user) &&
+    (!type || e.eventType === type) &&
+    (!search || JSON.stringify(e).toLowerCase().includes(search))
+  );
+  document.getElementById('filterCount').textContent =
+    filtered.length < _allEvents.length ? `${filtered.length.toLocaleString()} of ${_allEvents.length.toLocaleString()} shown` : '';
+  const rows = [...filtered].reverse().slice(0, 500).map(e => {
+    const ts = e.timestamp.replace('T', ' ').slice(0, 19);
+    return `<tr>
+      <td class="ts">${ts}</td>
+      <td class="user-cell">${e.userId}</td>
+      <td><span class="tag ${e.condition}">${e.condition}</span></td>
+      <td><span class="tag evt">${e.eventType}</span></td>
+      <td class="data-cell">${JSON.stringify(e.data)}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('eventBody').innerHTML =
+    rows || '<tr class="empty-row"><td colspan="5">No events match</td></tr>';
+}
+
+async function triggerBackup() {
+  await fetch('/api/admin/backup');
+  showToast('Backup saved to backend/data/backups/');
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.display = 'block';
+  setTimeout(() => t.style.display = 'none', 3000);
+}
+
+loadAll();
+</script>
+</body>
+</html>"""
 
 
 # Serve frontend
