@@ -335,22 +335,8 @@
     </div>
   </div>
 
-  <!-- Move Chat to Topic Dialog -->
-  <div class="dialog-overlay" id="moveChatDialog" style="display:none;">
-    <div class="dialog">
-      <h3>Move Chat to Topic</h3>
-      <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;">Select a topic to move this chat into.</p>
-      <label>Chat:</label>
-      <div id="moveChatTitle" style="font-weight:600;margin-bottom:8px;"></div>
-      <label>Move to:</label>
-      <select id="moveChatTargetSelect"
-        style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;font-family:inherit;"></select>
-      <div class="dialog-actions">
-        <button class="btn-cancel" id="moveChatCancelBtn">Cancel</button>
-        <button class="btn-save" id="moveChatConfirmBtn">Move</button>
-      </div>
-    </div>
-  </div>
+  <!-- Move Chat Popover (positioned by JS) -->
+  <div class="move-chat-popover" id="moveChatPopover" style="display:none;"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/marked/lib/marked.umd.min.js"></script>
   <script src="/static/utils.js?v=__CACHE_VERSION__"></script>

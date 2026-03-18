@@ -33,6 +33,7 @@ const cssContent = fs.readFileSync(path.join(ROOT, 'frontend/styles.css'), 'utf8
 const htmlContent = fs.readFileSync(path.join(ROOT, 'frontend/index.html'), 'utf8');
 const sidebarContent = fs.readFileSync(path.join(ROOT, 'frontend/sidebar.js'), 'utf8');
 const appContent = fs.readFileSync(path.join(ROOT, 'frontend/app.js'), 'utf8');
+const backendMainContent = fs.readFileSync(path.join(ROOT, 'backend/main.py'), 'utf8');
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TODO 1: Reduced assistant message padding
@@ -519,9 +520,11 @@ test('CSS defines chat-move-btn style', () => {
         'CSS should define .chat-move-btn');
 });
 
-test('move chat dialog exists in HTML', () => {
-    assert.ok(htmlContent.includes('id="moveChatDialog"'),
-        'HTML should define moveChatDialog');
+test('move chat popover exists in HTML (replaces old modal dialog)', () => {
+    assert.ok(htmlContent.includes('id="moveChatPopover"'),
+        'HTML should define moveChatPopover');
+    assert.ok(!htmlContent.includes('id="moveChatDialog"'),
+        'HTML should NOT contain old moveChatDialog overlay');
 });
 
 test('_moveChat updates topicId and cleans up empty topics', () => {
@@ -546,6 +549,35 @@ test('move dropdown excludes current topic and Unassigned', () => {
         'Dropdown should filter out current topic');
     assert.ok(dropdownFn.includes("t.name !== 'Unassigned'"),
         'Dropdown should filter out Unassigned');
+});
+
+test('_showMoveDropdown references moveChatPopover (not moveChatDialog)', () => {
+    const dropdownFn = appContent.substring(
+        appContent.indexOf('_showMoveDropdown('),
+        appContent.indexOf('_moveChat(chatId,')
+    );
+    assert.ok(dropdownFn.includes('moveChatPopover'),
+        '_showMoveDropdown should reference moveChatPopover');
+    assert.ok(!dropdownFn.includes('moveChatDialog'),
+        '_showMoveDropdown should NOT reference moveChatDialog');
+});
+
+test('CSS defines .move-chat-popover style', () => {
+    assert.ok(cssContent.includes('.move-chat-popover'),
+        'CSS should define .move-chat-popover');
+});
+
+test('CSS defines .move-topic-chip style', () => {
+    assert.ok(cssContent.includes('.move-topic-chip'),
+        'CSS should define .move-topic-chip');
+});
+
+test('app.js closes popover on outside click', () => {
+    const start = appContent.indexOf('_showMoveDropdown(');
+    const end = appContent.indexOf('\n  _moveChat(');
+    const dropdownFn = appContent.substring(start, end);
+    assert.ok(dropdownFn.includes('mousedown'),
+        '_showMoveDropdown should add mousedown listener for outside-click close');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1060,6 +1092,271 @@ test('cosine similarity: orthogonal vectors = 0', () => {
     }
     const sim = dot / (Math.sqrt(normA) * Math.sqrt(normB));
     assert.ok(Math.abs(sim) < 1e-7, `Should be ~0, got ${sim}`);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Topic Suggestion: Race Condition Guard
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\n─── Topic Suggestion: Race Condition Guard ───');
+
+test('TopicSuggester debounce callback checks welcome-mode after rankTopics resolves', () => {
+    const debounceStart = appContent.indexOf('this._debounceTimer = setTimeout(async () => {');
+    assert.ok(debounceStart >= 0, 'Should find debounce timer callback');
+    const debounceBlock = appContent.substring(debounceStart, debounceStart + 500);
+    assert.ok(debounceBlock.includes('rankTopics'),
+        'Debounce block should call rankTopics');
+    const rankIdx = debounceBlock.indexOf('rankTopics');
+    const welcomeIdx = debounceBlock.indexOf('welcome-mode', rankIdx);
+    assert.ok(welcomeIdx > rankIdx,
+        'welcome-mode check should appear AFTER rankTopics call in debounce callback');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Chat Title: Strip Status Prefix
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\n─── Chat Title: Strip Status Prefix ───');
+
+test('title-setting block strips [My current status in...] prefix', () => {
+    const titleBlock = appContent.substring(
+        appContent.indexOf('Update chat title from first exchange'),
+        appContent.indexOf('this.msgCountSinceRefresh++')
+    );
+    assert.ok(titleBlock.includes('My current status in'),
+        'Title block should contain status prefix strip logic');
+    assert.ok(titleBlock.includes('.replace(') || titleBlock.includes('replace('),
+        'Title block should use .replace() to strip prefix');
+});
+
+test('status prefix regex correctly strips a sample prefix', () => {
+    const raw = '[My current status in "Machine Learning": Overview: CS student]\n\nHow does backprop work?';
+    const clean = raw.replace(/^\[My current status in "[^"]*":[^\]]*\]\s*/s, '').trim();
+    assert.strictEqual(clean, 'How does backprop work?',
+        'Regex should strip status prefix and leave the real question');
+});
+
+test('status prefix regex preserves content with no prefix', () => {
+    const raw = 'How does backprop work?';
+    const clean = raw.replace(/^\[My current status in "[^"]*":[^\]]*\]\s*/s, '').trim();
+    assert.strictEqual(clean, 'How does backprop work?',
+        'Regex should not alter content with no prefix');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Sidebar: Refresh chat list on visibilitychange
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\n─── Sidebar: Refresh on Visibility Change ───');
+
+test('visibilitychange handler calls _renderChatList when becoming visible', () => {
+    const visBlock = appContent.substring(
+        appContent.indexOf("addEventListener('visibilitychange'"),
+        appContent.indexOf("addEventListener('visibilitychange'") + 300
+    );
+    assert.ok(visBlock.includes('_renderChatList'),
+        'visibilitychange handler should call _renderChatList');
+    assert.ok(visBlock.includes('_summarizeCurrentChat'),
+        'visibilitychange handler should call _summarizeCurrentChat on hide');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Thread Familiarity: Conservative Prompt Rules
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\n─── Thread Familiarity: Conservative Prompt Rules ───');
+
+test('STATUS_UPDATE_PROMPT requires user to have raised the concept for familiar', () => {
+    assert.ok(promptContent.includes('user must have raised or asked about this concept'),
+        'Prompt should require user raised the concept for familiar level');
+});
+
+test('STATUS_UPDATE_PROMPT states system-introduced concepts default to brief', () => {
+    assert.ok(promptContent.includes('introduced by the system (AI)') && promptContent.includes('default to "brief"'),
+        'Prompt should state AI-introduced concepts default to brief');
+});
+
+test('STATUS_UPDATE_PROMPT states user labels take priority over inferred levels', () => {
+    assert.ok(promptContent.includes('take priority over inferred levels'),
+        'Prompt should state user labels take priority');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Chunk Labels in Status Updates
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\n─── Chunk Labels in Status Updates ───');
+
+// -- Sidebar: _labelsDirty flag --
+
+test('sidebar.js declares _labelsDirty property', () => {
+    assert.ok(sidebarContent.includes('_labelsDirty'),
+        'Sidebar should have _labelsDirty property');
+    assert.ok(sidebarContent.includes('_labelsDirty: false'),
+        '_labelsDirty should be initialized to false');
+});
+
+// -- _initStatusUpdate includes currentMessages with labels --
+
+test('_initStatusUpdate gathers messages with injected chunk labels', () => {
+    const fnStart = sidebarContent.indexOf('_initStatusUpdate() {');
+    assert.ok(fnStart >= 0, 'Should find _initStatusUpdate definition');
+    const fnBlock = sidebarContent.substring(fnStart, fnStart + 1500);
+    assert.ok(fnBlock.includes('_injectChunkLabels'),
+        '_initStatusUpdate should call _injectChunkLabels to include labels in messages');
+    assert.ok(fnBlock.includes('currentMessages'),
+        '_initStatusUpdate should send currentMessages in the POST body');
+});
+
+test('_initStatusUpdate clears _labelsDirty', () => {
+    const fnStart = sidebarContent.indexOf('_initStatusUpdate() {');
+    const fnBlock = sidebarContent.substring(fnStart, fnStart + 1500);
+    assert.ok(fnBlock.includes('this._labelsDirty = false'),
+        '_initStatusUpdate should clear _labelsDirty after gathering messages');
+});
+
+// -- refresh() clears _labelsDirty --
+
+test('refresh() clears _labelsDirty before fetch', () => {
+    const fnStart = sidebarContent.indexOf('async refresh() {');
+    assert.ok(fnStart >= 0, 'Should find refresh() definition');
+    const fnBlock = sidebarContent.substring(fnStart, fnStart + 1200);
+    assert.ok(fnBlock.includes('this._labelsDirty = false'),
+        'refresh() should clear _labelsDirty');
+    const labelsClearIdx = fnBlock.indexOf('this._labelsDirty = false');
+    const fetchIdx = fnBlock.indexOf('fetch(');
+    assert.ok(labelsClearIdx < fetchIdx,
+        '_labelsDirty should be cleared BEFORE the fetch call in refresh()');
+});
+
+// -- _flushDirtyLabels method --
+
+test('_flushDirtyLabels method exists and checks _labelsDirty', () => {
+    assert.ok(sidebarContent.includes('_flushDirtyLabels()'),
+        'Sidebar should define _flushDirtyLabels');
+    const fnStart = sidebarContent.indexOf('_flushDirtyLabels()');
+    const fnBlock = sidebarContent.substring(fnStart, fnStart + 1200);
+    assert.ok(fnBlock.includes('this._labelsDirty'),
+        '_flushDirtyLabels should check _labelsDirty');
+    assert.ok(fnBlock.includes('this.currentTopicId'),
+        '_flushDirtyLabels should check currentTopicId');
+});
+
+test('_flushDirtyLabels calls /api/topic/status/update with currentMessages', () => {
+    const fnStart = sidebarContent.indexOf('_flushDirtyLabels()');
+    const fnBlock = sidebarContent.substring(fnStart, fnStart + 1200);
+    assert.ok(fnBlock.includes('/api/topic/status/update'),
+        '_flushDirtyLabels should POST to /api/topic/status/update');
+    assert.ok(fnBlock.includes('currentMessages'),
+        '_flushDirtyLabels should send currentMessages');
+    assert.ok(fnBlock.includes('_injectChunkLabels'),
+        '_flushDirtyLabels should inject chunk labels into messages');
+});
+
+test('_flushDirtyLabels clears _labelsDirty', () => {
+    const fnStart = sidebarContent.indexOf('_flushDirtyLabels()');
+    const fnBlock = sidebarContent.substring(fnStart, fnStart + 1200);
+    assert.ok(fnBlock.includes('this._labelsDirty = false'),
+        '_flushDirtyLabels should clear _labelsDirty');
+});
+
+test('_flushDirtyLabels is fire-and-forget (uses .then not await)', () => {
+    const fnStart = sidebarContent.indexOf('_flushDirtyLabels()');
+    const fnBlock = sidebarContent.substring(fnStart, fnStart + 1200);
+    assert.ok(fnBlock.includes('.then('),
+        '_flushDirtyLabels should use .then() for fire-and-forget');
+    assert.ok(!fnBlock.includes('async'),
+        '_flushDirtyLabels should not be async (fire-and-forget)');
+});
+
+// -- _toggleChunkLabel sets Sidebar._labelsDirty --
+
+test('_toggleChunkLabel sets Sidebar._labelsDirty = true', () => {
+    const fnStart = appContent.indexOf('_toggleChunkLabel(chunkEl, msgId, chunkIdx, label) {');
+    assert.ok(fnStart >= 0, 'Should find _toggleChunkLabel definition');
+    const fnBlock = appContent.substring(fnStart, fnStart + 1500);
+    assert.ok(fnBlock.includes('Sidebar._labelsDirty = true'),
+        '_toggleChunkLabel should set Sidebar._labelsDirty to true');
+});
+
+// -- All 7 leave-chat sites call _flushDirtyLabels --
+
+test('logout handler calls Sidebar._flushDirtyLabels()', () => {
+    const logoutStart = appContent.indexOf("getElementById('logoutBtn')");
+    assert.ok(logoutStart >= 0, 'Should find logoutBtn listener');
+    const block = appContent.substring(logoutStart, logoutStart + 300);
+    assert.ok(block.includes('_flushDirtyLabels'),
+        'Logout handler should call _flushDirtyLabels');
+});
+
+test('beforeunload handler calls Sidebar._flushDirtyLabels()', () => {
+    const buStart = appContent.indexOf("addEventListener('beforeunload'");
+    assert.ok(buStart >= 0, 'Should find beforeunload listener');
+    const block = appContent.substring(buStart, buStart + 200);
+    assert.ok(block.includes('_flushDirtyLabels'),
+        'beforeunload handler should call _flushDirtyLabels');
+});
+
+test('visibilitychange hidden handler calls Sidebar._flushDirtyLabels()', () => {
+    const visStart = appContent.indexOf("addEventListener('visibilitychange'");
+    assert.ok(visStart >= 0, 'Should find visibilitychange listener');
+    const block = appContent.substring(visStart, visStart + 300);
+    assert.ok(block.includes('_flushDirtyLabels'),
+        'visibilitychange hidden handler should call _flushDirtyLabels');
+});
+
+test('newChat() calls Sidebar._flushDirtyLabels()', () => {
+    const fnStart = appContent.indexOf('newChat() {');
+    assert.ok(fnStart >= 0, 'Should find newChat() definition');
+    const block = appContent.substring(fnStart, fnStart + 300);
+    assert.ok(block.includes('_flushDirtyLabels'),
+        'newChat() should call _flushDirtyLabels');
+});
+
+test('chat selection click calls Sidebar._flushDirtyLabels()', () => {
+    const chatItemFn = appContent.indexOf('_createChatItem(chat) {');
+    assert.ok(chatItemFn >= 0, 'Should find _createChatItem definition');
+    const fnBlock = appContent.substring(chatItemFn, chatItemFn + 4500);
+    assert.ok(fnBlock.includes('_flushDirtyLabels'),
+        'Chat selection click handler should call _flushDirtyLabels');
+});
+
+test('connection goto click calls Sidebar._flushDirtyLabels()', () => {
+    const gotoStart = appContent.indexOf("('.conn-card-goto').addEventListener");
+    assert.ok(gotoStart >= 0, 'Should find conn-card-goto event listener');
+    const block = appContent.substring(gotoStart, gotoStart + 500);
+    assert.ok(block.includes('_flushDirtyLabels'),
+        'Connection goto click should call _flushDirtyLabels');
+});
+
+test('_onInactive() calls Sidebar._flushDirtyLabels()', () => {
+    const fnStart = appContent.indexOf('_onInactive() {');
+    assert.ok(fnStart >= 0, 'Should find _onInactive definition');
+    const block = appContent.substring(fnStart, fnStart + 200);
+    assert.ok(block.includes('_flushDirtyLabels'),
+        '_onInactive should call _flushDirtyLabels');
+});
+
+// -- Backend: StatusUpdateRequest includes currentMessages --
+
+test('backend StatusUpdateRequest model includes currentMessages field', () => {
+    const classStart = backendMainContent.indexOf('class StatusUpdateRequest');
+    assert.ok(classStart >= 0, 'Should find StatusUpdateRequest class');
+    const block = backendMainContent.substring(classStart, classStart + 300);
+    assert.ok(block.includes('currentMessages'),
+        'StatusUpdateRequest should have currentMessages field');
+    assert.ok(block.includes('MessageItem'),
+        'currentMessages should be typed as list[MessageItem]');
+});
+
+test('backend update_topic_status formats currentMessages when provided', () => {
+    const fnStart = backendMainContent.indexOf('async def update_topic_status');
+    assert.ok(fnStart >= 0, 'Should find update_topic_status function');
+    const block = backendMainContent.substring(fnStart, fnStart + 600);
+    assert.ok(block.includes('req.currentMessages'),
+        'update_topic_status should reference req.currentMessages');
+    assert.ok(block.includes('current_messages_text'),
+        'update_topic_status should build current_messages_text from request');
 });
 
 // ─── Summary ──────────────────────────────────────────────────────────────────

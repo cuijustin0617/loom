@@ -359,7 +359,9 @@ const TopicSuggester = {
 
     this._debounceTimer = setTimeout(async () => {
       const result = await this.rankTopics(text);
-      if (result && !this._suggestionDismissed && !App.selectedTopicId) {
+      const mc = document.getElementById('mainContent');
+      if (result && !this._suggestionDismissed && !App.selectedTopicId
+          && mc && mc.classList.contains('welcome-mode')) {
         this._showTopicSuggestion(result.topicId);
       } else {
         this._hideTopicSuggestion();
@@ -493,8 +495,7 @@ const TopicSuggester = {
     dropdown.querySelectorAll('.topic-picker-option').forEach(opt => {
       opt.addEventListener('click', () => {
         const val = opt.dataset.value;
-        const topicName = opt.querySelector('.topic-picker-option-name')?.textContent || '';
-        StudyLog.event('topic_picker_selected', { topicId: val || null, topicName });
+        StudyLog.event('topic_picker_selected', { topicId: val || null });
         App.selectedTopicId = val || null;
         const sel = document.getElementById('topicSelect');
         if (sel) sel.value = val;
@@ -598,9 +599,12 @@ const App = {
 
     try { Storage.migrateTopicColors(); } catch (e) { console.warn('migrateTopicColors failed:', e); }
     try { Storage.reEmbedChats(); } catch (e) { console.warn('reEmbedChats failed:', e); }
-    Sidebar.init();
+    try { Sidebar.init(); } catch (e) { console.warn('Sidebar.init failed:', e); }
     this._bindEvents();
-    this._loadState();
+    try { this._loadState(); } catch (e) { console.warn('_loadState failed:', e); }
+
+    // Safety: ensure no dialog overlays are stuck open from a prior session
+    document.querySelectorAll('.dialog-overlay').forEach(d => { d.style.display = 'none'; });
 
     this.inactivityTimer = new InactivityTimer(() => this._onInactive(), 120000);
     this.inactivityTimer.start();
@@ -699,6 +703,7 @@ const App = {
     // Logout
     document.getElementById('logoutBtn').addEventListener('click', () => {
       StudyLog.event('session_end');
+      Sidebar._flushDirtyLabels();
       this._summarizeCurrentChat();
       Storage.logout();
       location.reload();
@@ -707,10 +712,16 @@ const App = {
     // Summarize on tab leave
     window.addEventListener('beforeunload', () => {
       StudyLog.event('session_end');
+      Sidebar._flushDirtyLabels();
       this._summarizeCurrentChat();
     });
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) this._summarizeCurrentChat();
+      if (document.hidden) {
+        Sidebar._flushDirtyLabels();
+        this._summarizeCurrentChat();
+      } else {
+        this._renderChatList();
+      }
     });
 
     // Resize handles
@@ -880,7 +891,8 @@ const App = {
   // ── Chat Operations ───────────────────────────────────────────────────
 
   newChat() {
-    this._summarizeCurrentChat();
+    try { Sidebar._flushDirtyLabels(); } catch (e) { console.warn('flushDirtyLabels failed:', e); }
+    try { this._summarizeCurrentChat(); } catch (e) { console.warn('summarizeCurrentChat failed:', e); }
     const chat = Storage.createChat();
     this.currentChatId = chat.id;
     this.msgCountSinceRefresh = 0;
@@ -897,8 +909,8 @@ const App = {
       searchBtn.title = 'Google Search ON';
     }
     Sidebar.hide();
-    this._renderChat(chat.id);
-    this._renderChatList();
+    try { this._renderChat(chat.id); } catch (e) { console.warn('renderChat failed:', e); }
+    try { this._renderChatList(); } catch (e) { console.warn('renderChatList failed:', e); }
     document.getElementById('chatInput').focus();
     StudyLog.event('chat_created', { chatId: chat.id });
   },
@@ -1090,7 +1102,7 @@ const App = {
             Storage.addMessage(this.currentChatId, assistantMsg);
 
             if (STUDY_CONDITION === 'loom') {
-              if (evt.topic && evt.topic.confidence > 0.6) {
+              if (evt.topic && evt.topic.confidence > 0.35) {
                 await this._handleTopicDetection(evt.topic);
               }
               if (evt.concepts && evt.concepts.length > 0) {
@@ -1134,10 +1146,12 @@ const App = {
         }
       }
 
-      // Update chat title from first exchange
+      // Update chat title from first exchange, stripping any injected status prefix
       const chat = Storage.getChat(this.currentChatId);
       if (chat && chat.title === 'New Chat') {
-        chat.title = Utils.truncate(messages[0]?.content || 'Chat', 40);
+        const rawTitle = messages[0]?.content || 'Chat';
+        const cleanTitle = rawTitle.replace(/^\[My current status in "[^"]*":[^\]]*\]\s*/s, '').trim();
+        chat.title = Utils.truncate(cleanTitle || rawTitle, 40);
         chat.lastActive = Utils.timestamp();
         Storage.saveChat(chat);
         document.getElementById('chatTitle').textContent = chat.title;
@@ -1354,6 +1368,8 @@ const App = {
       chunkEl.classList.add(`labeled-${newLabel}`);
     }
 
+    Sidebar._labelsDirty = true;
+
     StudyLog.event('chunk_labeled', {
       chatId,
       msgId,
@@ -1480,7 +1496,7 @@ const App = {
             <span class="conn-card-value conn-card-user-asked"></span>
           </div>
           <div class="conn-card-row">
-            <span class="conn-card-label">You learned</span>
+            <span class="conn-card-label">You explored</span>
             <span class="conn-card-value conn-card-ai-covered"></span>
           </div>
         </div>
@@ -1502,6 +1518,7 @@ const App = {
           this._hideConnCard();
           const chat = Storage.getChat(chatId);
           if (chat) {
+            Sidebar._flushDirtyLabels();
             this._summarizeCurrentChat();
             this.msgCountSinceRefresh = 0;
             this._renderChat(chatId);
@@ -1698,13 +1715,13 @@ const App = {
         const topic = Storage.createTopic(topicData.name);
         topicId = topic.id;
         isNew = true;
-        StudyLog.event('topic_created', { topicId, topicName: topicData.name, isAutoDetected: true });
+        StudyLog.event('topic_created', { topicId, isAutoDetected: true });
       }
     }
 
     if (topicId) {
       const chat = Storage.getChat(this.currentChatId);
-      if (chat) {
+      if (chat && !chat.topicId) {
         chat.topicId = topicId;
         chat.lastActive = Utils.timestamp();
         Storage.saveChat(chat);
@@ -1952,6 +1969,7 @@ const App = {
   },
 
   _onInactive() {
+    Sidebar._flushDirtyLabels();
     this._summarizeCurrentChat();
   },
 
@@ -2021,7 +2039,7 @@ const App = {
     document.getElementById('contextToggleBtn').textContent = 'Expand';
     block.style.display = 'block';
     const sourceType = fullText.includes('--- Previous chat history ---') ? 'connection' : label === 'Status Summary' ? 'status' : 'direction';
-    StudyLog.event('context_block_added', { chatId: this.currentChatId, sourceType, label });
+    StudyLog.event('context_block_added', { chatId: this.currentChatId, sourceType });
   },
 
   clearContextBlock() {
@@ -2204,7 +2222,7 @@ const App = {
         const idx = parseInt(card.dataset.suggestionIdx, 10);
         const s = suggestions[idx];
         if (s) {
-          StudyLog.event('welcome_suggestion_clicked', { topicId: s.topicId, topicName: s.topicName, question: s.question });
+          StudyLog.event('welcome_suggestion_clicked', { topicId: s.topicId, suggestionIdx: idx });
           this._startSuggestedChat(s);
         }
       });
@@ -2403,7 +2421,7 @@ const App = {
         tag.addEventListener('click', () => {
           const idx = parseInt(tag.dataset.ctxIdx);
           const mod = visibleModules[idx];
-          StudyLog.event('context_tag_clicked', { type: mod?.type || '', label: mod?.label || '' });
+          StudyLog.event('context_tag_clicked', { type: mod?.type || '' });
           const panel = el.querySelector('.ctx-detail-panel');
           if (panel.classList.contains('visible') && panel.dataset.activeIdx === String(idx)) {
             panel.classList.remove('visible');
@@ -2547,7 +2565,7 @@ const App = {
           mergeBtn.draggable = false;
           mergeBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            StudyLog.event('topic_merge_dialog_opened', { topicId: topic.id, topicName: topic.name });
+            StudyLog.event('topic_merge_dialog_opened', { topicId: topic.id });
             this._openMergeDialog(topic.id);
           });
           title.appendChild(mergeBtn);
@@ -2638,6 +2656,7 @@ const App = {
     el.addEventListener('click', () => {
       const currentView = document.querySelector('.toggle-btn.active')?.dataset?.view || 'recent';
       StudyLog.event('chat_selected', { chatId: chat.id, topicId: chat.topicId || null, view: currentView });
+      Sidebar._flushDirtyLabels();
       this._summarizeCurrentChat();
       this.msgCountSinceRefresh = 0;
       this._renderChat(chat.id);
@@ -2682,16 +2701,33 @@ const App = {
 
     this._moveChatId = chatId;
     this._moveChatOldTopicId = currentTopicId;
-    document.getElementById('moveChatTitle').textContent = chat.title || 'Untitled chat';
-    const select = document.getElementById('moveChatTargetSelect');
-    select.innerHTML = '';
+
+    const popover = document.getElementById('moveChatPopover');
+    popover.innerHTML = '<div class="move-chat-popover-label">Move to topic</div>';
     topics.forEach(t => {
-      const opt = document.createElement('option');
-      opt.value = t.id;
-      opt.textContent = t.name;
-      select.appendChild(opt);
+      const tc = Utils.getTopicColor(t);
+      const chip = document.createElement('div');
+      chip.className = 'move-topic-chip';
+      chip.innerHTML = `<span class="move-topic-chip-dot" style="background:${tc.color}"></span><span class="move-topic-chip-name">${Utils.escapeHtml(t.name)}</span>`;
+      chip.addEventListener('click', () => {
+        popover.style.display = 'none';
+        this._moveChat(chatId, t.id, currentTopicId);
+      });
+      popover.appendChild(chip);
     });
-    document.getElementById('moveChatDialog').style.display = 'flex';
+
+    const rect = anchorEl.getBoundingClientRect();
+    popover.style.display = 'block';
+    popover.style.left = Math.min(rect.left, window.innerWidth - 250) + 'px';
+    popover.style.top = (rect.bottom + 4) + 'px';
+
+    const closeOnOutside = (e) => {
+      if (!popover.contains(e.target) && e.target !== anchorEl) {
+        popover.style.display = 'none';
+        document.removeEventListener('mousedown', closeOnOutside);
+      }
+    };
+    setTimeout(() => document.addEventListener('mousedown', closeOnOutside), 0);
   },
 
   _moveChat(chatId, newTopicId, oldTopicId) {
@@ -2798,7 +2834,7 @@ const App = {
       const badge = document.getElementById('topicBadge');
       if (badge) badge.textContent = newName;
     }
-    StudyLog.event('topic_renamed', { topicId, oldName, newName });
+    StudyLog.event('topic_renamed', { topicId });
     Utils.showToast(`Renamed to "${newName}"`, 'success');
 
     // Check if overview needs adjusting for the name change
@@ -2930,7 +2966,7 @@ const App = {
     if (!name) return;
     const desc = document.getElementById('topicDescInput').value.trim();
     const topic = Storage.createTopic(name, desc);
-    StudyLog.event('topic_created', { topicId: topic.id, topicName: name, isAutoDetected: false });
+    StudyLog.event('topic_created', { topicId: topic.id, isAutoDetected: false });
     this._hideTopicDialog();
     this._renderChatList();
   },

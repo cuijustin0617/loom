@@ -25,8 +25,8 @@ You MUST return valid JSON in this exact format:
 Rules:
 - "response" should be a natural, helpful answer to the user's question
 - "topic.name" should be a broad domain name like "Machine Learning", "Fitness", "Chinese Language"
-- "topic.matchedExistingId" should be the id of an existing topic if one matches, or null if this is a new domain
-- "topic.confidence" is 0-1 how confident you are this belongs to that topic
+- "topic.matchedExistingId": STRONGLY PREFER matching to an existing topic. Use the id of an existing topic if the chat falls within the same broad domain, even if the specific sub-topic differs. Only null if truly no existing topic is relevant.
+- "topic.confidence" is 0-1. If matched to an existing topic, should be at least 0.5 unless very tenuous.
 - "concepts" should list 1-4 key concepts discussed, each with a short title and preview
 - Concept titles should be max 5 words, previews max 15 words"""
 
@@ -85,7 +85,9 @@ CHAT_METADATA_PROMPT = """Analyze this conversation and extract topic classifica
 Existing topics the user has:
 {topics_json}
 
-The full conversation is given as messages. Your job is ONLY to classify:
+The full conversation is given as messages. Your job is ONLY to classify.
+
+IMPORTANT: You should PREFER matching to an existing topic. A chat belongs to an existing topic if it falls within the same broad domain, even if the specific sub-topic is different. For example, a chat about "gradient descent" belongs to an existing "Machine Learning" topic; a chat about "deadlifts" belongs to an existing "Fitness" topic. Only return null for matchedExistingId if the chat truly has NO relationship to any existing topic.
 
 Return JSON:
 {{
@@ -102,9 +104,9 @@ Return JSON:
 
 Rules:
 - "topic.name": broad domain like "Machine Learning", "Fitness"
-- "topic.matchedExistingId": id of existing topic if one matches, or null
-- "topic.confidence": 0-1
-- "isOneOff": true if this is a random one-off request unlikely to be followed up — things like formatting an email, quick factual lookups, translations, or random specific tasks that don't represent ongoing learning. false for sustained learning/knowledge-seeking topics.
+- "topic.matchedExistingId": MUST be the id of an existing topic if the chat is related to that domain. Only null if truly no existing topic is relevant.
+- "topic.confidence": 0-1. If matched to an existing topic, confidence should be at least 0.5 unless the match is very tenuous.
+- "isOneOff": true ONLY for trivial one-off requests unlikely to be followed up — things like formatting an email, quick factual lookups, translations, or random specific tasks that don't represent ongoing learning. When in doubt, set false.
 - "concepts": 1-4 key concepts, title max 5 words, preview max 15 words"""
 
 SIDEBAR_BRIDGE_QUESTIONS_PROMPT = """You help users connect their current conversation to their past knowledge.
@@ -213,11 +215,13 @@ Rules for threads:
 - Each thread has 1-5 ordered steps showing what the user explored, earliest to latest
 - Each step has a short text description (5-15 words) and an understanding level
 - System (assistant) messages may contain optional inline user labels: `[USER: understood this section]` means the user confirmed they read and understood that section; `[USER: unsure about this section]` means they flagged confusion. Unlabeled sections should be treated as briefly skimmed at best — do NOT assume the user absorbed unlabeled content.
+- User-applied labels (`[USER: understood this section]` / `[USER: unsure about this section]`) take priority over inferred levels — if a label is present on a chunk, that label determines the step level and should override any prior inference.
 - Infer understanding primarily from the USER's own actions — their questions, follow-up reactions, and chunk labels:
   - "solid": user demonstrated mastery through deep follow-ups, applied the concept correctly, or labeled it as understood
-  - "familiar": user asked about it directly AND engaged with the response (follow-up questions, or an understood label)
+  - "familiar": user must have raised or asked about this concept in their own message (not just received it in an AI response), AND engaged with the response via follow-up questions or an understood label
   - "unsure": user explicitly flagged confusion — either via an [USER: unsure about this section] label, or by expressing lack of understanding in their messages (e.g. "I don't get this", "this is confusing", asking for re-explanation)
   - "brief": concept was only mentioned by the system with no user engagement signal (no follow-up, no label)
+- If a concept was introduced by the system (AI) in its response — not explicitly asked for by the user — default to "brief" regardless of how much the AI said about it. Only promote to "familiar" or higher if the user subsequently engaged.
 - Do NOT mark concepts as "familiar" or "solid" just because the system explained them. The system's response alone is not evidence the user understood it.
 - If the user explicitly states what they know or shares notes, that can be a step with "solid"/"familiar"
 - If a new chat extends an existing thread, append or update a step; if it opens a new direction, start a new thread
@@ -237,8 +241,8 @@ Return JSON:
       "label": "Consensus & Raft",
       "steps": [
         {{"text": "Consensus basics and approaches", "level": "solid"}},
-        {{"text": "Raft protocol implementation", "level": "solid"}},
-        {{"text": "Leader election mechanics", "level": "familiar"}},
+        {{"text": "Raft protocol implementation", "level": "familiar"}},
+        {{"text": "Leader election mechanics", "level": "brief"}},
         {{"text": "Log replication", "level": "brief"}},
         {{"text": "Split-brain scenarios", "level": "unsure"}}
       ]
@@ -270,7 +274,7 @@ Return JSON:
   "aiCovered": "Key points the AI addressed, taught, or recommended — what the user could take away (1-2 sentences)"
 }}"""
 
-TOPIC_AUTO_DETECT_PROMPT = """Analyze these recent chat summaries and identify recurring topic clusters. A topic must have at least 2 chats that clearly belong to the same domain.
+TOPIC_AUTO_DETECT_PROMPT = """Analyze these recent chat summaries. Your PRIMARY goal is to assign as many chats as possible to existing topics. Your secondary goal is to identify new topic clusters.
 
 Chat summaries (each with an id):
 {summaries_json}
@@ -289,9 +293,9 @@ Return JSON:
 }}
 
 Rules:
-- If chats form a new cluster (2+ chats in same domain), add to newTopics
-- If an unassigned chat clearly belongs to an existing topic, add to assignToExisting
-- Chats that are random one-off requests (formatting emails, quick lookups, translations, etc.) should NOT be grouped — leave them out of both arrays
+- FIRST: Check every unassigned chat against existing topics. If a chat is even loosely related to an existing topic's domain, assign it via assignToExisting. Be generous — a chat about any sub-topic within a domain belongs to that topic. Even a SINGLE chat can be assigned to an existing topic.
+- SECOND: If remaining chats form a new cluster (2+ chats in same domain), add to newTopics
+- Only leave out chats that are truly random one-off requests (formatting emails, quick lookups, translations)
 - If no groupings are found, return {{ "newTopics": [], "assignToExisting": [] }}"""
 
 BASELINE_PERSONAL_DETAILS_PROMPT = """You are a helpful system that extracts personal details about the user from their conversations. Your goal is to maintain a running bullet-point list of what the system knows about the user.

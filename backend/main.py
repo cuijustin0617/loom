@@ -171,6 +171,7 @@ class StatusUpdateRequest(BaseModel):
     topicName: str
     currentStatus: Union[str, dict] = ""
     recentSummaries: list[str] = []
+    currentMessages: list[MessageItem] = []
     model: str | None = None
 
 
@@ -591,10 +592,16 @@ async def update_topic_status(req: StatusUpdateRequest):
     """Incrementally update topic status summary."""
     current = _serialize_status_to_str(req.currentStatus)
     recent_text = "\n".join([f"- {s}" for s in req.recentSummaries]) or "No chats yet."
+    current_messages_text = "(none)"
+    if req.currentMessages:
+        recent_msgs = req.currentMessages[-6:]
+        current_messages_text = "\n".join(
+            [f"{m.role}: {m.content}" for m in recent_msgs]
+        )
     system_prompt = STATUS_UPDATE_PROMPT.format(
         topic_name=req.topicName,
         current_status=current or "(empty - create fresh)",
-        current_messages="(none)",
+        current_messages=current_messages_text,
         recent_summaries=recent_text,
     )
     result = await llm.chat(
@@ -945,6 +952,18 @@ _ADMIN_HTML = """<!DOCTYPE html>
     background: var(--accent-light); color: var(--accent);
     padding: 2px 8px; border-radius: 20px;
   }
+  .live-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11px; font-weight: 500; color: var(--text-muted);
+  }
+  .live-dot {
+    width: 7px; height: 7px; border-radius: 50%; background: #10b981;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .3; }
+  }
   .spacer { flex: 1; }
   .btn {
     display: inline-flex; align-items: center; gap: 5px;
@@ -1116,9 +1135,10 @@ _ADMIN_HTML = """<!DOCTYPE html>
   </div>
   <span class="header-badge" id="headerTotal">loading…</span>
   <div class="spacer"></div>
+  <span class="live-badge"><span class="live-dot"></span><span id="lastRefresh">loading…</span></span>
   <button class="btn" onclick="triggerBackup()">&#128190; Backup</button>
   <a class="btn" href="/api/admin/export">&#8659; Export JSON</a>
-  <button class="btn" onclick="loadAll()">&#8635; Refresh</button>
+  <button class="btn" onclick="loadAll(true)">&#8635; Refresh</button>
 </header>
 
 <div class="main">
@@ -1183,28 +1203,46 @@ _ADMIN_HTML = """<!DOCTYPE html>
 <script>
 let _allEvents = [];
 let _summary = [];
+let _autoRefreshTimer = null;
+const AUTO_REFRESH_MS = 15000;
 
-async function loadAll() {
-  document.getElementById('loading').style.display = 'flex';
-  document.getElementById('app').style.display = 'none';
+async function loadAll(manual = false) {
+  const isFirst = document.getElementById('app').style.display === 'none';
+  if (isFirst) {
+    document.getElementById('loading').style.display = 'flex';
+  }
 
-  const [evtResp, sumResp] = await Promise.all([
-    fetch('/api/admin/events'),
-    fetch('/api/admin/events/summary'),
-  ]);
-  _allEvents = await evtResp.json();
-  const sumData = await sumResp.json();
-  _summary = sumData.summary;
+  try {
+    const [evtResp, sumResp] = await Promise.all([
+      fetch('/api/admin/events'),
+      fetch('/api/admin/events/summary'),
+    ]);
+    _allEvents = await evtResp.json();
+    const sumData = await sumResp.json();
+    _summary = sumData.summary;
 
-  document.getElementById('headerTotal').textContent = `${_allEvents.length.toLocaleString()} events`;
-  populateFilters();
-  renderStats(sumData.total, _summary);
-  renderHeatmap(_allEvents);
-  renderSummaryTable(_allEvents);
-  applyFilters();
+    document.getElementById('headerTotal').textContent = `${_allEvents.length.toLocaleString()} events`;
+    populateFilters();
+    renderStats(sumData.total, _summary);
+    renderHeatmap(_allEvents);
+    renderSummaryTable(_allEvents);
+    applyFilters();
 
-  document.getElementById('loading').style.display = 'none';
-  document.getElementById('app').style.display = 'block';
+    const now = new Date();
+    document.getElementById('lastRefresh').textContent =
+      `Updated ${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}`;
+
+    if (isFirst) {
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('app').style.display = 'block';
+    }
+    if (manual) showToast('Refreshed');
+  } catch (e) {
+    document.getElementById('lastRefresh').textContent = 'Error refreshing';
+  }
+
+  clearTimeout(_autoRefreshTimer);
+  _autoRefreshTimer = setTimeout(() => loadAll(), AUTO_REFRESH_MS);
 }
 
 function populateFilters() {

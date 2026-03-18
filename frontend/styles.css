@@ -1862,7 +1862,7 @@ body {
   width: 100%;
 }
 
-/* Learning Threads */
+/* Knowledge Threads */
 .thread-row {
   margin-bottom: 2px;
 }
@@ -2430,6 +2430,60 @@ body {
 
 .btn-save:hover {
   background: var(--primary-light);
+}
+
+/* ── Move Chat Popover ──────────────────────────────────────────────────── */
+.move-chat-popover {
+  position: fixed;
+  z-index: 1200;
+  min-width: 160px;
+  max-width: 240px;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--main-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.06);
+  padding: 6px;
+}
+
+.move-chat-popover-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-muted);
+  padding: 4px 8px 6px;
+}
+
+.move-topic-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.move-topic-chip:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.move-topic-chip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.move-topic-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── Topic colors ────────────────────────────────────────────────────────── */

@@ -495,6 +495,55 @@ bias-variance tradeoff. These determine how well your model generalizes to new d
   assert.ok(chunks[0].includes('Machine learning'));
 });
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// LABEL PROPAGATION: source file checks
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\n─── Label Propagation Source Checks ───');
+
+const fsSrc = require('fs');
+const pathSrc = require('path');
+const projRoot = pathSrc.resolve(__dirname, '../..');
+const sidebarSrc = fsSrc.readFileSync(pathSrc.join(projRoot, 'frontend/sidebar.js'), 'utf8');
+const appSrc = fsSrc.readFileSync(pathSrc.join(projRoot, 'frontend/app.js'), 'utf8');
+
+test('sidebar.js _flushDirtyLabels early-returns when no topic', () => {
+  const fnStart = sidebarSrc.indexOf('_flushDirtyLabels()');
+  assert.ok(fnStart >= 0, 'Should find _flushDirtyLabels');
+  const fnBlock = sidebarSrc.substring(fnStart, fnStart + 200);
+  assert.ok(fnBlock.includes('!this.currentTopicId'),
+    '_flushDirtyLabels should check currentTopicId for early return');
+});
+
+test('sidebar.js _flushDirtyLabels early-returns when labels not dirty', () => {
+  const fnStart = sidebarSrc.indexOf('_flushDirtyLabels()');
+  const fnBlock = sidebarSrc.substring(fnStart, fnStart + 200);
+  assert.ok(fnBlock.includes('!this._labelsDirty'),
+    '_flushDirtyLabels should check _labelsDirty for early return');
+});
+
+test('_flushDirtyLabels updates topic status in localStorage on success', () => {
+  const fnStart = sidebarSrc.indexOf('_flushDirtyLabels() {');
+  assert.ok(fnStart >= 0, 'Should find _flushDirtyLabels definition');
+  const fnBlock = sidebarSrc.substring(fnStart, fnStart + 3000);
+  assert.ok(fnBlock.includes('Storage.saveTopic'),
+    '_flushDirtyLabels should save updated topic status to localStorage');
+  assert.ok(fnBlock.includes('statusLastUpdated'),
+    '_flushDirtyLabels should update statusLastUpdated timestamp');
+});
+
+test('_toggleChunkLabel sets dirty flag BEFORE logging the event', () => {
+  const fnStart = appSrc.indexOf('_toggleChunkLabel(chunkEl, msgId, chunkIdx, label) {');
+  assert.ok(fnStart >= 0, 'Should find _toggleChunkLabel definition');
+  const fnBlock = appSrc.substring(fnStart, fnStart + 1500);
+  const dirtyIdx = fnBlock.indexOf('Sidebar._labelsDirty = true');
+  const logIdx = fnBlock.indexOf("StudyLog.event('chunk_labeled'");
+  assert.ok(dirtyIdx >= 0 && logIdx >= 0,
+    'Both dirty flag set and StudyLog event should exist in _toggleChunkLabel');
+  assert.ok(dirtyIdx < logIdx,
+    'Dirty flag should be set BEFORE the StudyLog event');
+});
+
 // ─── Summary ──────────────────────────────────────────────────────────────────
 
 console.log(`\n═══════════════════════════════════`);

@@ -3,6 +3,7 @@
 const Sidebar = {
   currentTopicId: null,
   currentData: null,
+  _labelsDirty: false,
 
   init() {
     this._initStatusEdit();
@@ -81,6 +82,7 @@ const Sidebar = {
       return { role: m.role, content: m.content };
     });
     if (messages.length === 0) return;
+    this._labelsDirty = false;
 
     this._showLoading();
 
@@ -142,12 +144,12 @@ const Sidebar = {
     if (dirs.length === 0) {
       dirContainer.innerHTML = '<p style="font-size:12px;color:var(--text-muted);">Keep chatting for suggestions.</p>';
     }
-    dirs.forEach(dir => {
-      dirContainer.appendChild(this._createDirectionCard(dir));
+    dirs.forEach((dir, idx) => {
+      dirContainer.appendChild(this._createDirectionCard(dir, idx));
     });
   },
 
-  _createDirectionCard(dir) {
+  _createDirectionCard(dir, directionIdx) {
     const el = document.createElement('div');
     const dirType = dir.type || 'extend';
     el.className = `direction-card type-${dirType}`;
@@ -178,10 +180,10 @@ const Sidebar = {
         </button>
       </div>
     `;
-    this._setupDrag(el, dir.question || '', dir.title || '');
+    this._setupDrag(el, dir.question || '', dir.title || '', directionIdx);
     el.querySelector('.card-new-chat-btn').addEventListener('click', (e) => {
       e.stopPropagation();
-      StudyLog.event('module3_direction_new_chat', { topicId: this.currentTopicId, directionTitle: dir.title || '' });
+      StudyLog.event('module3_direction_new_chat', { topicId: this.currentTopicId, directionIdx });
       this._startDirectionInNewChat(dir);
     });
     return el;
@@ -210,17 +212,17 @@ const Sidebar = {
     App.sendMessage();
   },
 
-  _setupDrag(el, fullText, label) {
+  _setupDrag(el, fullText, label, directionIdx) {
     el.addEventListener('dragstart', (e) => {
       e.dataTransfer.setData('text/plain', fullText);
       e.dataTransfer.setData('application/loom-label', label);
       el.classList.add('dragging');
-      StudyLog.event('module3_direction_dragged', { topicId: this.currentTopicId, directionTitle: label });
+      StudyLog.event('module3_direction_dragged', { topicId: this.currentTopicId, directionIdx });
     });
     el.addEventListener('dragend', () => el.classList.remove('dragging'));
 
     el.addEventListener('click', () => {
-      StudyLog.event('module3_direction_clicked', { topicId: this.currentTopicId, directionTitle: label });
+      StudyLog.event('module3_direction_clicked', { topicId: this.currentTopicId, directionIdx });
       App.setContextBlock(fullText, label);
     });
   },
@@ -274,7 +276,7 @@ const Sidebar = {
     }
 
     if (threads.length > 0) {
-      html += '<div class="status-section"><div class="status-section-label">Learning Threads</div>';
+      html += '<div class="status-section"><div class="status-section-label">Knowledge Threads</div>';
       threads.forEach((thread, ti) => {
         const label = thread.label || 'Thread';
         const steps = thread.steps || [];
@@ -493,7 +495,7 @@ const Sidebar = {
     topic.statusLastUpdated = Utils.timestamp();
     Storage.saveTopic(topic);
     this._renderStatus(topic.statusSummary);
-    StudyLog.event('summary_edited', { topicId: this.currentTopicId, section, editType: 'delete', oldValue });
+    StudyLog.event('summary_edited', { topicId: this.currentTopicId, section, editType: 'delete', itemIdx: idx });
   },
 
   _editStatusItem(section, idx, newText) {
@@ -511,7 +513,7 @@ const Sidebar = {
     topic.statusLastUpdated = Utils.timestamp();
     Storage.saveTopic(topic);
     this._renderStatus(topic.statusSummary);
-    StudyLog.event('summary_edited', { topicId: this.currentTopicId, section, editType: 'edit', oldValue, newValue: newText });
+    StudyLog.event('summary_edited', { topicId: this.currentTopicId, section, editType: 'edit', itemIdx: idx });
   },
 
   _deleteThread(threadIdx) {
@@ -524,7 +526,7 @@ const Sidebar = {
     topic.statusLastUpdated = Utils.timestamp();
     Storage.saveTopic(topic);
     this._renderStatus(topic.statusSummary);
-    StudyLog.event('summary_edited', { topicId: this.currentTopicId, section: 'threads', editType: 'delete_thread', oldValue: oldLabel });
+    StudyLog.event('summary_edited', { topicId: this.currentTopicId, section: 'threads', editType: 'delete_thread', threadIdx });
   },
 
   _deleteThreadStep(threadIdx, stepIdx) {
@@ -540,7 +542,7 @@ const Sidebar = {
     topic.statusLastUpdated = Utils.timestamp();
     Storage.saveTopic(topic);
     this._renderStatus(topic.statusSummary);
-    StudyLog.event('summary_edited', { topicId: this.currentTopicId, section: 'threads', editType: 'delete_step', oldValue });
+    StudyLog.event('summary_edited', { topicId: this.currentTopicId, section: 'threads', editType: 'delete_step', threadIdx, stepIdx });
   },
 
   _editThreadStep(threadIdx, stepIdx, newText) {
@@ -556,7 +558,7 @@ const Sidebar = {
     topic.statusLastUpdated = Utils.timestamp();
     Storage.saveTopic(topic);
     this._renderStatus(topic.statusSummary);
-    StudyLog.event('summary_edited', { topicId: this.currentTopicId, section: 'threads', editType: 'edit_step', oldValue, newValue: newText });
+    StudyLog.event('summary_edited', { topicId: this.currentTopicId, section: 'threads', editType: 'edit_step', threadIdx, stepIdx });
   },
 
   _showAiEditPrompt() {
@@ -626,7 +628,7 @@ const Sidebar = {
       Storage.saveTopic(topic);
       this._renderStatus(topic.statusSummary);
       Utils.showToast('Overview updated', 'success');
-      StudyLog.event('summary_ai_edited', { topicId: this.currentTopicId, instruction });
+      StudyLog.event('summary_ai_edited', { topicId: this.currentTopicId });
     } catch (err) {
       console.error('AI overview edit failed:', err);
       Utils.showToast('AI edit failed', 'error');
@@ -686,6 +688,14 @@ const Sidebar = {
 
       try {
         const summaries = Storage.getAllChatSummariesForTopic(topic.id);
+        const chatId = Storage.getCurrentChatId();
+        const currentMessages = Storage.getMessages(chatId).map(m => {
+          if (m.role === 'assistant' && m.chunkLabels && Object.keys(m.chunkLabels).length > 0) {
+            return { role: m.role, content: App._injectChunkLabels(m.content, m.chunkLabels) };
+          }
+          return { role: m.role, content: m.content };
+        });
+        this._labelsDirty = false;
         const resp = await fetch('/api/topic/status/update', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -693,6 +703,7 @@ const Sidebar = {
             topicName: topic.name,
             currentStatus: this._serializeStatus(topic.statusSummary),
             recentSummaries: summaries.map(s => s.summary),
+            currentMessages,
             model: Storage.getSidebarModel(),
           }),
         });
@@ -716,6 +727,54 @@ const Sidebar = {
       }
       btn.classList.remove('loading');
       btn.disabled = false;
+    });
+  },
+
+  _flushDirtyLabels() {
+    if (!this._labelsDirty || !this.currentTopicId) return;
+    const topic = Storage.getTopic(this.currentTopicId);
+    if (!topic) return;
+
+    const chatId = Storage.getCurrentChatId();
+    const messages = Storage.getMessages(chatId).map(m => {
+      if (m.role === 'assistant' && m.chunkLabels && Object.keys(m.chunkLabels).length > 0) {
+        return { role: m.role, content: App._injectChunkLabels(m.content, m.chunkLabels) };
+      }
+      return { role: m.role, content: m.content };
+    });
+    if (messages.length === 0) return;
+
+    this._labelsDirty = false;
+    const summaries = Storage.getAllChatSummariesForTopic(topic.id);
+    const topicId = this.currentTopicId;
+
+    fetch('/api/topic/status/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        topicName: topic.name,
+        currentStatus: this._serializeStatus(topic.statusSummary),
+        recentSummaries: summaries.map(s => s.summary),
+        currentMessages: messages,
+        model: Storage.getSidebarModel(),
+      }),
+    }).then(resp => resp.json()).then(data => {
+      let newStatus;
+      if (data.overview || data.threads) {
+        newStatus = { overview: data.overview || [], threads: data.threads || [] };
+      } else {
+        newStatus = data.status || topic.statusSummary;
+      }
+      const freshTopic = Storage.getTopic(topicId);
+      if (freshTopic) {
+        freshTopic.statusSummary = newStatus;
+        freshTopic.statusLastUpdated = Utils.timestamp();
+        if (freshTopic.sidebarCache) freshTopic.sidebarCache.statusUpdate = newStatus;
+        Storage.saveTopic(freshTopic);
+      }
+      StudyLog.event('summary_updated', { topicId, trigger: 'label_flush' });
+    }).catch(err => {
+      console.warn('Label flush status update failed:', err);
     });
   },
 
@@ -906,8 +965,8 @@ const Sidebar = {
       StudyLog.event('module3_shuffled', {
         topicId: topicId,
         location,
-        oldDirections: oldDirs,
-        newDirections: newDirs.map(d => d.title),
+        oldCount: oldDirs.length,
+        newCount: newDirs.length,
       });
     } catch (err) {
       console.error('Shuffle directions failed:', err);
@@ -934,18 +993,7 @@ const Sidebar = {
   },
 
   _initMoveDialog() {
-    document.getElementById('moveChatCancelBtn').addEventListener('click', () => {
-      document.getElementById('moveChatDialog').style.display = 'none';
-    });
-
-    document.getElementById('moveChatConfirmBtn').addEventListener('click', () => {
-      const targetId = document.getElementById('moveChatTargetSelect').value;
-      const chatId = App._moveChatId;
-      const oldTopicId = App._moveChatOldTopicId;
-      if (!targetId || !chatId) return;
-      document.getElementById('moveChatDialog').style.display = 'none';
-      App._moveChat(chatId, targetId, oldTopicId);
-    });
+    // Move-chat now uses an inline popover managed by App._showMoveDropdown
   },
 
   _initModuleCollapse() {

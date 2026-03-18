@@ -223,12 +223,12 @@ test('sidebar_collapsed event logged with side and collapsed fields', () => {
     assert.ok(surrounding.includes('collapsed'), 'Should include collapsed field');
 });
 
-test('context_tag_clicked event logged with type and label', () => {
+test('context_tag_clicked event logged with type only (no label)', () => {
     assert.ok(appContent.includes("'context_tag_clicked'"), 'Should log context_tag_clicked');
     const idx = appContent.indexOf("'context_tag_clicked'");
     const surrounding = appContent.substring(idx - 20, idx + 200);
     assert.ok(surrounding.includes('type:'), 'Should include type field');
-    assert.ok(surrounding.includes('label:'), 'Should include label field');
+    assert.ok(!surrounding.includes('label:'), 'Should NOT include label field (privacy)');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -264,12 +264,12 @@ test('topic_picker_opened event logged', () => {
     assert.ok(appContent.includes("'topic_picker_opened'"), 'Should log topic_picker_opened');
 });
 
-test('topic_picker_selected event logged with topicId and topicName', () => {
+test('topic_picker_selected event logged with topicId only (no topicName)', () => {
     assert.ok(appContent.includes("'topic_picker_selected'"), 'Should log topic_picker_selected');
     const idx = appContent.indexOf("'topic_picker_selected'");
     const surrounding = appContent.substring(idx - 20, idx + 200);
     assert.ok(surrounding.includes('topicId'), 'Should include topicId');
-    assert.ok(surrounding.includes('topicName'), 'Should include topicName');
+    assert.ok(!surrounding.includes('topicName'), 'Should NOT include topicName (privacy)');
 });
 
 test('topic_picker_keyboard_select event logged', () => {
@@ -371,7 +371,9 @@ test('welcome_suggestion_clicked event logged', () => {
     const idx = appContent.indexOf("'welcome_suggestion_clicked'");
     const surrounding = appContent.substring(idx - 20, idx + 200);
     assert.ok(surrounding.includes('topicId'), 'Should include topicId');
-    assert.ok(surrounding.includes('question'), 'Should include question');
+    assert.ok(surrounding.includes('suggestionIdx'), 'Should include suggestionIdx');
+    assert.ok(!surrounding.includes('question'), 'Should NOT include question (privacy)');
+    assert.ok(!surrounding.includes('topicName'), 'Should NOT include topicName (privacy)');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -508,6 +510,184 @@ ALL_EXPECTED_EVENTS.forEach(evt => {
     test(`event '${evt}' exists in codebase`, () => {
         assert.ok(allCode.includes(`'${evt}'`), `Event '${evt}' should exist in app.js or sidebar.js`);
     });
+});
+
+// ─── Topic assignment: one-assignment-per-chat guard ─────────────────────────
+
+test('auto topic_assigned is guarded by !chat.topicId in _handleTopicDetection', () => {
+    // Find _handleTopicDetection and locate the auto topic_assigned call inside it
+    const fnStart = appContent.indexOf('async _handleTopicDetection(');
+    assert.ok(fnStart !== -1, '_handleTopicDetection must exist');
+    const fnEnd = appContent.indexOf('\n  },\n', fnStart);
+    const fnBody = appContent.substring(fnStart, fnEnd);
+
+    // The auto assignment StudyLog.event call must be inside a !chat.topicId guard
+    const autoIdx = fnBody.indexOf("assignMethod: 'auto'");
+    assert.ok(autoIdx !== -1, "auto assignMethod must exist in _handleTopicDetection");
+
+    // Look back from the auto assignment call for the guard condition
+    const before = fnBody.substring(0, autoIdx);
+    const lastIfIdx = before.lastIndexOf('if (');
+    assert.ok(lastIfIdx !== -1, 'There must be an if-guard before the auto assignment');
+    const guardExpr = before.substring(lastIfIdx, before.length);
+    assert.ok(
+        guardExpr.includes('!chat.topicId'),
+        `auto topic_assigned must be guarded by !chat.topicId, found: "${guardExpr.trim().slice(0, 100)}"`
+    );
+});
+
+test('manual topic_assigned is also guarded by !chat.topicId', () => {
+    const manualIdx = appContent.indexOf("assignMethod: 'manual'");
+    assert.ok(manualIdx !== -1, "manual assignMethod must exist");
+    const before = appContent.substring(Math.max(0, manualIdx - 300), manualIdx);
+    assert.ok(before.includes('!chat.topicId'), 'manual topic_assigned must also be guarded by !chat.topicId');
+});
+
+test('topic_assigned auto and manual never share the same if-block in _handleTopicDetection', () => {
+    const fnStart = appContent.indexOf('async _handleTopicDetection(');
+    const fnEnd = appContent.indexOf('\n  },\n', fnStart);
+    const fnBody = appContent.substring(fnStart, fnEnd);
+
+    // Count auto topic_assigned calls (excluding isOneOff)
+    const autoMatches = [...fnBody.matchAll(/assignMethod: 'auto'/g)];
+    // There should be exactly 2: one for isOneOff path, one for normal path
+    assert.ok(autoMatches.length >= 1, 'Should have at least one auto assignment in _handleTopicDetection');
+
+    // Confirm there is NO manual assignment inside _handleTopicDetection (manual is in sendMessage)
+    assert.ok(!fnBody.includes("assignMethod: 'manual'"), '_handleTopicDetection should not contain manual assignment');
+});
+
+test('topic_assigned is only fired when chat has no existing topicId (one-per-chat guarantee)', () => {
+    // All three auto-assignment sites in _handleTopicDetection must be inside !chat.topicId guards
+    const fnStart = appContent.indexOf('async _handleTopicDetection(');
+    const fnEnd = appContent.indexOf('\n  },\n', fnStart);
+    const fnBody = appContent.substring(fnStart, fnEnd);
+
+    let searchIdx = 0;
+    while (true) {
+        const evtIdx = fnBody.indexOf("'topic_assigned'", searchIdx);
+        if (evtIdx === -1) break;
+        const before = fnBody.substring(0, evtIdx);
+        const lastIf = before.lastIndexOf('if (');
+        const guardSnippet = before.substring(lastIf);
+        assert.ok(
+            guardSnippet.includes('!chat.topicId'),
+            `topic_assigned at offset ${evtIdx} in _handleTopicDetection must be inside !chat.topicId guard`
+        );
+        searchIdx = evtIdx + 1;
+    }
+});
+
+// ─── Privacy: no user content in logs ────────────────────────────────────────
+
+console.log('\n─── Privacy: no user content in logs ───');
+
+function getEventContext(code, eventName, range = 200) {
+    const idx = code.indexOf(`'${eventName}'`);
+    if (idx === -1) return '';
+    return code.substring(idx, idx + range);
+}
+
+test('topic_created does not log topicName', () => {
+    let searchIdx = 0;
+    while (true) {
+        const idx = appContent.indexOf("'topic_created'", searchIdx);
+        if (idx === -1) break;
+        const ctx = appContent.substring(idx, idx + 200);
+        assert.ok(!ctx.includes('topicName'), `topic_created should not include topicName: ${ctx.slice(0, 80)}`);
+        assert.ok(ctx.includes('topicId'), 'topic_created should include topicId');
+        assert.ok(ctx.includes('isAutoDetected'), 'topic_created should include isAutoDetected');
+        searchIdx = idx + 1;
+    }
+});
+
+test('topic_renamed does not log oldName or newName', () => {
+    const idx = appContent.indexOf("'topic_renamed'");
+    assert.ok(idx !== -1, 'topic_renamed must exist');
+    const lineEnd = appContent.indexOf('\n', idx);
+    const eventLine = appContent.substring(idx, lineEnd);
+    assert.ok(eventLine.includes('topicId'), 'topic_renamed should include topicId');
+    assert.ok(!eventLine.includes('oldName'), 'topic_renamed should NOT include oldName');
+    assert.ok(!eventLine.includes('newName'), 'topic_renamed should NOT include newName');
+});
+
+test('topic_merge_dialog_opened does not log topicName', () => {
+    const ctx = getEventContext(appContent, 'topic_merge_dialog_opened');
+    assert.ok(ctx.includes('topicId'), 'Should include topicId');
+    assert.ok(!ctx.includes('topicName'), 'Should NOT include topicName');
+});
+
+test('context_block_added does not log label', () => {
+    const ctx = getEventContext(appContent, 'context_block_added');
+    assert.ok(ctx.includes('sourceType'), 'Should include sourceType');
+    assert.ok(!ctx.includes('label'), 'Should NOT include label');
+});
+
+test('context_tag_clicked does not log label', () => {
+    const ctx = getEventContext(appContent, 'context_tag_clicked');
+    assert.ok(ctx.includes('type'), 'Should include type');
+    assert.ok(!ctx.includes('label'), 'Should NOT include label');
+});
+
+test('module3_direction_new_chat uses directionIdx not directionTitle', () => {
+    const ctx = getEventContext(sidebarContent, 'module3_direction_new_chat');
+    assert.ok(ctx.includes('directionIdx'), 'Should include directionIdx');
+    assert.ok(!ctx.includes('directionTitle'), 'Should NOT include directionTitle');
+});
+
+test('module3_direction_dragged uses directionIdx not directionTitle', () => {
+    const ctx = getEventContext(sidebarContent, 'module3_direction_dragged');
+    assert.ok(ctx.includes('directionIdx'), 'Should include directionIdx');
+    assert.ok(!ctx.includes('directionTitle'), 'Should NOT include directionTitle');
+});
+
+test('module3_direction_clicked uses directionIdx not directionTitle', () => {
+    const ctx = getEventContext(sidebarContent, 'module3_direction_clicked');
+    assert.ok(ctx.includes('directionIdx'), 'Should include directionIdx');
+    assert.ok(!ctx.includes('directionTitle'), 'Should NOT include directionTitle');
+});
+
+test('summary_edited does not log oldValue or newValue', () => {
+    let searchIdx = 0;
+    while (true) {
+        const idx = sidebarContent.indexOf("'summary_edited'", searchIdx);
+        if (idx === -1) break;
+        const ctx = sidebarContent.substring(idx, idx + 200);
+        assert.ok(!ctx.includes('oldValue'), `summary_edited should NOT include oldValue: ${ctx.slice(0, 80)}`);
+        assert.ok(!ctx.includes('newValue'), `summary_edited should NOT include newValue: ${ctx.slice(0, 80)}`);
+        searchIdx = idx + 1;
+    }
+});
+
+test('summary_edited uses positional indices (itemIdx, threadIdx, stepIdx)', () => {
+    const allEdits = [];
+    let searchIdx = 0;
+    while (true) {
+        const idx = sidebarContent.indexOf("'summary_edited'", searchIdx);
+        if (idx === -1) break;
+        allEdits.push(sidebarContent.substring(idx, idx + 200));
+        searchIdx = idx + 1;
+    }
+    const hasItemIdx = allEdits.some(s => s.includes('itemIdx'));
+    const hasThreadIdx = allEdits.some(s => s.includes('threadIdx'));
+    const hasStepIdx = allEdits.some(s => s.includes('stepIdx'));
+    assert.ok(hasItemIdx, 'At least one summary_edited should include itemIdx');
+    assert.ok(hasThreadIdx, 'At least one summary_edited should include threadIdx');
+    assert.ok(hasStepIdx, 'At least one summary_edited should include stepIdx');
+});
+
+test('summary_ai_edited does not log instruction', () => {
+    const ctx = getEventContext(sidebarContent, 'summary_ai_edited');
+    assert.ok(ctx.includes('topicId'), 'Should include topicId');
+    assert.ok(!ctx.includes('instruction'), 'Should NOT include instruction');
+});
+
+test('module3_shuffled does not log direction titles', () => {
+    const ctx = getEventContext(sidebarContent, 'module3_shuffled');
+    assert.ok(!ctx.includes('oldDirections'), 'Should NOT include oldDirections');
+    assert.ok(!ctx.includes('newDirections'), 'Should NOT include newDirections');
+    assert.ok(ctx.includes('oldCount'), 'Should include oldCount');
+    assert.ok(ctx.includes('newCount'), 'Should include newCount');
 });
 
 // ─── Summary ──────────────────────────────────────────────────────────────────
