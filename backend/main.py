@@ -95,6 +95,23 @@ def _init_db():
     conn.execute("CREATE INDEX IF NOT EXISTS idx_events_user ON events(user_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type)")
     conn.commit()
+    # Auto-restore from seed file if events table is empty (survives Render deploys)
+    count = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+    if count == 0:
+        seed_path = Path(__file__).parent / "seed_events.json"
+        if seed_path.exists():
+            try:
+                events = json.loads(seed_path.read_text())
+                for e in events:
+                    conn.execute(
+                        "INSERT INTO events (user_id, condition, event_type, event_data, timestamp) VALUES (?,?,?,?,?)",
+                        (e["userId"], e.get("condition", "loom"), e["eventType"],
+                         json.dumps(e.get("data", {})), e["timestamp"]),
+                    )
+                conn.commit()
+                print(f"[seed] Restored {len(events)} events from seed_events.json")
+            except Exception as exc:
+                print(f"[seed] Failed to restore events: {exc}")
     conn.close()
 
 
@@ -701,20 +718,35 @@ async def log_event(req: LogEvent):
     return {"ok": True}
 
 
-def _backup_events_to_json():
-    """Write all events to a timestamped JSON backup file."""
-    backup_dir = DATA_DIR / "backups"
-    backup_dir.mkdir(parents=True, exist_ok=True)
+def _get_all_events_json():
+    """Return all events as a list of dicts."""
     conn = _get_db()
     rows = conn.execute(
         "SELECT user_id, condition, event_type, event_data, timestamp FROM events ORDER BY id"
     ).fetchall()
     conn.close()
-    events = [
+    return [
         {"userId": r[0], "condition": r[1], "eventType": r[2],
          "data": json.loads(r[3]), "timestamp": r[4]}
         for r in rows
     ]
+
+
+def _update_seed_file():
+    """Overwrite seed_events.json so the next Render deploy starts with all events."""
+    try:
+        seed_path = Path(__file__).parent / "seed_events.json"
+        events = _get_all_events_json()
+        seed_path.write_text(json.dumps(events))
+    except Exception as exc:
+        print(f"[seed] Could not update seed file: {exc}")
+
+
+def _backup_events_to_json():
+    """Write all events to a timestamped JSON backup file."""
+    backup_dir = DATA_DIR / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    events = _get_all_events_json()
     ts = time.strftime("%Y%m%d_%H%M%S")
     filepath = backup_dir / f"events_backup_{ts}.json"
     filepath.write_text(json.dumps(events, indent=2))
@@ -722,6 +754,7 @@ def _backup_events_to_json():
     backups = sorted(backup_dir.glob("events_backup_*.json"))
     for old in backups[:-10]:
         old.unlink(missing_ok=True)
+    _update_seed_file()
 
 
 # ── Data Sync ─────────────────────────────────────────────────────────────────
@@ -850,6 +883,37 @@ async def admin_backup():
     return {"ok": True, "backupDir": str(DATA_DIR / "backups")}
 
 
+@app.post("/api/admin/import")
+async def admin_import(request: Request):
+    """Import events from a JSON array, skipping duplicates by timestamp+userId+eventType."""
+    body = await request.json()
+    events = body if isinstance(body, list) else body.get("events", [])
+    if not events:
+        return {"ok": False, "error": "No events provided", "imported": 0}
+    conn = _get_db()
+    imported = 0
+    for e in events:
+        uid = e.get("userId", "")
+        cond = e.get("condition", "loom")
+        etype = e.get("eventType", "")
+        edata = json.dumps(e.get("data", {}))
+        ts = e.get("timestamp", "")
+        exists = conn.execute(
+            "SELECT 1 FROM events WHERE user_id=? AND event_type=? AND timestamp=? LIMIT 1",
+            (uid, etype, ts),
+        ).fetchone()
+        if not exists:
+            conn.execute(
+                "INSERT INTO events (user_id, condition, event_type, event_data, timestamp) VALUES (?,?,?,?,?)",
+                (uid, cond, etype, edata, ts),
+            )
+            imported += 1
+    conn.commit()
+    conn.close()
+    _update_seed_file()
+    return {"ok": True, "imported": imported, "skipped": len(events) - imported}
+
+
 @app.get("/api/admin/events/summary")
 async def admin_events_summary():
     """Return event counts grouped by user and event_type for quick overview."""
@@ -870,16 +934,8 @@ async def admin_events_summary():
 @app.get("/api/admin/export")
 async def admin_export():
     """Export all events as downloadable JSON."""
-    conn = _get_db()
-    rows = conn.execute(
-        "SELECT user_id, condition, event_type, event_data, timestamp FROM events ORDER BY id"
-    ).fetchall()
-    conn.close()
-    events = [
-        {"userId": r[0], "condition": r[1], "eventType": r[2],
-         "data": json.loads(r[3]), "timestamp": r[4]}
-        for r in rows
-    ]
+    events = _get_all_events_json()
+    _update_seed_file()
     return JSONResponse(
         content=events,
         headers={"Content-Disposition": f"attachment; filename=loom_events_{time.strftime('%Y%m%d')}.json"},
@@ -1138,6 +1194,8 @@ _ADMIN_HTML = """<!DOCTYPE html>
   <span class="live-badge"><span class="live-dot"></span><span id="lastRefresh">loading…</span></span>
   <button class="btn" onclick="triggerBackup()">&#128190; Backup</button>
   <a class="btn" href="/api/admin/export">&#8659; Export JSON</a>
+  <button class="btn" onclick="document.getElementById('importFile').click()">&#8657; Import JSON</button>
+  <input type="file" id="importFile" accept=".json" style="display:none" onchange="importEvents(this)">
   <button class="btn" onclick="loadAll(true)">&#8635; Refresh</button>
 </header>
 
@@ -1340,6 +1398,20 @@ function applyFilters() {
 async function triggerBackup() {
   await fetch('/api/admin/backup');
   showToast('Backup saved to backend/data/backups/');
+}
+
+async function importEvents(input) {
+  if (!input.files || !input.files[0]) return;
+  const text = await input.files[0].text();
+  const events = JSON.parse(text);
+  const resp = await fetch('/api/admin/import', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(events),
+  });
+  const result = await resp.json();
+  input.value = '';
+  showToast('Imported ' + result.imported + ' events (' + result.skipped + ' duplicates skipped)');
+  loadAll(true);
 }
 
 function showToast(msg) {
