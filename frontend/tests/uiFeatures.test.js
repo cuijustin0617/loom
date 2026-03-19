@@ -34,6 +34,7 @@ const htmlContent = fs.readFileSync(path.join(ROOT, 'frontend/index.html'), 'utf
 const sidebarContent = fs.readFileSync(path.join(ROOT, 'frontend/sidebar.js'), 'utf8');
 const appContent = fs.readFileSync(path.join(ROOT, 'frontend/app.js'), 'utf8');
 const backendMainContent = fs.readFileSync(path.join(ROOT, 'backend/main.py'), 'utf8');
+const storageContent = fs.readFileSync(path.join(ROOT, 'frontend/storage.js'), 'utf8');
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TODO 1: Reduced assistant message padding
@@ -1040,7 +1041,7 @@ test('newChat resets TopicSuggester', () => {
 
 test('sendMessage hides topic suggestion and picker', () => {
     const startIdx = appContent.indexOf('async sendMessage()');
-    const sendFn = appContent.substring(startIdx, startIdx + 4000);
+    const sendFn = appContent.substring(startIdx, startIdx + 5000);
     assert.ok(sendFn.includes('_hideTopicSuggestion'),
         'sendMessage should hide topic suggestion');
     assert.ok(sendFn.includes('topicPickerEl'),
@@ -1357,6 +1358,156 @@ test('backend update_topic_status formats currentMessages when provided', () => 
         'update_topic_status should reference req.currentMessages');
     assert.ok(block.includes('current_messages_text'),
         'update_topic_status should build current_messages_text from request');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Attachment Send Bug Fix: localStorage quota safety
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\n─── Attachment Send Bug Fix ───');
+
+test('sendMessage stores attachments WITHOUT base64 data field', () => {
+    const sendFn = appContent.substring(
+        appContent.indexOf('async sendMessage()'),
+        appContent.indexOf('_createStreamingMessage')
+    );
+    const userMsgBlock = sendFn.substring(
+        sendFn.indexOf('const userMsg = {'),
+        sendFn.indexOf('Storage.addMessage')
+    );
+    assert.ok(userMsgBlock.includes("name: a.name, mimeType: a.mimeType }"),
+        'userMsg attachment map should only include name and mimeType (no data)');
+    assert.ok(!userMsgBlock.includes('data: a.data'),
+        'userMsg attachment map should NOT include data: a.data');
+});
+
+test('sendMessage still sends base64 data to API via apiAttachments', () => {
+    const sendFn = appContent.substring(
+        appContent.indexOf('async sendMessage()'),
+        appContent.indexOf('_createStreamingMessage')
+    );
+    assert.ok(sendFn.includes("mimeType: a.mimeType, data: a.data"),
+        'apiAttachments should include mimeType and data for the API call');
+    assert.ok(sendFn.includes('reqBody.attachments = apiAttachments'),
+        'reqBody should receive apiAttachments with full data');
+});
+
+test('_saveAll has try/catch for localStorage quota errors', () => {
+    const saveAllStart = storageContent.indexOf('_saveAll(data)');
+    assert.ok(saveAllStart >= 0, 'Should find _saveAll definition');
+    const saveAllBlock = storageContent.substring(saveAllStart, saveAllStart + 300);
+    assert.ok(saveAllBlock.includes('try {') && saveAllBlock.includes('catch'),
+        '_saveAll should have try/catch wrapping localStorage.setItem');
+    assert.ok(saveAllBlock.includes('return false'),
+        '_saveAll should return false on quota error');
+    assert.ok(saveAllBlock.includes('return true'),
+        '_saveAll should return true on success');
+});
+
+test('addMessage returns null on storage failure', () => {
+    const addMsgStart = storageContent.indexOf('addMessage(chatId, message)');
+    assert.ok(addMsgStart >= 0, 'Should find addMessage definition');
+    const addMsgBlock = storageContent.substring(addMsgStart, addMsgStart + 300);
+    assert.ok(addMsgBlock.includes('if (!ok) return null'),
+        'addMessage should return null when _saveAll fails');
+});
+
+test('sendMessage checks addMessage return and shows toast on failure', () => {
+    const sendFn = appContent.substring(
+        appContent.indexOf('async sendMessage()'),
+        appContent.indexOf('_createStreamingMessage')
+    );
+    assert.ok(sendFn.includes('const saved = Storage.addMessage'),
+        'sendMessage should capture addMessage return value');
+    assert.ok(sendFn.includes('if (!saved)'),
+        'sendMessage should check if save failed');
+    assert.ok(sendFn.includes('Storage full'),
+        'sendMessage should show storage-full toast on failure');
+});
+
+test('sendMessage clears textarea AFTER successful save, not before', () => {
+    const sendFn = appContent.substring(
+        appContent.indexOf('async sendMessage()'),
+        appContent.indexOf('_createStreamingMessage')
+    );
+    const saveIdx = sendFn.indexOf('Storage.addMessage');
+    const clearIdx = sendFn.indexOf("input.value = '';");
+    assert.ok(saveIdx >= 0 && clearIdx >= 0, 'Should find both save and clear');
+    assert.ok(clearIdx > saveIdx,
+        'textarea clear should come AFTER Storage.addMessage, not before');
+});
+
+test('sendMessage restores input on storage failure', () => {
+    const sendFn = appContent.substring(
+        appContent.indexOf('async sendMessage()'),
+        appContent.indexOf('_createStreamingMessage')
+    );
+    assert.ok(sendFn.includes('const savedInput = input.value'),
+        'sendMessage should capture input value before attempting save');
+    assert.ok(sendFn.includes('input.value = savedInput'),
+        'sendMessage should restore input on failure');
+});
+
+test('sendBtn uses try/finally to always re-enable', () => {
+    const sendFn = appContent.substring(
+        appContent.indexOf('async sendMessage()'),
+        appContent.indexOf('// ── Chunk Labeling')
+    );
+    assert.ok(sendFn.includes('} finally {'),
+        'sendMessage should have a finally block');
+    const finallyIdx = sendFn.indexOf('} finally {');
+    const afterFinally = sendFn.substring(finallyIdx, finallyIdx + 200);
+    assert.ok(afterFinally.includes("sendBtn').disabled = false"),
+        'finally block should re-enable sendBtn');
+});
+
+test('storage.js has _stripAttachmentBase64 migration method', () => {
+    assert.ok(storageContent.includes('_stripAttachmentBase64'),
+        'storage.js should define _stripAttachmentBase64 migration');
+    const fnStart = storageContent.indexOf('_stripAttachmentBase64(data)');
+    assert.ok(fnStart >= 0, 'Should find _stripAttachmentBase64 definition');
+    const fnBlock = storageContent.substring(fnStart, fnStart + 500);
+    assert.ok(fnBlock.includes('delete att.data'),
+        'Migration should delete att.data from stored attachments');
+    assert.ok(fnBlock.includes('changed = true'),
+        'Migration should track whether changes were made');
+});
+
+test('_stripAttachmentBase64 is called from _getAll on first load', () => {
+    const getAllStart = storageContent.indexOf('_getAll()');
+    assert.ok(getAllStart >= 0, 'Should find _getAll definition');
+    const getAllBlock = storageContent.substring(getAllStart, getAllStart + 600);
+    assert.ok(getAllBlock.includes('_stripAttachmentBase64'),
+        '_getAll should call _stripAttachmentBase64 migration');
+});
+
+test('_appendMessage gracefully handles attachments without data field', () => {
+    const appendStart = appContent.indexOf('_appendMessage(msg)');
+    assert.ok(appendStart >= 0, 'Should find _appendMessage definition');
+    const appendBlock = appContent.substring(appendStart, appendStart + 1200);
+    assert.ok(appendBlock.includes('att.data'),
+        '_appendMessage should check att.data for image rendering');
+    assert.ok(appendBlock.includes('att.name'),
+        '_appendMessage should fall back to file name when data is missing');
+});
+
+// ── Attachment stripping logic unit test ─────────────────────────────────────
+
+test('attachment metadata without data is much smaller than with data', () => {
+    const withData = JSON.stringify({ name: 'photo.jpg', mimeType: 'image/jpeg', data: 'x'.repeat(100000) });
+    const withoutData = JSON.stringify({ name: 'photo.jpg', mimeType: 'image/jpeg' });
+    assert.ok(withData.length > 100000, 'With data should be large');
+    assert.ok(withoutData.length < 100, 'Without data should be tiny');
+    assert.ok(withoutData.length < withData.length * 0.01,
+        'Stripped attachment should be <1% the size of one with base64 data');
+});
+
+test('stripping data from attachment preserves name and mimeType', () => {
+    const att = { name: 'test.png', mimeType: 'image/png', data: 'abc123base64' };
+    const stripped = { name: att.name, mimeType: att.mimeType };
+    assert.strictEqual(stripped.name, 'test.png');
+    assert.strictEqual(stripped.mimeType, 'image/png');
+    assert.strictEqual(stripped.data, undefined);
 });
 
 // ─── Summary ──────────────────────────────────────────────────────────────────

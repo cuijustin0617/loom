@@ -2850,17 +2850,23 @@ class TestSidebarCollapseToggle:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestAttachmentDataInMessages:
-    """Image attachment base64 data must be stored in the message for rendering."""
+    """Stored messages should NOT include base64 data (quota fix), but API payload should."""
 
-    def test_user_msg_includes_attachment_data(self):
-        """The userMsg object should include data field from pendingAttachments."""
+    def test_user_msg_excludes_base64_data(self):
+        """The stored userMsg should NOT include data field to avoid localStorage quota overflow."""
         js = _get_client().get("/static/app.js").text
         idx = js.index("attachments: this.pendingAttachments.length > 0")
         block = js[idx:idx+200]
-        assert "a.data" in block
+        assert "name: a.name, mimeType: a.mimeType }" in block
+        assert "data: a.data" not in block
+
+    def test_api_payload_includes_base64_data(self):
+        """The reqBody.attachments sent to the API should include base64 data."""
+        js = _get_client().get("/static/app.js").text
+        assert "mimeType: a.mimeType, data: a.data" in js
 
     def test_append_message_renders_base64_image(self):
-        """_appendMessage should render image attachments using data: URL."""
+        """_appendMessage should render image attachments using data: URL when available."""
         js = _get_client().get("/static/app.js").text
         assert "data:${att.mimeType};base64,${att.data}" in js
 

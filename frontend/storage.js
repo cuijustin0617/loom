@@ -51,15 +51,46 @@ const Storage = {
       for (const key of Object.keys(defaults)) {
         if (!(key in parsed)) parsed[key] = defaults[key];
       }
+      if (this._stripAttachmentBase64(parsed)) {
+        try { localStorage.setItem(this._KEY, JSON.stringify(parsed)); } catch { /* quota */ }
+      }
       return parsed;
     } catch {
       return this._defaultData();
     }
   },
 
+  _migrated: false,
+
+  _stripAttachmentBase64(data) {
+    if (this._migrated) return false;
+    this._migrated = true;
+    let changed = false;
+    const msgs = data.messages || {};
+    for (const chatId of Object.keys(msgs)) {
+      for (const msg of msgs[chatId]) {
+        if (msg.attachments && Array.isArray(msg.attachments)) {
+          for (const att of msg.attachments) {
+            if (att.data) {
+              delete att.data;
+              changed = true;
+            }
+          }
+        }
+      }
+    }
+    return changed;
+  },
+
   _saveAll(data) {
-    localStorage.setItem(this._KEY, JSON.stringify(data));
+    try {
+      localStorage.setItem(this._KEY, JSON.stringify(data));
+    } catch (e) {
+      console.error('Storage quota exceeded:', e);
+      return false;
+    }
     this._scheduleSync();
+    return true;
   },
 
   _defaultData() {
@@ -237,7 +268,8 @@ const Storage = {
     const data = this._getAll();
     if (!data.messages[chatId]) data.messages[chatId] = [];
     data.messages[chatId].push(message);
-    this._saveAll(data);
+    const ok = this._saveAll(data);
+    if (!ok) return null;
     return message;
   },
 

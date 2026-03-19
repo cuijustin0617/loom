@@ -942,8 +942,7 @@ const App = {
       content = 'Please describe or analyze the attached file(s).';
     }
 
-    input.value = '';
-    input.style.height = 'auto';
+    const savedInput = input.value;
 
     if (!this.currentChatId) {
       const chat = Storage.createChat();
@@ -974,7 +973,7 @@ const App = {
       }
     }
 
-    // Add user message
+    // Add user message (attachments stored without base64 data to avoid localStorage quota issues)
     const userMsg = {
       id: 'msg_' + Utils.generateId(),
       chatId: this.currentChatId,
@@ -982,11 +981,20 @@ const App = {
       content: content,
       contextBlock: contextBlock,
       attachments: this.pendingAttachments.length > 0
-        ? this.pendingAttachments.map(a => ({ name: a.name, mimeType: a.mimeType, data: a.data }))
+        ? this.pendingAttachments.map(a => ({ name: a.name, mimeType: a.mimeType }))
         : null,
       timestamp: Utils.timestamp(),
     };
-    Storage.addMessage(this.currentChatId, userMsg);
+    const saved = Storage.addMessage(this.currentChatId, userMsg);
+    if (!saved) {
+      Utils.showToast('Storage full — could not save message. Try clearing old chats.', 'error');
+      input.value = savedInput;
+      return;
+    }
+
+    input.value = '';
+    input.style.height = 'auto';
+
     this._appendMessage(userMsg);
     this.pendingSummarize = true;
     const currentChat = Storage.getChat(this.currentChatId);
@@ -1010,6 +1018,16 @@ const App = {
     TopicSuggester._hideTopicSuggestion();
 
     document.getElementById('sendBtn').disabled = true;
+
+    // Capture attachment data for API before clearing pending
+    let apiAttachments = null;
+    if (this.pendingAttachments.length > 0) {
+      apiAttachments = this.pendingAttachments.map(a => ({
+        mimeType: a.mimeType, data: a.data,
+      }));
+      this.pendingAttachments = [];
+      this._renderAttachments();
+    }
 
     const messages = Storage.getMessages(this.currentChatId).map(m => ({
       role: m.role, content: m.content,
@@ -1045,12 +1063,8 @@ const App = {
       condition: STUDY_CONDITION,
       personalDetails: STUDY_CONDITION === 'baseline' ? Storage.getPersonalDetails() : [],
     };
-    if (this.pendingAttachments.length > 0) {
-      reqBody.attachments = this.pendingAttachments.map(a => ({
-        mimeType: a.mimeType, data: a.data,
-      }));
-      this.pendingAttachments = [];
-      this._renderAttachments();
+    if (apiAttachments) {
+      reqBody.attachments = apiAttachments;
     }
 
     // Create a live assistant message element for streaming
@@ -1172,9 +1186,9 @@ const App = {
       console.error('Chat error:', err);
       this._finalizeStreamingMessage(assistantEl, 'Failed to get response. Check your connection.');
       Utils.showToast('Failed to get response. Check your connection.', 'error');
+    } finally {
+      document.getElementById('sendBtn').disabled = false;
     }
-
-    document.getElementById('sendBtn').disabled = false;
   },
 
   // ── Chunk Labeling (Module 1) ────────────────────────────────────────
