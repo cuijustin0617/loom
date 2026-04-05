@@ -28,6 +28,14 @@ legacy/
 prototypes/
 cursor.md
 TODO.md
+STUDY_LOGGING_PLAN.md
+events.csv
+slides.txt
+
+# Research / paper
+UIST 2026/
+teaser_figure/
+user_study_analysis/
 
 # Editor / OS
 .vscode/*
