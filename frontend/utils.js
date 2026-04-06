@@ -1,4 +1,4 @@
-/* Utility helpers for Loom app */
+/* Utility helpers for ChatWeave app */
 
 const Utils = {
   generateId() {
@@ -134,11 +134,13 @@ const Utils = {
 
   TOPIC_COLORS: [
     { color: '#3B82F6', light: '#EFF6FF', hue: 217 },
-    { color: '#EC4899', light: '#FDF2F8', hue: 330 },
-    { color: '#F59E0B', light: '#FFFBEB', hue: 38 },
-    { color: '#10B981', light: '#ECFDF5', hue: 160 },
     { color: '#8B5CF6', light: '#F5F3FF', hue: 263 },
-    { color: '#EF4444', light: '#FEF2F2', hue: 0 },
+    { color: '#EC4899', light: '#FDF2F8', hue: 330 },
+    { color: '#6366F1', light: '#EEF2FF', hue: 239 },
+    { color: '#0EA5E9', light: '#F0F9FF', hue: 199 },
+    { color: '#64748B', light: '#F1F5F9', hue: 215 },
+    { color: '#A855F7', light: '#FAF5FF', hue: 272 },
+    { color: '#DB2777', light: '#FDF2F8', hue: 322 },
   ],
 
   _hslToHex(h, s, l) {
@@ -160,11 +162,16 @@ const Utils = {
     };
   },
 
+  _BLUE_FAMILY_MIN: 190,
+  _BLUE_FAMILY_MAX: 340,
+
   findDistantHue(existingHues) {
     if (existingHues.length === 0) return 217;
-    let bestHue = 0;
+    const lo = this._BLUE_FAMILY_MIN;
+    const hi = this._BLUE_FAMILY_MAX;
+    let bestHue = lo;
     let bestMinDist = -1;
-    for (let h = 0; h < 360; h++) {
+    for (let h = lo; h <= hi; h++) {
       let minDist = 360;
       for (const eh of existingHues) {
         const dist = Math.min(Math.abs(h - eh), 360 - Math.abs(h - eh));

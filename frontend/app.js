@@ -1,4 +1,4 @@
-/* Loom main application controller */
+/* ChatWeave main application controller */
 
 const API_BASE = '';  // same origin
 
@@ -586,7 +586,7 @@ const App = {
     const userId = Storage.getUserId();
     document.getElementById('userName').textContent = userId;
     document.getElementById('userAvatar').textContent = userId.charAt(0).toUpperCase();
-    document.getElementById('userCondition').textContent = STUDY_CONDITION === 'baseline' ? 'Baseline' : 'Loom';
+    document.getElementById('userCondition').textContent = STUDY_CONDITION === 'baseline' ? 'Baseline' : 'ChatWeave';
 
     // Apply condition-specific UI
     if (STUDY_CONDITION === 'baseline') {
@@ -1034,7 +1034,7 @@ const App = {
     }));
     const topics = Storage.getTopics().map(t => ({ id: t.id, name: t.name }));
 
-    // Only send same-topic past chats for connections in Loom mode
+    // Only send same-topic past chats for connections in ChatWeave mode
     let sameTopicSummaries = [];
     if (STUDY_CONDITION === 'loom') {
       const currentChat2 = Storage.getChat(this.currentChatId);
@@ -2162,7 +2162,7 @@ const App = {
           </svg>
         </div>
         <h2>Where should we start?</h2>
-        <p>Ask anything. Loom will build your knowledge map as you go.</p>
+        <p>Ask anything. ChatWeave will build your knowledge map as you go.</p>
       </div>
       ${suggestionsHtml}`;
 
@@ -2369,7 +2369,20 @@ const App = {
       const isStatus = mod.type === 'status';
       const icon = isStatus ? statusSvg : linkSvg;
       const typeClass = isStatus ? 'ctx-status' : 'ctx-linked';
-      return `<span class="ctx-tag ${typeClass}" data-ctx-idx="${i}">${icon} ${Utils.escapeHtml(mod.label)}</span>`;
+      let inlineStyle = '';
+      if (isStatus) {
+        const topicName = (mod.label || '').replace(/^Status:\s*/, '');
+        let topic = Storage.getTopics().find(t => t.name === topicName);
+        if (!topic && this.currentChatId) {
+          const chat = Storage.getChat(this.currentChatId);
+          if (chat && chat.topicId) topic = Storage.getTopic(chat.topicId);
+        }
+        if (topic) {
+          const tc = Utils.getTopicColor(topic);
+          inlineStyle = ` style="color:${tc.color};background:${tc.light}"`;
+        }
+      }
+      return `<span class="ctx-tag ${typeClass}" data-ctx-idx="${i}"${inlineStyle}>${icon} ${Utils.escapeHtml(mod.label)}</span>`;
     }).join('<span class="ctx-dot">&middot;</span>');
 
     return `<div class="message-context-bar">${tags}</div><div class="ctx-detail-panel"></div>`;

@@ -1,4 +1,4 @@
-/* localStorage persistence layer for Loom — per-user keying */
+/* localStorage persistence layer for ChatWeave — per-user keying */
 
 const Storage = {
   _userId: null,
@@ -195,7 +195,12 @@ const Storage = {
     if (!data || !Array.isArray(data.topics)) return;
     const topics = data.topics;
     if (!topics || topics.length === 0) return;
-    const needsMigration = topics.some(t => t.colorHue === undefined || t.colorHue === null);
+    const lo = Utils._BLUE_FAMILY_MIN;
+    const hi = Utils._BLUE_FAMILY_MAX;
+    const needsMigration = topics.some(t =>
+      t.colorHue === undefined || t.colorHue === null ||
+      t.colorHue < lo || t.colorHue > hi
+    );
     if (!needsMigration) return;
     const assignedHues = [];
     for (const topic of topics) {
@@ -343,14 +348,13 @@ const Storage = {
   // ── Embedding Migration ─────────────────────────────────────────────────
 
   async reEmbedChats() {
-    const data = this._getAll();
-    if (!data || !Array.isArray(data.chats)) return;
-    const chats = data.chats.filter(c => c.summary && c.summary.trim());
-    if (!chats.length) return;
+    const snapshot = this._getAll();
+    if (!snapshot || !Array.isArray(snapshot.chats)) return;
 
     const EXPECTED_DIM = 3072;
-    const needsReEmbed = chats.filter(c =>
-      !c.embedding || c.embedding.length !== EXPECTED_DIM
+    const needsReEmbed = snapshot.chats.filter(c =>
+      c.summary && c.summary.trim() &&
+      (!c.embedding || c.embedding.length !== EXPECTED_DIM)
     );
     if (!needsReEmbed.length) return;
 
@@ -364,15 +368,18 @@ const Storage = {
         });
         if (!resp.ok) continue;
         const result = await resp.json();
-        chat.embedding = result.embedding;
-        const idx = data.chats.findIndex(c => c.id === chat.id);
-        if (idx >= 0) data.chats[idx] = chat;
+        // Re-read fresh data before each write to avoid stale overwrites
+        const fresh = this._getAll();
+        const idx = fresh.chats.findIndex(c => c.id === chat.id);
+        if (idx >= 0) {
+          fresh.chats[idx].embedding = result.embedding;
+          this._saveAll(fresh);
+        }
         console.log(`[reEmbed] ✅ ${chat.id} (${chat.title})`);
       } catch (e) {
         console.warn(`[reEmbed] ❌ ${chat.id}:`, e);
       }
     }
-    this._saveAll(data);
     console.log('[reEmbed] Migration complete');
   },
 

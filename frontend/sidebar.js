@@ -25,13 +25,18 @@ const Sidebar = {
 
     const topic = Storage.getTopic(topicId);
     if (topic) {
-      document.getElementById('statusTopicName').textContent = topic.name;
+      const statusTopicEl = document.getElementById('statusTopicName');
+      statusTopicEl.textContent = topic.name;
       const badge = document.getElementById('topicBadge');
       const tc = Utils.getTopicColor(topic);
       badge.style.display = 'inline-block';
       badge.textContent = topic.name;
       badge.style.background = tc.light;
       badge.style.color = tc.color;
+
+      statusTopicEl.style.color = tc.color;
+      const statusIcon = document.querySelector('#moduleStatus .status-icon');
+      if (statusIcon) statusIcon.style.color = tc.color;
 
       if (topic.sidebarCache) {
         this.currentData = topic.sidebarCache;
