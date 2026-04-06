@@ -251,6 +251,20 @@ test('overview field in Module 1 is collapsible', () => {
         'CSS should define section-collapsed items rule');
 });
 
+test('overview items have independent scroll container', () => {
+    assert.ok(sidebarContent.includes('status-section-overview'),
+        'sidebar render should tag overview section');
+    assert.ok(cssContent.includes('.status-section-overview .status-section-items'),
+        'CSS should define independent overview scrolling');
+    assert.ok(cssContent.includes('max-height: 140px') && cssContent.includes('overflow-y: auto'),
+        'Overview section items should have max-height + overflow auto');
+});
+
+test('knowledge threads section has dedicated class for stable heading visibility', () => {
+    assert.ok(sidebarContent.includes('status-section-threads'),
+        'sidebar render should tag knowledge threads section');
+});
+
 // ── Module collapse persistence logic unit test ──────────────────────────────
 
 test('module collapse localStorage logic: toggle and persist', () => {
@@ -329,6 +343,48 @@ test('_hideConnCard removes scroll listener', () => {
 test('_showConnCard sets marker reference', () => {
     assert.ok(appContent.includes('this._connCardMarker = marker'),
         '_showConnCard should store marker reference');
+});
+
+test('module 3 drag payload includes direction metadata for input rendering', () => {
+    assert.ok(sidebarContent.includes("application/loom-context-type") && sidebarContent.includes('direction_card'),
+        'Direction drag should include context type metadata');
+    assert.ok(sidebarContent.includes("application/loom-direction-type"),
+        'Direction drag should include direction type metadata');
+    assert.ok(sidebarContent.includes("application/loom-question"),
+        'Direction drag should include question metadata');
+});
+
+test('app drop handler reads direction metadata and passes to setContextBlock', () => {
+    assert.ok(appContent.includes("getData('application/loom-context-type')"),
+        'Drop handler should read context type metadata');
+    assert.ok(appContent.includes("getData('application/loom-direction-type')"),
+        'Drop handler should read direction-type metadata');
+    assert.ok(appContent.includes("getData('application/loom-question')"),
+        'Drop handler should read question metadata');
+});
+
+test('context block stores contextMeta and user message renders direction suggestion card', () => {
+    assert.ok(appContent.includes('contextMeta = {'),
+        'sendMessage should collect contextMeta from context block');
+    assert.ok(appContent.includes('contextMeta: contextMeta'),
+        'user message payload should include contextMeta');
+    assert.ok(appContent.includes("type: 'direction_suggestion'"),
+        'append message should map metadata to direction_suggestion module');
+    assert.ok(cssContent.includes('.ctx-card-direction'),
+        'CSS should define card-style direction module in user bubble');
+    assert.ok(cssContent.includes('.context-preview-card'),
+        'CSS should define card-style preview in input context block');
+});
+
+test('module 2 build action passes linked chat card metadata to input preview', () => {
+    assert.ok(appContent.includes("type: 'linked_chat_card'"),
+        'Build on this should pass linked_chat_card type');
+    assert.ok(appContent.includes('card.dataset.userAsked') && appContent.includes('card.dataset.aiCovered'),
+        'Build on this should pass userAsked/aiCovered metadata');
+    assert.ok(appContent.includes('context-preview-linked'),
+        'setContextBlock should render linked-card style preview');
+    assert.ok(cssContent.includes('.context-preview-linked'),
+        'CSS should define linked-card preview style');
 });
 
 test('connection card CSS has refined styling (top border, softer shadow)', () => {

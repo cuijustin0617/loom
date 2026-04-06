@@ -185,7 +185,12 @@ const Sidebar = {
         </button>
       </div>
     `;
-    this._setupDrag(el, dir.question || '', dir.title || '', directionIdx);
+    this._setupDrag(el, dir.question || '', dir.title || '', directionIdx, {
+      type: 'direction_card',
+      cardType: dirType,
+      title: dir.title || '',
+      question: dir.question || '',
+    });
     el.querySelector('.card-new-chat-btn').addEventListener('click', (e) => {
       e.stopPropagation();
       StudyLog.event('module3_direction_new_chat', { topicId: this.currentTopicId, directionIdx });
@@ -217,10 +222,15 @@ const Sidebar = {
     App.sendMessage();
   },
 
-  _setupDrag(el, fullText, label, directionIdx) {
+  _setupDrag(el, fullText, label, directionIdx, meta = null) {
     el.addEventListener('dragstart', (e) => {
       e.dataTransfer.setData('text/plain', fullText);
       e.dataTransfer.setData('application/loom-label', label);
+      if (meta && meta.type) {
+        e.dataTransfer.setData('application/loom-context-type', meta.type);
+        e.dataTransfer.setData('application/loom-direction-type', meta.cardType || 'extend');
+        e.dataTransfer.setData('application/loom-question', meta.question || fullText);
+      }
       el.classList.add('dragging');
       StudyLog.event('module3_direction_dragged', { topicId: this.currentTopicId, directionIdx });
     });
@@ -228,7 +238,7 @@ const Sidebar = {
 
     el.addEventListener('click', () => {
       StudyLog.event('module3_direction_clicked', { topicId: this.currentTopicId, directionIdx });
-      App.setContextBlock(fullText, label);
+      App.setContextBlock(fullText, label, meta);
     });
   },
 
@@ -269,7 +279,7 @@ const Sidebar = {
 
     if (overview.length > 0) {
       const overviewCollapsed = localStorage.getItem('loom_overviewCollapsed') === 'true';
-      html += '<div class="status-section"><div class="status-section-label collapsible' + (overviewCollapsed ? ' section-collapsed' : '') + '" data-section-toggle="overview"><span class="section-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="8" height="8"><polyline points="6 9 12 15 18 9"/></svg></span>Overview<button class="overview-ai-edit-btn" title="AI edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="10" height="10"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/><path d="M18 14l1 3 3 1-3 1-1 3-1-3-3-1 3-1 1-3z"/></svg></button></div><div class="overview-ai-prompt-slot"></div><div class="status-section-items' + (overviewCollapsed ? ' section-collapsed' : '') + '" data-section-items="overview">';
+      html += '<div class="status-section status-section-overview"><div class="status-section-label collapsible' + (overviewCollapsed ? ' section-collapsed' : '') + '" data-section-toggle="overview"><span class="section-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="8" height="8"><polyline points="6 9 12 15 18 9"/></svg></span>Overview<button class="overview-ai-edit-btn" title="AI edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="10" height="10"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/><path d="M18 14l1 3 3 1-3 1-1 3-1-3-3-1 3-1 1-3z"/></svg></button></div><div class="overview-ai-prompt-slot"></div><div class="status-section-items' + (overviewCollapsed ? ' section-collapsed' : '') + '" data-section-items="overview">';
       overview.forEach((pt, i) => {
         html += `<div class="status-item" data-section="overview" data-idx="${i}">
           <span class="status-item-text">${Utils.escapeHtml(pt)}</span>
@@ -281,7 +291,7 @@ const Sidebar = {
     }
 
     if (threads.length > 0) {
-      html += '<div class="status-section"><div class="status-section-label">Knowledge Threads</div>';
+      html += '<div class="status-section status-section-threads"><div class="status-section-label">Knowledge Threads</div>';
       threads.forEach((thread, ti) => {
         const label = thread.label || 'Thread';
         const steps = thread.steps || [];

@@ -163,18 +163,35 @@ function _parseUserMessageModules(content) {
   return { modules, userQuery: remaining.trim() };
 }
 
-function _renderContextBar(modules) {
+function _renderContextBar(modules, options = {}) {
+  const contextOnly = !!options.contextOnly;
   const statusSvg = '<svg class="status-svg"></svg>';
   const linkSvg = '<svg class="link-svg"></svg>';
 
-  const tags = modules.map((mod, i) => {
+  const items = modules.map((mod, i) => {
+    if (mod.type === 'direction_suggestion') {
+      const cardType = Utils.escapeHtml(mod.cardType || 'extend');
+      return `<div class="ctx-card ctx-card-direction type-${cardType}">
+        <div class="ctx-card-tag">${cardType}</div>
+        <div class="ctx-card-title">${Utils.escapeHtml(mod.title || mod.label || '')}</div>
+        <div class="ctx-card-question">${Utils.escapeHtml(mod.question || mod.body || '')}</div>
+      </div>`;
+    }
     const isStatus = mod.type === 'status';
     const icon = isStatus ? statusSvg : linkSvg;
     const typeClass = isStatus ? 'ctx-status' : 'ctx-linked';
     return `<span class="ctx-tag ${typeClass}" data-ctx-idx="${i}">${icon} ${Utils.escapeHtml(mod.label)}</span>`;
-  }).join('<span class="ctx-dot">&middot;</span>');
+  });
 
-  return `<div class="message-context-bar">${tags}</div><div class="ctx-detail-panel"></div>`;
+  const html = items.map((entry, idx) => {
+    const isCard = entry.includes('ctx-card');
+    const prevIsCard = idx > 0 && items[idx - 1].includes('ctx-card');
+    if (idx > 0 && !isCard && !prevIsCard) return `<span class="ctx-dot">&middot;</span>${entry}`;
+    return entry;
+  }).join('');
+
+  const barClass = contextOnly ? 'message-context-bar context-only' : 'message-context-bar';
+  return `<div class="${barClass}">${html}</div><div class="ctx-detail-panel"></div>`;
 }
 
 function simulateAppendMessage(msg) {
@@ -182,9 +199,27 @@ function simulateAppendMessage(msg) {
     ? _parseUserMessageModules(msg.content)
     : { modules: [], userQuery: msg.content };
 
-  const visibleModules = modules.filter(m => m.type !== 'knowledge_context');
+  const modulesWithMeta = modules.map(m => ({ ...m }));
+  if (msg.contextMeta && msg.contextMeta.type === 'direction_card') {
+    const knowledgeIdx = modulesWithMeta.findIndex(m => m.type === 'knowledge_context');
+    const directionModule = {
+      type: 'direction_suggestion',
+      label: msg.contextMeta.title || 'Suggested next question',
+      title: msg.contextMeta.title || 'Suggested next question',
+      question: msg.contextMeta.question || modulesWithMeta[knowledgeIdx]?.body || '',
+      body: modulesWithMeta[knowledgeIdx]?.body || msg.contextMeta.question || '',
+      cardType: msg.contextMeta.cardType || 'extend',
+    };
+    if (knowledgeIdx !== -1) modulesWithMeta[knowledgeIdx] = directionModule;
+    else modulesWithMeta.unshift(directionModule);
+  }
+  const visibleModules = modulesWithMeta.filter(m => m.type !== 'knowledge_context');
 
-  const displayContent = msg.role === 'user' ? (userQuery || msg.content) : msg.content;
+  const displayContent = msg.role === 'user'
+    ? ((msg.contextMeta && msg.contextMeta.type === 'direction_card' && !userQuery)
+      ? ''
+      : (userQuery || msg.content))
+    : msg.content;
   const renderedContent = msg.role === 'assistant'
     ? Utils.renderMarkdown(msg.content)
     : Utils.escapeHtml(displayContent);
@@ -194,7 +229,12 @@ function simulateAppendMessage(msg) {
     : '';
 
   if (visibleModules.length > 0) {
-    const barHtml = _renderContextBar(visibleModules);
+    const contextOnly = msg.role === 'user'
+      && !!(msg.contextMeta && msg.contextMeta.type === 'direction_card' && !((userQuery || '').trim()));
+    const barHtml = _renderContextBar(visibleModules, { contextOnly });
+    if (contextOnly) {
+      return `<div class="message ${msg.role}">${attachHtml}<div class="message-bubble-group">${barHtml}</div></div>`;
+    }
     return `<div class="message ${msg.role}">${attachHtml}<div class="message-bubble-group">${barHtml}<div class="message-content">${renderedContent}</div></div></div>`;
   }
   return `<div class="message ${msg.role}">${attachHtml}<div class="message-content">${renderedContent}</div></div>`;
@@ -459,6 +499,43 @@ test('knowledge-context module does NOT render (folded into message)', () => {
   assert.ok(!html.includes('ctx-tag'));
   const bubbleMatch = html.match(/<div class="message-content">([\s\S]*?)<\/div>/);
   assert.ok(bubbleMatch[1].includes('Please explain.'));
+});
+
+test('dragged direction renders card-style module in user bubble', () => {
+  const content = buildKnowledge('How does gradient descent work?') + '\n\nHelp me answer this.';
+  const html = simulateAppendMessage({
+    role: 'user',
+    content,
+    contextMeta: {
+      type: 'direction_card',
+      cardType: 'bridge',
+      title: 'Optimization bridge',
+      question: 'How does gradient descent work?',
+    },
+  });
+  assert.ok(html.includes('message-bubble-group'));
+  assert.ok(html.includes('ctx-card-direction'));
+  assert.ok(html.includes('type-bridge'));
+  assert.ok(html.includes('Optimization bridge'));
+  assert.ok(html.includes('How does gradient descent work?'));
+});
+
+test('dragged direction only does not show fallback sentence in bubble', () => {
+  const content = buildKnowledge('How does gradient descent work?');
+  const html = simulateAppendMessage({
+    role: 'user',
+    content,
+    contextMeta: {
+      type: 'direction_card',
+      cardType: 'extend',
+      title: 'Optimization bridge',
+      question: 'How does gradient descent work?',
+    },
+  });
+  assert.ok(html.includes('ctx-card-direction'));
+  assert.ok(!html.includes('Please continue building on this previous conversation.'));
+  assert.ok(html.includes('message-context-bar context-only'));
+  assert.ok(!html.includes('<div class="message-content">'));
 });
 
 test('assistant messages are unaffected (no module parsing)', () => {

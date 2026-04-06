@@ -3,6 +3,8 @@
 const Storage = {
   _userId: null,
   _condition: null,
+  _MAX_MESSAGES_PER_CHAT_ON_QUOTA: 120,
+  _MAX_CHATS_ON_QUOTA: 40,
 
   // ── User Session ─────────────────────────────────────────────────────
 
@@ -84,13 +86,77 @@ const Storage = {
 
   _saveAll(data) {
     try {
-      localStorage.setItem(this._KEY, JSON.stringify(data));
+      const compacted = this._writeWithQuotaRecovery(data);
+      if (!compacted) return false;
     } catch (e) {
       console.error('Storage quota exceeded:', e);
       return false;
     }
     this._scheduleSync();
     return true;
+  },
+
+  _writeWithQuotaRecovery(data) {
+    const variants = [
+      this._prepareDataForWrite(data, 0),
+      this._prepareDataForWrite(data, 1),
+      this._prepareDataForWrite(data, 2),
+      this._prepareDataForWrite(data, 3),
+    ];
+
+    for (let i = 0; i < variants.length; i++) {
+      try {
+        localStorage.setItem(this._KEY, JSON.stringify(variants[i]));
+        return variants[i];
+      } catch (e) {
+        if (i === variants.length - 1) {
+          console.error('Storage quota exceeded:', e);
+          return null;
+        }
+      }
+    }
+    return null;
+  },
+
+  _prepareDataForWrite(data, level) {
+    const clone = JSON.parse(JSON.stringify(data || this._defaultData()));
+    this._stripAttachmentBase64(clone);
+    if (level <= 0) return clone;
+
+    // Tier 1: drop bulky chat embeddings; they can be regenerated.
+    if (Array.isArray(clone.chats)) {
+      for (const chat of clone.chats) {
+        if (chat && Array.isArray(chat.embedding) && chat.embedding.length) {
+          chat.embedding = null;
+        }
+      }
+    }
+    if (level <= 1) return clone;
+
+    // Tier 2: keep only recent messages per chat.
+    if (clone.messages && typeof clone.messages === 'object') {
+      for (const chatId of Object.keys(clone.messages)) {
+        const msgs = clone.messages[chatId];
+        if (Array.isArray(msgs) && msgs.length > this._MAX_MESSAGES_PER_CHAT_ON_QUOTA) {
+          clone.messages[chatId] = msgs.slice(-this._MAX_MESSAGES_PER_CHAT_ON_QUOTA);
+        }
+      }
+    }
+    if (level <= 2) return clone;
+
+    // Tier 3: keep most recent chats and matching messages.
+    const chats = Array.isArray(clone.chats) ? clone.chats : [];
+    if (!chats.length) return clone;
+    chats.sort((a, b) => String(b?.lastActive || b?.createdAt || '').localeCompare(String(a?.lastActive || a?.createdAt || '')));
+    const keepIds = new Set(chats.slice(0, this._MAX_CHATS_ON_QUOTA).map(c => c.id).filter(Boolean));
+    if (clone.currentChatId) keepIds.add(clone.currentChatId);
+    clone.chats = chats.filter(c => keepIds.has(c.id));
+    const nextMessages = {};
+    for (const id of keepIds) {
+      if (clone.messages && clone.messages[id]) nextMessages[id] = clone.messages[id];
+    }
+    clone.messages = nextMessages;
+    return clone;
   },
 
   _defaultData() {
@@ -136,8 +202,7 @@ const Storage = {
       if (!resp.ok) return false;
       const result = await resp.json();
       if (result.data) {
-        localStorage.setItem(this._KEY, JSON.stringify(result.data));
-        return true;
+        return !!this._writeWithQuotaRecovery(result.data);
       }
     } catch (e) {
       console.warn('Sync pull failed:', e);

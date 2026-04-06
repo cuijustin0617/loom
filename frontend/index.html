@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ChatWeave — Knowledge Sidebar</title>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
     rel="stylesheet">
   <link rel="stylesheet" href="/static/styles.css?v=__CACHE_VERSION__">
 </head>
@@ -36,14 +36,7 @@
     <!-- Left Sidebar -->
     <aside class="left-sidebar" id="leftSidebar">
       <div class="sidebar-header">
-        <div class="logo-icon">
-          <svg viewBox="0 0 24 24" fill="none">
-            <path d="M12 2C12 2 6 8 6 14C6 17.5 8.5 20 12 22C15.5 20 18 17.5 18 14C18 8 12 2 12 2Z" fill="white"
-              opacity="0.9" />
-            <ellipse cx="12" cy="14" rx="2" ry="3" fill="white" opacity="0.5" />
-          </svg>
-        </div>
-        <span class="logo-text">ChatWeave</span>
+        <span class="chatweave-logo chatweave-logo--sidebar">Chat<span class="chatweave-logo-weave">Weave</span></span>
       </div>
 
       <button class="new-chat-btn" id="newChatBtn">
@@ -108,7 +101,7 @@
       <!-- Context block (from drag-drop) -->
       <div class="context-block" id="contextBlock" style="display:none;">
         <div class="context-block-header">
-          <span class="context-block-label">Added context</span>
+          <span class="context-block-label" id="contextBlockLabel">Added context</span>
           <div class="context-block-actions">
             <button class="context-toggle-btn" id="contextToggleBtn">Expand</button>
             <button class="context-close-btn" id="contextCloseBtn">&times;</button>

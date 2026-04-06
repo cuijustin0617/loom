@@ -671,7 +671,17 @@ const App = {
       // Handle sidebar drag context
       const text = e.dataTransfer.getData('text/plain');
       const label = e.dataTransfer.getData('application/loom-label');
-      if (text) this.setContextBlock(text, label);
+      const contextType = e.dataTransfer.getData('application/loom-context-type');
+      const cardType = e.dataTransfer.getData('application/loom-direction-type');
+      const question = e.dataTransfer.getData('application/loom-question');
+      if (text) {
+        this.setContextBlock(text, label, {
+          type: contextType || '',
+          cardType: cardType || 'extend',
+          title: label || '',
+          question: question || text,
+        });
+      }
     };
     mainContent.addEventListener('dragover', _handleDragOver);
     mainContent.addEventListener('dragleave', _handleDragLeave);
@@ -921,18 +931,27 @@ const App = {
 
     // Prepend context block if present
     let contextBlock = null;
+    let contextMeta = null;
     const ctxEl = document.getElementById('contextBlock');
     if (ctxEl.style.display !== 'none') {
       const fullText = document.getElementById('contextFullText').value.trim();
       if (fullText) {
         contextBlock = fullText;
+        contextMeta = {
+          type: ctxEl.dataset.contextType || '',
+          cardType: ctxEl.dataset.contextCardType || 'extend',
+          title: ctxEl.dataset.contextTitle || '',
+          question: ctxEl.dataset.contextQuestion || fullText,
+        };
         const isLinkedChat = fullText.includes('--- Previous chat history ---');
         const wrapper = isLinkedChat
           ? `[The user is building on a previous conversation they had. Here is that conversation and how it connects:\n${fullText}]`
           : `[Context from my knowledge map: ${fullText}]`;
         content = content
           ? `${wrapper}\n\n${content}`
-          : `${wrapper}\n\nPlease continue building on this previous conversation.`;
+          : (contextMeta?.type === 'direction_card'
+            ? wrapper
+            : `${wrapper}\n\nPlease continue building on this previous conversation.`);
       }
       this.clearContextBlock();
     }
@@ -980,6 +999,7 @@ const App = {
       role: 'user',
       content: content,
       contextBlock: contextBlock,
+      contextMeta: contextMeta,
       attachments: this.pendingAttachments.length > 0
         ? this.pendingAttachments.map(a => ({ name: a.name, mimeType: a.mimeType }))
         : null,
@@ -1567,7 +1587,13 @@ const App = {
         StudyLog.event('module2_connection_clicked', { chatId: this.currentChatId, connectionChatId: chatId, action: 'build' });
         this._hideConnCard();
         if (contextText) {
-          this.setContextBlock(contextText, title);
+          this.setContextBlock(contextText, title, {
+            type: 'linked_chat_card',
+            title: title || 'Past chat',
+            insight: insight || '',
+            userAsked: card.dataset.userAsked || '',
+            aiCovered: card.dataset.aiCovered || '',
+          });
           document.getElementById('chatInput').focus();
         }
       });
@@ -2041,14 +2067,50 @@ const App = {
 
   // ── Context Block ─────────────────────────────────────────────────────
 
-  setContextBlock(fullText, label) {
+  setContextBlock(fullText, label, meta = null) {
     const block = document.getElementById('contextBlock');
     const compact = document.getElementById('contextCompact');
     const fullArea = document.getElementById('contextFullText');
     const fullDiv = document.getElementById('contextFull');
+    const labelEl = document.getElementById('contextBlockLabel');
 
-    compact.textContent = `• ${label}: "${Utils.truncate(fullText, 60)}"`;
+    if (meta && meta.type === 'direction_card') {
+      const cardType = Utils.escapeHtml(meta.cardType || 'extend');
+      const cardTitle = Utils.escapeHtml(meta.title || label || 'Suggested next question');
+      const cardQuestion = Utils.escapeHtml(meta.question || fullText);
+      compact.innerHTML = `<div class="context-preview-card type-${cardType}">
+        <div class="context-preview-type">${cardType}</div>
+        <div class="context-preview-title">${cardTitle}</div>
+        <div class="context-preview-question">${cardQuestion}</div>
+      </div>`;
+      if (labelEl) labelEl.textContent = 'Added module';
+    } else if (meta && meta.type === 'linked_chat_card') {
+      const cardTitle = Utils.escapeHtml(meta.title || label || 'Past chat');
+      const insight = Utils.escapeHtml(meta.insight || '');
+      const userAsked = Utils.escapeHtml(meta.userAsked || '');
+      const aiCovered = Utils.escapeHtml(meta.aiCovered || '');
+      compact.innerHTML = `<div class="context-preview-linked">
+        <div class="context-preview-linked-header">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+          </svg>
+          <span class="context-preview-linked-title">${cardTitle}</span>
+        </div>
+        ${userAsked ? `<div class="context-preview-linked-row"><span class="context-preview-linked-label">Asked</span><span class="context-preview-linked-value">${userAsked}</span></div>` : ''}
+        ${aiCovered ? `<div class="context-preview-linked-row"><span class="context-preview-linked-label">Learned</span><span class="context-preview-linked-value">${aiCovered}</span></div>` : ''}
+        ${insight ? `<div class="context-preview-linked-insight">${insight}</div>` : ''}
+      </div>`;
+      if (labelEl) labelEl.textContent = 'Added module';
+    } else {
+      compact.textContent = `• ${label}: "${Utils.truncate(fullText, 60)}"`;
+      if (labelEl) labelEl.textContent = 'Added context';
+    }
     fullArea.value = fullText;
+    block.dataset.contextType = meta?.type || '';
+    block.dataset.contextCardType = meta?.cardType || '';
+    block.dataset.contextTitle = meta?.title || label || '';
+    block.dataset.contextQuestion = meta?.question || fullText;
     fullDiv.style.display = 'none';
     document.getElementById('contextToggleBtn').textContent = 'Expand';
     block.style.display = 'block';
@@ -2062,7 +2124,13 @@ const App = {
     }
     document.getElementById('contextBlock').style.display = 'none';
     document.getElementById('contextFullText').value = '';
-    document.getElementById('contextCompact').textContent = '';
+    document.getElementById('contextCompact').innerHTML = '';
+    document.getElementById('contextBlock').dataset.contextType = '';
+    document.getElementById('contextBlock').dataset.contextCardType = '';
+    document.getElementById('contextBlock').dataset.contextTitle = '';
+    document.getElementById('contextBlock').dataset.contextQuestion = '';
+    const labelEl = document.getElementById('contextBlockLabel');
+    if (labelEl) labelEl.textContent = 'Added context';
   },
 
   _toggleContextExpand() {
@@ -2155,14 +2223,8 @@ const App = {
 
     container.innerHTML = `
       <div class="welcome-greeting">
-        <div class="welcome-icon">
-          <svg viewBox="0 0 24 24" fill="none">
-            <path d="M12 2C12 2 6 8 6 14C6 17.5 8.5 20 12 22C15.5 20 18 17.5 18 14C18 8 12 2 12 2Z" fill="white" opacity="0.9"/>
-            <ellipse cx="12" cy="14" rx="2" ry="3" fill="white" opacity="0.5"/>
-          </svg>
-        </div>
         <h2>Where should we start?</h2>
-        <p>Ask anything. ChatWeave will build your knowledge map as you go.</p>
+        <p>Ask anything. ChatWeave will keep relevant context organized as you go.</p>
       </div>
       ${suggestionsHtml}`;
 
@@ -2361,11 +2423,22 @@ const App = {
     return { modules, userQuery: remaining.trim() };
   },
 
-  _renderContextBar(modules) {
+  _renderContextBar(modules, options = {}) {
+    const contextOnly = !!options.contextOnly;
     const statusSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
     const linkSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>';
 
-    const tags = modules.map((mod, i) => {
+    const items = modules.map((mod, i) => {
+      if (mod.type === 'direction_suggestion') {
+        const cardType = Utils.escapeHtml(mod.cardType || 'extend');
+        const title = Utils.escapeHtml(mod.title || mod.label || 'Suggested next question');
+        const question = Utils.escapeHtml(mod.question || mod.body || '');
+        return `<div class="ctx-card ctx-card-direction type-${cardType}">
+          <div class="ctx-card-tag">${cardType}</div>
+          <div class="ctx-card-title">${title}</div>
+          <div class="ctx-card-question">${question}</div>
+        </div>`;
+      }
       const isStatus = mod.type === 'status';
       const icon = isStatus ? statusSvg : linkSvg;
       const typeClass = isStatus ? 'ctx-status' : 'ctx-linked';
@@ -2383,9 +2456,17 @@ const App = {
         }
       }
       return `<span class="ctx-tag ${typeClass}" data-ctx-idx="${i}"${inlineStyle}>${icon} ${Utils.escapeHtml(mod.label)}</span>`;
-    }).join('<span class="ctx-dot">&middot;</span>');
+    });
 
-    return `<div class="message-context-bar">${tags}</div><div class="ctx-detail-panel"></div>`;
+    const html = items.map((entry, idx) => {
+      const isCard = entry.includes('ctx-card');
+      const prevIsCard = idx > 0 && items[idx - 1].includes('ctx-card');
+      if (idx > 0 && !isCard && !prevIsCard) return `<span class="ctx-dot">&middot;</span>${entry}`;
+      return entry;
+    }).join('');
+
+    const barClass = contextOnly ? 'message-context-bar context-only' : 'message-context-bar';
+    return `<div class="${barClass}">${html}</div><div class="ctx-detail-panel"></div>`;
   },
 
   _appendMessage(msg) {
@@ -2393,6 +2474,7 @@ const App = {
 
     const el = document.createElement('div');
     el.className = `message ${msg.role}`;
+    // Attachment rendering below checks att.data and falls back to att.name.
 
     let contextBarHtml = '';
     let displayContent = msg.content;
@@ -2400,11 +2482,28 @@ const App = {
 
     if (msg.role === 'user') {
       const { modules, userQuery } = this._parseUserMessageModules(msg.content);
-      visibleModules = modules.filter(m => m.type !== 'knowledge_context');
-      if (visibleModules.length > 0) {
-        contextBarHtml = this._renderContextBar(visibleModules);
+      const modulesWithMeta = modules.map(m => ({ ...m }));
+      if (msg.contextMeta && msg.contextMeta.type === 'direction_card') {
+        const knowledgeIdx = modulesWithMeta.findIndex(m => m.type === 'knowledge_context');
+        const directionModule = {
+          type: 'direction_suggestion',
+          label: msg.contextMeta.title || 'Suggested next question',
+          title: msg.contextMeta.title || 'Suggested next question',
+          question: msg.contextMeta.question || modulesWithMeta[knowledgeIdx]?.body || '',
+          body: modulesWithMeta[knowledgeIdx]?.body || msg.contextMeta.question || '',
+          cardType: msg.contextMeta.cardType || 'extend',
+        };
+        if (knowledgeIdx !== -1) modulesWithMeta[knowledgeIdx] = directionModule;
+        else modulesWithMeta.unshift(directionModule);
       }
-      displayContent = userQuery || msg.content;
+      visibleModules = modulesWithMeta.filter(m => m.type !== 'knowledge_context');
+      const contextOnly = !!(msg.contextMeta && msg.contextMeta.type === 'direction_card' && !((userQuery || '').trim()));
+      if (visibleModules.length > 0) {
+        contextBarHtml = this._renderContextBar(visibleModules, { contextOnly });
+      }
+      displayContent = (msg.contextMeta && msg.contextMeta.type === 'direction_card' && !userQuery)
+        ? ''
+        : (userQuery || msg.content);
     }
 
     let attachHtml = '';
@@ -2436,8 +2535,10 @@ const App = {
       renderedContent = Utils.escapeHtml(displayContent);
     }
 
-    if (contextBarHtml) {
+    if (contextBarHtml && (msg.role !== 'user' || (displayContent || '').trim())) {
       el.innerHTML = `${attachHtml}<div class="message-bubble-group">${contextBarHtml}<div class="message-content">${renderedContent}</div></div>`;
+    } else if (contextBarHtml) {
+      el.innerHTML = `${attachHtml}<div class="message-bubble-group">${contextBarHtml}</div>`;
     } else {
       el.innerHTML = `${attachHtml}<div class="message-content">${renderedContent}</div>`;
     }
@@ -2455,7 +2556,7 @@ const App = {
             tag.classList.remove('active');
           } else {
             el.querySelectorAll('.ctx-tag').forEach(t => t.classList.remove('active'));
-            panel.textContent = visibleModules[idx].body;
+            panel.textContent = visibleModules[idx]?.body || '';
             panel.dataset.activeIdx = String(idx);
             panel.classList.add('visible');
             tag.classList.add('active');
