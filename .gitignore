@@ -51,3 +51,4 @@ user_study_analysis/
 *.pem
 .eslintcache
 backend/data/
+backend/seed_events.json
