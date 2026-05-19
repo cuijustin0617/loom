@@ -1566,6 +1566,89 @@ test('stripping data from attachment preserves name and mimeType', () => {
     assert.strictEqual(stripped.data, undefined);
 });
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// Notion Redesign: Design Tokens
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\n─── Notion Redesign: Design Tokens ───');
+
+test('--primary is near-black, not blue', () => {
+    assert.ok(!cssContent.includes('--primary: #3B82F6'),
+        ':root should NOT contain --primary: #3B82F6 (old blue)');
+    const match = cssContent.match(/--primary:\s*#([0-9A-Fa-f]{6})/);
+    assert.ok(match, 'Should define --primary hex color');
+    const hex = match[1];
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    assert.ok(r < 80 && g < 80 && b < 80,
+        `--primary should be near-black, got #${hex}`);
+});
+
+test('--sidebar-bg is warm off-white, not blue-tinted', () => {
+    assert.ok(!cssContent.includes('--sidebar-bg: rgba(59, 130, 246'),
+        '--sidebar-bg should NOT use blue rgba');
+    assert.ok(cssContent.includes('--sidebar-bg: #F7F7F5'),
+        '--sidebar-bg should be #F7F7F5');
+});
+
+test('--hover-bg is defined in :root', () => {
+    assert.ok(cssContent.includes('--hover-bg:'),
+        ':root should define --hover-bg');
+});
+
+test('--selected-bg is defined in :root', () => {
+    assert.ok(cssContent.includes('--selected-bg:'),
+        ':root should define --selected-bg');
+});
+
+test('--bg-primary is defined in :root', () => {
+    assert.ok(cssContent.includes('--bg-primary:'),
+        ':root should define --bg-primary');
+});
+
+test('--bg-secondary is defined in :root', () => {
+    assert.ok(cssContent.includes('--bg-secondary:'),
+        ':root should define --bg-secondary');
+});
+
+test('body font-family includes Inter', () => {
+    const bodyMatch = cssContent.match(/body\s*\{[^}]*font-family:[^}]*\}/s);
+    assert.ok(bodyMatch, 'Should find body font-family rule');
+    assert.ok(bodyMatch[0].includes("'Inter'"),
+        `Body font-family should include 'Inter', got: ${bodyMatch[0].slice(0, 100)}`);
+});
+
+test('send button uses dark fill (var(--primary))', () => {
+    const sendRule = cssContent.match(/\.send-btn\s*\{[^}]*background:\s*([^;]+)/);
+    assert.ok(sendRule, 'Should find .send-btn background rule');
+    assert.ok(sendRule[1].includes('var(--primary)'),
+        `.send-btn background should use var(--primary), got: ${sendRule[1]}`);
+});
+
+test('login button does not use blue fill', () => {
+    const loginRule = cssContent.match(/\.login-btn\s*\{[^}]*background:\s*([^;]+)/);
+    assert.ok(loginRule, 'Should find .login-btn background rule');
+    assert.ok(!loginRule[1].includes('#3B82F6'),
+        `.login-btn background should not be blue #3B82F6`);
+    assert.ok(loginRule[1].includes('var(--primary)'),
+        `.login-btn background should use var(--primary)`);
+});
+
+test('.new-chat-btn is ghost style (no border)', () => {
+    const newChatRule = cssContent.match(/\.new-chat-btn\s*\{[^}]*\}/s);
+    assert.ok(newChatRule, 'Should find .new-chat-btn rule');
+    assert.ok(newChatRule[0].includes('border: none'),
+        '.new-chat-btn should have border: none (ghost style)');
+});
+
+test('.new-chat-btn hover uses neutral background', () => {
+    const hoverRule = cssContent.match(/\.new-chat-btn:hover\s*\{[^}]*\}/s);
+    assert.ok(hoverRule, 'Should find .new-chat-btn:hover rule');
+    assert.ok(hoverRule[0].includes('var(--hover-bg)'),
+        '.new-chat-btn:hover should use var(--hover-bg)');
+});
+
 // ─── Summary ──────────────────────────────────────────────────────────────────
 
 console.log(`\n═══════════════════════════════════`);
