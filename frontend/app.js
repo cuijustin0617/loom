@@ -1651,14 +1651,28 @@ const App = {
     const positionCard = () => {
       const rect = marker.getBoundingClientRect();
       const cardRect = card.getBoundingClientRect();
+      const chatMessages = document.getElementById('chatMessages');
+      const chatRect = chatMessages?.getBoundingClientRect();
       // Check if marker is still visible in viewport
       if (rect.bottom < 0 || rect.top > window.innerHeight) {
         this._hideConnCard();
         return;
       }
-      let top = rect.bottom + 8;
-      if (top + cardRect.height > window.innerHeight - 16) {
-        top = rect.top - cardRect.height - 8;
+      const topBound = Math.max(12, (chatRect?.top || 0) + 8);
+      const bottomBound = Math.min(window.innerHeight - 12, (chatRect?.bottom || window.innerHeight) - 8);
+      const belowTop = rect.bottom + 8;
+      const aboveTop = rect.top - cardRect.height - 8;
+
+      // Prefer below the marker, then above, then clamp within visible chat area.
+      let top = belowTop;
+      if (belowTop + cardRect.height > bottomBound && aboveTop >= topBound) {
+        top = aboveTop;
+      }
+      if (top + cardRect.height > bottomBound) {
+        top = bottomBound - cardRect.height;
+      }
+      if (top < topBound) {
+        top = topBound;
       }
       let left = rect.left + rect.width / 2 - cardRect.width / 2;
       left = Math.max(12, Math.min(left, window.innerWidth - cardRect.width - 12));

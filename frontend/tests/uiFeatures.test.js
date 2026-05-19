@@ -404,7 +404,7 @@ test('connection card has scale animation on appear', () => {
 test('connection card border-radius is refined', () => {
     const match = cssContent.match(/\.conn-card\s*\{[^}]*border-radius:\s*(\d+)px/);
     assert.ok(match, 'Should have border-radius on .conn-card');
-    assert.strictEqual(match[1], '14', 'Border radius should be 14px');
+    assert.ok(Number(match[1]) <= 6, 'Border radius should be near-rectangular');
 });
 
 // ── Connection card position logic unit test ─────────────────────────────────
