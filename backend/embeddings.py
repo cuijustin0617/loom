@@ -4,6 +4,22 @@ import os
 import numpy as np
 from typing import Optional
 
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+OPENROUTER_EMBED_MODEL = os.getenv("OPENROUTER_EMBED_MODEL", "google/gemini-embedding-2")
+
+
+def _openrouter_client():
+    from openai import AsyncOpenAI
+
+    return AsyncOpenAI(
+        base_url=OPENROUTER_BASE_URL,
+        api_key=os.getenv("OPENROUTER_API_KEY"),
+        default_headers={
+            "HTTP-Referer": os.getenv("OPENROUTER_SITE_URL", "http://localhost:8000"),
+            "X-OpenRouter-Title": os.getenv("OPENROUTER_APP_NAME", "Loom"),
+        },
+    )
+
 
 class EmbeddingService:
     def __init__(self, provider: Optional[str] = None):
@@ -12,6 +28,8 @@ class EmbeddingService:
     async def embed_text(self, text: str) -> list[float]:
         if self.provider == "openai":
             return await self._openai_embed(text)
+        elif self.provider == "openrouter":
+            return await self._openrouter_embed(text)
         elif self.provider == "gemini":
             return await self._gemini_embed(text)
         else:
@@ -23,6 +41,8 @@ class EmbeddingService:
             return []
         if self.provider == "openai":
             return await self._openai_embed_batch(texts)
+        elif self.provider == "openrouter":
+            return await self._openrouter_embed_batch(texts)
         elif self.provider == "gemini":
             return [await self._gemini_embed(t) for t in texts]
         else:
@@ -46,6 +66,47 @@ class EmbeddingService:
         )
         idx_emb = sorted(response.data, key=lambda d: d.index)
         return [d.embedding for d in idx_emb]
+
+    async def _openrouter_embed(self, text: str) -> list[float]:
+        import httpx, json as _json
+        api_key = os.getenv("OPENROUTER_API_KEY", "")
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{OPENROUTER_BASE_URL}/embeddings",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "HTTP-Referer": os.getenv("OPENROUTER_SITE_URL", "http://localhost:8000"),
+                    "X-OpenRouter-Title": os.getenv("OPENROUTER_APP_NAME", "Loom"),
+                    "Content-Type": "application/json",
+                },
+                content=_json.dumps({"model": OPENROUTER_EMBED_MODEL, "input": text}),
+            )
+        resp.raise_for_status()
+        body = resp.json()
+        return body["data"][0]["embedding"]
+
+    async def _openrouter_embed_batch(self, texts: list[str]) -> list[list[float]]:
+        import httpx, json as _json
+        api_key = os.getenv("OPENROUTER_API_KEY", "")
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                f"{OPENROUTER_BASE_URL}/embeddings",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "HTTP-Referer": os.getenv("OPENROUTER_SITE_URL", "http://localhost:8000"),
+                    "X-OpenRouter-Title": os.getenv("OPENROUTER_APP_NAME", "Loom"),
+                    "Content-Type": "application/json",
+                },
+                content=_json.dumps({"model": OPENROUTER_EMBED_MODEL, "input": texts}),
+            )
+        resp.raise_for_status()
+        body = resp.json()
+        # Some models return data as list; fall back to sequential if not
+        if body.get("data") and isinstance(body["data"], list):
+            items = sorted(body["data"], key=lambda d: d.get("index", 0))
+            return [d["embedding"] for d in items]
+        # Model doesn't support batch — embed sequentially
+        return [await self._openrouter_embed(t) for t in texts]
 
     async def _gemini_embed(self, text: str) -> list[float]:
         from google import genai

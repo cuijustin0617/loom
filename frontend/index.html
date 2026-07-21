@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ChatWeave — Knowledge Sidebar</title>
+  <title>ChatWeave — Personal Context Probe</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
     rel="stylesheet">
   <link rel="stylesheet" href="/static/styles.css?v=__CACHE_VERSION__">
@@ -137,13 +137,7 @@
               </button>
               <div class="topic-picker-dropdown" id="topicPickerDropdown"></div>
             </div>
-            <button class="search-btn" id="searchToggleBtn" title="Google Search grounding">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                <circle cx="11" cy="11" r="8" />
-                <line x1="21" y1="21" x2="16.65" y2="16.65" />
-              </svg>
-              <span>Search</span>
-            </button>
+            <select class="model-select" id="modelSelect" title="Model"></select>
             <button class="send-btn" id="sendBtn">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
                 <line x1="22" y1="2" x2="11" y2="13" />
@@ -153,7 +147,7 @@
           </div>
           <input type="file" id="fileInput" multiple accept="image/*,.pdf,.txt,.csv,.json" style="display:none;">
         </div>
-        <div class="chat-footer-note">All AI outputs are powered by Gemini-3-Flash.</div>
+        <div class="chat-footer-note" id="modelFooterNote">Externalized personal context probe: past · current · future</div>
       </div>
     </main>
     <div class="resize-handle" id="resizeRight">
@@ -164,96 +158,89 @@
       </button>
     </div>
 
-    <!-- Right Sidebar -->
+    <!-- Right Sidebar: Unified Personal Context (Past · Current · Future) -->
     <aside class="right-sidebar" id="rightSidebar">
       <div class="knowledge-header">
         <div class="knowledge-title">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
             <circle cx="12" cy="12" r="10" />
             <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10" />
             <path d="M2 12h20" />
           </svg>
-          Knowledge Sidebar
+          Personal Context
+        </div>
+        <div class="temporal-breadcrumb" id="temporalBreadcrumb">
+          <span class="temporal-crumb" data-phase="past">Past</span>
+          <span class="temporal-crumb-sep">·</span>
+          <span class="temporal-crumb" data-phase="current">Current</span>
+          <span class="temporal-crumb-sep">·</span>
+          <span class="temporal-crumb" data-phase="future">Future</span>
         </div>
       </div>
 
       <div class="sidebar-content" id="sidebarContent">
+        <!-- Empty state -->
         <div class="sidebar-empty" id="sidebarEmpty">
-          <p>Start chatting to see your knowledge modules here.</p>
-          <p class="sidebar-hint">The sidebar will surface relevant context when it detects a recurring topic.</p>
+          <p>Start chatting to see your personal context here.</p>
+          <p class="sidebar-hint">Your past history, current profile, and future directions will appear once a topic is detected.</p>
         </div>
 
-        <!-- Module 1: Status Summary (User Knowledge) -->
-        <div class="sidebar-module module-status" id="moduleStatus" style="display:none;">
-          <div class="module-header" data-module="moduleStatus">
-            <div class="module-header-label">
-              <span class="module-icon status-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                  <circle cx="12" cy="7" r="4" />
-                </svg>
-              </span>
-              <span class="module-title">User Knowledge</span>
-              <span class="module-title" id="statusTopicName"
-                style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-secondary);font-size:11px;margin-left:2px;"></span>
+        <!-- PAST: Historical context and provenance -->
+        <div class="temporal-section section-past" id="sectionPast" style="display:none;">
+          <div class="temporal-section-header" data-section="sectionPast">
+            <div class="temporal-section-label">
+              <span class="temporal-phase-dot dot-past"></span>
+              <span class="temporal-section-title">Past</span>
+              <span class="temporal-section-subtitle" id="pastTopicName"></span>
             </div>
-            <button class="status-update-btn" id="statusUpdateHeaderBtn" title="Update status">
+            <button class="module-collapse-btn" data-module="sectionPast" title="Collapse">
+              <svg class="module-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="10" height="10">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+          </div>
+          <div class="module-body" id="sectionPastBody">
+            <div class="past-chats-list" id="pastChatsList">
+              <p class="temporal-empty-hint">No relevant past chats yet. Keep chatting to build history.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- CURRENT: Active profile and concepts traversed -->
+        <div class="temporal-section section-current" id="sectionCurrent" style="display:none;">
+          <div class="temporal-section-header" data-section="sectionCurrent">
+            <div class="temporal-section-label">
+              <span class="temporal-phase-dot dot-current"></span>
+              <span class="temporal-section-title">Current</span>
+              <span class="temporal-section-subtitle" id="currentTopicName"></span>
+            </div>
+            <button class="status-update-btn" id="statusUpdateHeaderBtn" title="Update current profile">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
                 <polyline points="23 4 23 10 17 10" />
                 <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
               </svg>
             </button>
-            <button class="module-collapse-btn" data-module="moduleStatus" title="Collapse module">
-              <svg class="module-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
-                width="10" height="10">
+            <button class="module-collapse-btn" data-module="sectionCurrent" title="Collapse">
+              <svg class="module-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="10" height="10">
                 <polyline points="6 9 12 15 18 9" />
               </svg>
             </button>
           </div>
-          <div class="module-body" id="moduleStatusBody">
+          <div class="module-body" id="sectionCurrentBody">
             <div class="status-content" id="statusContent">
               <div class="status-structured" id="statusStructured" draggable="true"></div>
             </div>
           </div>
         </div>
 
-        <!-- Module 2: Linked Past Chats (connections from current response) -->
-        <div class="sidebar-module module-connections" id="moduleConnections" style="display:none;">
-          <div class="module-header" data-module="moduleConnections">
-            <div class="module-header-label">
-              <span class="module-icon connections-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-                </svg>
-              </span>
-              <span class="module-title">Linked past chats</span>
+        <!-- FUTURE: State-grounded proactive directions -->
+        <div class="temporal-section section-future" id="sectionFuture" style="display:none;">
+          <div class="temporal-section-header" data-section="sectionFuture">
+            <div class="temporal-section-label">
+              <span class="temporal-phase-dot dot-future"></span>
+              <span class="temporal-section-title">Future</span>
             </div>
-            <button class="module-collapse-btn" data-module="moduleConnections" title="Collapse module">
-              <svg class="module-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
-                width="10" height="10">
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </button>
-          </div>
-          <div class="module-body" id="moduleConnectionsBody">
-            <div class="connection-sidebar-cards" id="connectionSidebarCards"></div>
-          </div>
-        </div>
-
-        <!-- Module 3: New Directions -->
-        <div class="sidebar-module module-directions" id="moduleDirections" style="display:none;">
-          <div class="module-header" data-module="moduleDirections">
-            <div class="module-header-label">
-              <span class="module-icon directions-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                  <polygon
-                    points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-                </svg>
-              </span>
-              <span class="module-title">Explore next</span>
-            </div>
-            <button class="shuffle-btn" id="shuffleDirectionsBtn" title="Shuffle suggestions">
+            <button class="shuffle-btn" id="shuffleDirectionsBtn" title="Refresh suggestions">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
                 <polyline points="16 3 21 3 21 8" />
                 <line x1="4" y1="20" x2="21" y2="3" />
@@ -262,14 +249,13 @@
                 <line x1="4" y1="4" x2="9" y2="9" />
               </svg>
             </button>
-            <button class="module-collapse-btn" data-module="moduleDirections" title="Collapse module">
-              <svg class="module-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
-                width="10" height="10">
+            <button class="module-collapse-btn" data-module="sectionFuture" title="Collapse">
+              <svg class="module-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="10" height="10">
                 <polyline points="6 9 12 15 18 9" />
               </svg>
             </button>
           </div>
-          <div class="module-body" id="moduleDirectionsBody">
+          <div class="module-body" id="sectionFutureBody">
             <div class="direction-cards" id="directionCards"></div>
           </div>
         </div>
@@ -289,8 +275,6 @@
             <p class="baseline-details-empty">Start chatting and I'll learn about you.</p>
           </div>
         </div>
-
-
       </div>
     </aside>
   </div>
@@ -301,7 +285,7 @@
       <h3>Create New Topic</h3>
       <label>Topic name</label>
       <input type="text" id="topicNameInput" placeholder="e.g., Machine Learning, Fitness">
-      <label>Initial status (optional)</label>
+      <label>Initial context (optional)</label>
       <textarea id="topicDescInput" rows="2" placeholder="Describe yourself in this area..."></textarea>
       <div class="dialog-actions">
         <button class="btn-cancel" id="topicCancelBtn">Cancel</button>
@@ -315,7 +299,7 @@
     <div class="dialog">
       <h3>Merge Topics</h3>
       <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;">Select a topic to merge into the current
-        one. All chats will be reassigned and the status will be regenerated.</p>
+        one. All chats will be reassigned and the profile will be regenerated.</p>
       <label>Merge into current topic:</label>
       <div class="merge-current-topic" id="mergeCurrentTopic" style="font-weight:600;margin-bottom:8px;"></div>
       <label>Topic to absorb:</label>

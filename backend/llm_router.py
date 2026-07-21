@@ -1,4 +1,4 @@
-"""Unified LLM interface supporting OpenAI and Google Gemini."""
+"""Unified LLM interface supporting OpenAI, Google Gemini, and OpenRouter."""
 
 import os
 import json
@@ -38,6 +38,31 @@ def _fallback_response(raw: str) -> dict:
 
 
 DEFAULT_MODEL = "gemini-3-flash-preview"
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+
+def _map_openrouter_model(model: str) -> str:
+    """Map internal model names to OpenRouter slugs."""
+    if "/" in model:
+        return model
+    if model.startswith("gemini-"):
+        return f"google/{model}"
+    if model.startswith("gpt-"):
+        return f"openai/{model}"
+    return model
+
+
+def _openrouter_client():
+    from openai import AsyncOpenAI
+
+    return AsyncOpenAI(
+        base_url=OPENROUTER_BASE_URL,
+        api_key=os.getenv("OPENROUTER_API_KEY"),
+        default_headers={
+            "HTTP-Referer": os.getenv("OPENROUTER_SITE_URL", "http://localhost:8000"),
+            "X-OpenRouter-Title": os.getenv("OPENROUTER_APP_NAME", "Loom"),
+        },
+    )
 
 
 def _route_provider(model: str) -> str:
@@ -107,13 +132,15 @@ class LLMRouter:
         self.provider = provider or os.getenv("LLM_PROVIDER", "gemini")
 
     def _resolve_provider(self, model: str) -> str:
+        if self.provider == "openrouter":
+            return "openrouter"
         if model.startswith("gpt-"):
             return "openai"
         if model.startswith("gemini-"):
             return "gemini"
         if self.provider in ("openai", "gemini"):
             return self.provider
-        return self.provider  # will raise in caller if not openai/gemini
+        return self.provider  # will raise in caller if not openai/gemini/openrouter
 
     # ── Non-streaming chat (existing) ─────────────────────────────────────
 
@@ -128,6 +155,10 @@ class LLMRouter:
     ) -> dict:
         model = model or DEFAULT_MODEL
         provider = self._resolve_provider(model)
+        if provider == "openrouter":
+            return await self._openrouter_chat(
+                messages, system_prompt, json_mode, model, attachments, use_search,
+            )
         if provider == "openai":
             return await self._openai_chat(messages, system_prompt, json_mode, model, attachments)
         elif provider == "gemini":
@@ -148,6 +179,31 @@ class LLMRouter:
         kwargs = {"model": model, "messages": full_messages, "temperature": 0.7}
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
+
+        response = await client.chat.completions.create(**kwargs)
+        content = response.choices[0].message.content or ""
+        if json_mode:
+            try:
+                return _extract_json(content)
+            except (ValueError, json.JSONDecodeError):
+                return _fallback_response(content)
+        return {"response": content}
+
+    async def _openrouter_chat(
+        self, messages: list[dict], system_prompt: str, json_mode: bool,
+        model: str = DEFAULT_MODEL,
+        attachments: Optional[list[dict]] = None,
+        use_search: bool = False,
+    ) -> dict:
+        client = _openrouter_client()
+        full_messages = _build_openai_messages(messages, system_prompt, attachments)
+        or_model = _map_openrouter_model(model)
+
+        kwargs = {"model": or_model, "messages": full_messages, "temperature": 0.7}
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+        if use_search:
+            kwargs["tools"] = [{"type": "openrouter:web_search"}]
 
         response = await client.chat.completions.create(**kwargs)
         content = response.choices[0].message.content or ""
@@ -194,7 +250,12 @@ class LLMRouter:
         """Async generator yielding text chunks (plain text, no JSON mode)."""
         model = model or DEFAULT_MODEL
         provider = self._resolve_provider(model)
-        if provider == "openai":
+        if provider == "openrouter":
+            async for chunk in self._openrouter_stream(
+                messages, system_prompt, model, attachments, use_search,
+            ):
+                yield chunk
+        elif provider == "openai":
             async for chunk in self._openai_stream(messages, system_prompt, model, attachments):
                 yield chunk
         elif provider == "gemini":
@@ -226,6 +287,31 @@ class LLMRouter:
                 if not text.strip():
                     continue
             yield text
+
+    async def _openrouter_stream(
+        self, messages: list[dict], system_prompt: str,
+        model: str = DEFAULT_MODEL,
+        attachments: Optional[list[dict]] = None,
+        use_search: bool = False,
+    ) -> AsyncGenerator[str, None]:
+        client = _openrouter_client()
+        full_messages = _build_openai_messages(messages, system_prompt, attachments)
+        or_model = _map_openrouter_model(model)
+
+        kwargs = {
+            "model": or_model,
+            "messages": full_messages,
+            "temperature": 0.7,
+            "stream": True,
+        }
+        if use_search:
+            kwargs["tools"] = [{"type": "openrouter:web_search"}]
+
+        response = await client.chat.completions.create(**kwargs)
+        async for chunk in response:
+            delta = chunk.choices[0].delta if chunk.choices else None
+            if delta and delta.content:
+                yield delta.content
 
     async def _openai_stream(
         self, messages: list[dict], system_prompt: str,

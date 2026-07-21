@@ -537,7 +537,10 @@ test('_toggleChunkLabel sets dirty flag BEFORE logging the event', () => {
   assert.ok(fnStart >= 0, 'Should find _toggleChunkLabel definition');
   const fnBlock = appSrc.substring(fnStart, fnStart + 1500);
   const dirtyIdx = fnBlock.indexOf('Sidebar._labelsDirty = true');
-  const logIdx = fnBlock.indexOf("StudyLog.event('chunk_labeled'");
+  // Event was renamed from 'chunk_labeled' to 'current_concept_toggled' in redesign
+  const logIdx = fnBlock.indexOf("StudyLog.event('chunk_labeled'") >= 0
+    ? fnBlock.indexOf("StudyLog.event('chunk_labeled'")
+    : fnBlock.indexOf("StudyLog.event('current_concept_toggled'");
   assert.ok(dirtyIdx >= 0 && logIdx >= 0,
     'Both dirty flag set and StudyLog event should exist in _toggleChunkLabel');
   assert.ok(dirtyIdx < logIdx,

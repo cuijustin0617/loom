@@ -284,6 +284,60 @@ class TestLLMRouterOpenAI:
             assert isinstance(messages[-1]["content"], str)
 
 
+# ── OpenRouter routing ────────────────────────────────────────────────────────
+
+class TestOpenRouter:
+    @pytest.mark.asyncio
+    async def test_openrouter_json_mode(self):
+        router = LLMRouter(provider="openrouter")
+        with patch("llm_router._openrouter_client") as mock_client_factory:
+            mock_client = mock_client_factory.return_value
+            mock_client.chat.completions.create = AsyncMock(return_value=_openai_mock('{"response": "hello"}'))
+            result = await router.chat([{"role": "user", "content": "hi"}], "sys", json_mode=True)
+            assert result == {"response": "hello"}
+
+    @pytest.mark.asyncio
+    async def test_openrouter_maps_gemini_model(self):
+        router = LLMRouter(provider="openrouter")
+        with patch("llm_router._openrouter_client") as mock_client_factory:
+            mock_client = mock_client_factory.return_value
+            mock_create = AsyncMock(return_value=_openai_mock('{"ok": true}'))
+            mock_client.chat.completions.create = mock_create
+            await router.chat([{"role": "user", "content": "hi"}], "sys", model="gemini-3-flash-preview")
+            kwargs = mock_create.call_args.kwargs or mock_create.call_args[1]
+            assert kwargs["model"] == "google/gemini-3-flash-preview"
+
+    @pytest.mark.asyncio
+    async def test_openrouter_use_search_adds_tool(self):
+        router = LLMRouter(provider="openrouter")
+        with patch("llm_router._openrouter_client") as mock_client_factory:
+            mock_client = mock_client_factory.return_value
+            mock_create = AsyncMock(return_value=_openai_mock('{"ok": true}'))
+            mock_client.chat.completions.create = mock_create
+            await router.chat([{"role": "user", "content": "hi"}], "sys", use_search=True)
+            kwargs = mock_create.call_args.kwargs or mock_create.call_args[1]
+            assert kwargs["tools"] == [{"type": "openrouter:web_search"}]
+
+    @pytest.mark.asyncio
+    async def test_openrouter_stream(self):
+        router = LLMRouter(provider="openrouter")
+
+        chunk1 = MagicMock()
+        chunk1.choices = [MagicMock()]
+        chunk1.choices[0].delta.content = "Hello"
+
+        async def fake_async_iter():
+            yield chunk1
+
+        with patch("llm_router._openrouter_client") as mock_client_factory:
+            mock_client = mock_client_factory.return_value
+            mock_client.chat.completions.create = AsyncMock(return_value=fake_async_iter())
+            chunks = []
+            async for text in router.chat_stream([{"role": "user", "content": "hi"}], "sys"):
+                chunks.append(text)
+            assert chunks == ["Hello"]
+
+
 # ── LLMRouter.chat with mocked Gemini (new SDK) ──────────────────────────────
 
 class TestLLMRouterGemini:

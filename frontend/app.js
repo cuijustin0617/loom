@@ -700,15 +700,17 @@ const App = {
       e.target.value = '';
     });
 
-    // Google Search grounding toggle (on by default)
+    // Google Search grounding toggle (hidden in probe mode; search always enabled)
     const searchBtn = document.getElementById('searchToggleBtn');
-    searchBtn.classList.add('active');
-    searchBtn.title = 'Google Search ON';
-    searchBtn.addEventListener('click', () => {
-      this.useSearch = !this.useSearch;
-      searchBtn.classList.toggle('active', this.useSearch);
-      searchBtn.title = this.useSearch ? 'Google Search ON' : 'Google Search grounding';
-    });
+    if (searchBtn) {
+      searchBtn.classList.add('active');
+      searchBtn.title = 'Google Search ON';
+      searchBtn.addEventListener('click', () => {
+        this.useSearch = !this.useSearch;
+        searchBtn.classList.toggle('active', this.useSearch);
+        searchBtn.title = this.useSearch ? 'Google Search ON' : 'Google Search grounding';
+      });
+    }
 
     // Logout
     document.getElementById('logoutBtn').addEventListener('click', () => {
@@ -742,9 +744,8 @@ const App = {
     this._initCollapseToggle('collapseLeftBtn', 'leftSidebar', 'left');
     this._initCollapseToggle('collapseRightBtn', 'rightSidebar', 'right');
 
-    // Model is fixed to Gemini 3 Flash (no selector)
-    Storage.setChatModel('gemini-3-flash-preview');
-    Storage.setSidebarModel('gemini-3-flash-preview');
+    // Model selector
+    this._initModelSelect();
 
     // Topic selector in input bar (hidden, synced by custom picker)
     const topicSel = document.getElementById('topicSelect');
@@ -763,6 +764,28 @@ const App = {
       const text = document.getElementById('chatInput').value;
       TopicSuggester.onInputChange(text);
     });
+  },
+
+  _initModelSelect() {
+    const select = document.getElementById('modelSelect');
+    const footer = document.getElementById('modelFooterNote');
+    if (!select) return;
+
+    const current = Storage.getChatModel();
+    select.innerHTML = Storage.MODEL_OPTIONS.map(
+      (m) => `<option value="${m.id}">${m.label}</option>`,
+    ).join('');
+    select.value = Storage.MODEL_OPTIONS.some((m) => m.id === current)
+      ? current
+      : Storage.MODEL_OPTIONS[0].id;
+
+    const syncModel = (modelId) => {
+      Storage.setChatModel(modelId);
+      Storage.setSidebarModel(modelId);
+    };
+
+    syncModel(select.value);
+    select.addEventListener('change', () => syncModel(select.value));
   },
 
   _initResize(handleId, sidebarId, side) {
@@ -943,10 +966,17 @@ const App = {
           title: ctxEl.dataset.contextTitle || '',
           question: ctxEl.dataset.contextQuestion || fullText,
         };
-        const isLinkedChat = fullText.includes('--- Previous chat history ---');
-        const wrapper = isLinkedChat
-          ? `[The user is building on a previous conversation they had. Here is that conversation and how it connects:\n${fullText}]`
-          : `[Context from my knowledge map: ${fullText}]`;
+        const isLinkedChat = fullText.includes('--- Previous conversation ---');
+        const isPastChat = contextMeta?.type === 'past_chat';
+        const isCurrentProfile = contextMeta?.type === 'current_profile';
+        const isFutureDirection = contextMeta?.type === 'future_direction' || contextMeta?.type === 'direction_card';
+        const wrapper = isLinkedChat || isPastChat
+          ? `[The user is building on a previous conversation. Past conversation:\n${fullText}]`
+          : isCurrentProfile
+          ? `[User's current profile context: ${fullText}]`
+          : isFutureDirection
+          ? `[Exploring suggested direction: ${fullText}]`
+          : `[Additional context: ${fullText}]`;
         content = content
           ? `${wrapper}\n\n${content}`
           : (contextMeta?.type === 'direction_card'
@@ -1070,6 +1100,7 @@ const App = {
         : [];
     }
 
+    const currentTopic = this.selectedTopicId ? Storage.getTopic(this.selectedTopicId) : null;
     const reqBody = {
       chatId: this.currentChatId,
       messages,
@@ -1082,6 +1113,7 @@ const App = {
       allChatSummaries: sameTopicSummaries,
       condition: STUDY_CONDITION,
       personalDetails: STUDY_CONDITION === 'baseline' ? Storage.getPersonalDetails() : [],
+      topicStatus: (currentTopic && STUDY_CONDITION === 'loom') ? Sidebar._serializeStatus(currentTopic.statusSummary) : '',
     };
     if (apiAttachments) {
       reqBody.attachments = apiAttachments;
@@ -1113,27 +1145,27 @@ const App = {
             this._updateStreamingMessage(assistantEl, fullResponse);
           } else if (evt.type === 'done') {
             fullResponse = evt.response || fullResponse;
-            console.log('[Module2] done event received, response length:', fullResponse.length);
-            console.log('[Module2] has markers:', /\{~\d+\}/.test(fullResponse));
-            console.log('[Module2] has conn block:', fullResponse.includes('{~CONNECTIONS~}'));
 
             const assistantMsgId = 'msg_' + Utils.generateId();
             this._finalizeStreamingMessage(assistantEl, fullResponse, assistantMsgId);
 
-            const { mainText: cleanContent, connectionsJson: savedConns } = this._stripConnectionBlock(this._stripSearchArtifacts(fullResponse));
-            console.log('[Module2] connections parsed:', savedConns?.length || 0);
-            const cleanText = cleanContent.replace(/\{~\d+\}/g, '');
+            const { mainText: strippedMain } = this._stripConnectionBlock(this._stripSearchArtifacts(fullResponse));
             const assistantMsg = {
               id: assistantMsgId,
               chatId: this.currentChatId,
               role: 'assistant',
-              content: cleanText,
-              rawContent: cleanContent,
-              connections: savedConns || null,
+              content: strippedMain,
+              rawContent: strippedMain,
+              injectedPastChats: evt.injectedPastChats || null,
               contextBlock: null,
               timestamp: Utils.timestamp(),
             };
             Storage.addMessage(this.currentChatId, assistantMsg);
+
+            // Render injected past context panel above assistant response
+            if (evt.injectedPastChats && evt.injectedPastChats.length > 0) {
+              this._renderInjectedPastPanel(assistantEl, evt.injectedPastChats);
+            }
 
             if (STUDY_CONDITION === 'loom') {
               if (evt.topic && evt.topic.confidence > 0.35) {
@@ -1144,11 +1176,7 @@ const App = {
               }
               const chat = Storage.getChat(this.currentChatId);
               if (!this._isUnassignedTopic(chat?.topicId)) {
-                if (savedConns && savedConns.length > 0) {
-                  Sidebar.showConnections(savedConns);
-                } else {
-                  Sidebar.clearConnections();
-                }
+                Sidebar.showPastChats(evt.injectedPastChats || []);
               }
             }
           } else if (evt.type === 'error') {
@@ -1304,8 +1332,8 @@ const App = {
 
     const parts = chunks.map((chunk, i) => {
       const label = chunkLabels[String(i)];
-      if (label === 'understood') return chunk + '\n[USER: understood this section]';
-      if (label === 'unsure') return chunk + '\n[USER: unsure about this section]';
+      if (label === 'clear' || label === 'understood') return chunk + '\n[USER: clear on this section]';
+      if (label === 'needs_review' || label === 'unsure') return chunk + '\n[USER: needs review on this section]';
       return chunk;
     });
     return parts.join('\n\n');
@@ -1324,19 +1352,18 @@ const App = {
     const questionSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="18" height="18"><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><circle cx="12" cy="17" r="0.5" fill="currentColor"/></svg>';
 
     const chunksHtml = chunks.map((chunk, i) => {
-      let rendered = Utils.renderMarkdown(chunk);
-      rendered = this._parseConnectionMarkers(rendered);
+      const rendered = Utils.renderMarkdown(chunk);
       const label = chunkLabels?.[String(i)] || '';
-      const understoodActive = label === 'understood' ? ' active' : '';
-      const unsureActive = label === 'unsure' ? ' active' : '';
-      const labeledClass = label === 'understood' ? ' labeled-understood'
-        : label === 'unsure' ? ' labeled-unsure' : '';
+      const clearActive = label === 'clear' ? ' active' : '';
+      const reviewActive = label === 'needs_review' ? ' active' : '';
+      const labeledClass = label === 'clear' ? ' labeled-understood'
+        : label === 'needs_review' ? ' labeled-unsure' : '';
 
       return `<div class="msg-chunk${labeledClass}" data-chunk-idx="${i}" data-msg-id="${msgId}">
         <div class="chunk-content">${rendered}</div>
         <div class="chunk-label-bar">
-          <button class="chunk-label-btn${understoodActive}" data-label="understood" title="I understood this (or double-click chunk)">${checkSvg}</button>
-          <button class="chunk-label-btn${unsureActive}" data-label="unsure" title="I'm unsure about this">${questionSvg}</button>
+          <button class="chunk-label-btn${clearActive}" data-label="clear" title="Clear (I understand this)">${checkSvg}</button>
+          <button class="chunk-label-btn${reviewActive}" data-label="needs_review" title="Needs review">${questionSvg}</button>
         </div>
       </div>`;
     }).join('');
@@ -1398,13 +1425,12 @@ const App = {
     }
 
     chunkEl.classList.remove('labeled-understood', 'labeled-unsure');
-    if (newLabel) {
-      chunkEl.classList.add(`labeled-${newLabel}`);
-    }
+    if (newLabel === 'clear') chunkEl.classList.add('labeled-understood');
+    else if (newLabel === 'needs_review') chunkEl.classList.add('labeled-unsure');
 
     Sidebar._labelsDirty = true;
 
-    StudyLog.event('chunk_labeled', {
+    StudyLog.event('current_concept_toggled', {
       chatId,
       msgId,
       chunkIdx: parseInt(chunkIdx),
@@ -1420,11 +1446,6 @@ const App = {
     container.appendChild(el);
     el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     return el;
-  },
-
-  _parseConnectionMarkers(html) {
-    return html.replace(/((?:\S+\s+){0,2}\S+)\s*\{~(\d+)\}/g,
-      '<span class="conn-marker loading" data-conn-id="$2">$1<span class="conn-dots"></span></span>');
   },
 
   _stripSearchArtifacts(text) {
@@ -1446,40 +1467,9 @@ const App = {
     }
   },
 
-  _updateStreamingMessage(el, text) {
-    const contentEl = el.querySelector('.message-content');
-    const { mainText } = this._stripConnectionBlock(this._stripSearchArtifacts(text));
-    const rendered = Utils.renderMarkdown(mainText);
-    const withMarkers = this._parseConnectionMarkers(rendered);
-    contentEl.innerHTML = withMarkers + '<span class="streaming-cursor"></span>';
-  },
-
-  _finalizeStreamingMessage(el, text, msgId) {
-    const contentEl = el.querySelector('.message-content');
-    const { mainText, connectionsJson } = this._stripConnectionBlock(this._stripSearchArtifacts(text));
-    const markersInMainText = mainText.match(/\{~\d+\}/g);
-    console.log('[Module2 finalize] mainText markers:', markersInMainText);
-    console.log('[Module2 finalize] connectionsJson:', connectionsJson?.length || 0);
-
-    const { html: chunkedHtml, chunked } = this._renderChunkedContent(mainText, msgId || '', null);
-
-    if (chunked) {
-      contentEl.innerHTML = chunkedHtml;
-    } else {
-      const rendered = Utils.renderMarkdown(mainText);
-      const withMarkers = this._parseConnectionMarkers(rendered);
-      contentEl.innerHTML = withMarkers;
-    }
-
-    if (connectionsJson && connectionsJson.length > 0) {
-      this._resolveConnectionMarkers(contentEl, connectionsJson);
-    } else {
-      contentEl.querySelectorAll('.conn-marker').forEach(m => m.remove());
-    }
-
-    if (chunked) {
-      this._bindChunkLabelHandlers(contentEl);
-    }
+  _parseConnectionMarkers(html) {
+    return html.replace(/((?:\S+\s+){0,2}\S+)\s*\{~(\d+)\}/g,
+      '<span class="conn-marker loading" data-conn-id="$2">$1<span class="conn-dots"></span></span>');
   },
 
   _resolveConnectionMarkers(contentEl, connectionsJson) {
@@ -1541,14 +1531,11 @@ const App = {
         </div>
       `;
       document.body.appendChild(card);
-
       card.querySelector('.conn-card-close').addEventListener('click', () => this._hideConnCard());
-
       card.querySelector('.conn-card-goto').addEventListener('click', (e) => {
         e.preventDefault();
         const chatId = card.dataset.targetChatId;
         if (chatId) {
-          StudyLog.event('module2_connection_clicked', { chatId: this.currentChatId, connectionChatId: chatId, action: 'view' });
           this._hideConnCard();
           const chat = Storage.getChat(chatId);
           if (chat) {
@@ -1560,16 +1547,12 @@ const App = {
           }
         }
       });
-
       card.querySelector('.conn-card-build').addEventListener('click', () => {
         const chatId = card.dataset.targetChatId || '';
         const insight = card.dataset.insight || '';
         const title = card.dataset.title || '';
-
         const parts = [];
         if (insight) parts.push(`Connection to "${title}": ${insight}`);
-
-        // Include the full past chat history for rich context
         if (chatId) {
           const pastMessages = Storage.getMessages(chatId);
           if (pastMessages.length > 0) {
@@ -1582,12 +1565,9 @@ const App = {
             parts.push('--- End of previous chat ---');
           }
         }
-        const contextText = parts.join('\n');
-
-        StudyLog.event('module2_connection_clicked', { chatId: this.currentChatId, connectionChatId: chatId, action: 'build' });
         this._hideConnCard();
-        if (contextText) {
-          this.setContextBlock(contextText, title, {
+        if (parts.length > 0) {
+          this.setContextBlock(parts.join('\n'), title, {
             type: 'linked_chat_card',
             title: title || 'Past chat',
             insight: insight || '',
@@ -1597,13 +1577,11 @@ const App = {
           document.getElementById('chatInput').focus();
         }
       });
-
       document.addEventListener('click', (e) => {
         if (card.classList.contains('visible') && !card.contains(e.target) && !e.target.closest('.conn-marker')) {
           this._hideConnCard();
         }
       });
-
       this._connCardEl = card;
     }
     return this._connCardEl;
@@ -1611,7 +1589,6 @@ const App = {
 
   _showConnCard(marker) {
     const card = this._getConnCard();
-
     const title = marker.dataset.connChatTitle || 'Past chat';
     const userAsked = marker.dataset.connUserAsked || '';
     const aiCovered = marker.dataset.connAiCovered || '';
@@ -1620,90 +1597,59 @@ const App = {
 
     card.querySelector('.conn-card-title').textContent = title;
     card.querySelector('.conn-card-insight').textContent = insight;
-
     const summaryEl = card.querySelector('.conn-card-summary');
-    const userRow = card.querySelector('.conn-card-row:first-child');
-    const aiRow = card.querySelector('.conn-card-row:last-child');
-
     if (userAsked || aiCovered) {
       summaryEl.style.display = '';
       card.querySelector('.conn-card-user-asked').textContent = userAsked || '—';
       card.querySelector('.conn-card-ai-covered').textContent = aiCovered || '—';
-      userRow.style.display = userAsked ? '' : 'none';
-      aiRow.style.display = aiCovered ? '' : 'none';
     } else {
       summaryEl.style.display = 'none';
     }
-
     card.dataset.targetChatId = chatId;
     card.dataset.userAsked = userAsked;
     card.dataset.aiCovered = aiCovered;
     card.dataset.insight = insight;
     card.dataset.title = title;
-
-    const gotoLink = card.querySelector('.conn-card-goto');
-    gotoLink.style.display = chatId ? '' : 'none';
-
+    card.querySelector('.conn-card-goto').style.display = chatId ? '' : 'none';
     card.classList.add('visible');
     this._connCardMarker = marker;
 
-    // Position anchored to marker
     const positionCard = () => {
       const rect = marker.getBoundingClientRect();
       const cardRect = card.getBoundingClientRect();
       const chatMessages = document.getElementById('chatMessages');
       const chatRect = chatMessages?.getBoundingClientRect();
-      // Check if marker is still visible in viewport
-      if (rect.bottom < 0 || rect.top > window.innerHeight) {
-        this._hideConnCard();
-        return;
-      }
+      if (rect.bottom < 0 || rect.top > window.innerHeight) { this._hideConnCard(); return; }
       const topBound = Math.max(12, (chatRect?.top || 0) + 8);
       const bottomBound = Math.min(window.innerHeight - 12, (chatRect?.bottom || window.innerHeight) - 8);
-      const belowTop = rect.bottom + 8;
-      const aboveTop = rect.top - cardRect.height - 8;
-
-      // Prefer below the marker, then above, then clamp within visible chat area.
-      let top = belowTop;
-      if (belowTop + cardRect.height > bottomBound && aboveTop >= topBound) {
-        top = aboveTop;
+      let top = rect.bottom + 8;
+      if (top + cardRect.height > bottomBound && rect.top - cardRect.height - 8 >= topBound) {
+        top = rect.top - cardRect.height - 8;
       }
-      if (top + cardRect.height > bottomBound) {
-        top = bottomBound - cardRect.height;
-      }
-      if (top < topBound) {
-        top = topBound;
-      }
+      top = Math.max(topBound, Math.min(top, bottomBound - cardRect.height));
       let left = rect.left + rect.width / 2 - cardRect.width / 2;
       left = Math.max(12, Math.min(left, window.innerWidth - cardRect.width - 12));
       card.style.top = top + 'px';
       card.style.left = left + 'px';
     };
-
     requestAnimationFrame(positionCard);
 
-    // Follow scroll and dismiss when marker leaves viewport
     if (this._connScrollHandler) {
       const chatMessages = document.getElementById('chatMessages');
-      chatMessages.removeEventListener('scroll', this._connScrollHandler);
+      chatMessages?.removeEventListener('scroll', this._connScrollHandler);
     }
     this._connScrollHandler = () => {
       if (!card.classList.contains('visible')) return;
       requestAnimationFrame(positionCard);
     };
-    const chatMessages = document.getElementById('chatMessages');
-    chatMessages.addEventListener('scroll', this._connScrollHandler, { passive: true });
+    document.getElementById('chatMessages')?.addEventListener('scroll', this._connScrollHandler, { passive: true });
   },
 
   _hideConnCard() {
-    if (this._connCardEl && this._connCardEl.classList.contains('visible')) {
-      StudyLog.event('connection_card_closed', { chatId: this.currentChatId });
-    }
     if (this._connCardEl) this._connCardEl.classList.remove('visible');
     this._connCardMarker = null;
     if (this._connScrollHandler) {
-      const chatMessages = document.getElementById('chatMessages');
-      if (chatMessages) chatMessages.removeEventListener('scroll', this._connScrollHandler);
+      document.getElementById('chatMessages')?.removeEventListener('scroll', this._connScrollHandler);
       this._connScrollHandler = null;
     }
   },
@@ -1713,17 +1659,53 @@ const App = {
       marker.style.cursor = 'pointer';
       marker.addEventListener('click', (e) => {
         e.stopPropagation();
-        StudyLog.event('connection_marker_clicked', { connId: marker.dataset.connId, chatId: this.currentChatId });
         this._showConnCard(marker);
       });
-      marker.addEventListener('mouseenter', () => {
-        StudyLog.event('connection_marker_hovered', { connId: marker.dataset.connId, chatId: this.currentChatId });
-        Sidebar.highlightSidebarCard(marker.dataset.connId, true);
-      });
-      marker.addEventListener('mouseleave', () => {
-        Sidebar.highlightSidebarCard(marker.dataset.connId, false);
-      });
     });
+  },
+
+  _updateStreamingMessage(el, text) {
+    const contentEl = el.querySelector('.message-content');
+    const { mainText } = this._stripConnectionBlock(this._stripSearchArtifacts(text));
+    const rendered = Utils.renderMarkdown(mainText);
+    contentEl.innerHTML = this._parseConnectionMarkers(rendered) + '<span class="streaming-cursor"></span>';
+  },
+
+  _finalizeStreamingMessage(el, text, msgId) {
+    const contentEl = el.querySelector('.message-content');
+    const { mainText, connectionsJson } = this._stripConnectionBlock(this._stripSearchArtifacts(text));
+    const { html: chunkedHtml, chunked } = this._renderChunkedContent(mainText, msgId || '', null);
+    if (chunked) {
+      contentEl.innerHTML = chunkedHtml;
+    } else {
+      contentEl.innerHTML = this._parseConnectionMarkers(Utils.renderMarkdown(mainText));
+    }
+    if (connectionsJson && connectionsJson.length > 0) {
+      this._resolveConnectionMarkers(contentEl, connectionsJson);
+    } else {
+      contentEl.querySelectorAll('.conn-marker').forEach(m => m.remove());
+    }
+    if (chunked) {
+      this._bindChunkLabelHandlers(contentEl);
+    }
+  },
+
+  // ── Injected Past Context Panel ────────────────────────────────────────
+
+  _renderInjectedPastPanel(assistantEl, injectedPastChats) {
+    if (!injectedPastChats || injectedPastChats.length === 0) return;
+    const panel = document.createElement('div');
+    panel.className = 'past-context-panel';
+    const cardsHtml = injectedPastChats.map(chat => {
+      const title = Utils.escapeHtml(chat.title || 'Past conversation');
+      const excerpt = chat.userAsked ? Utils.escapeHtml(chat.userAsked.slice(0, 80)) : '';
+      return `<span class="past-context-tag" title="${excerpt}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="9" height="9"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        ${title}
+      </span>`;
+    }).join('');
+    panel.innerHTML = `<span class="past-context-label">Context used:</span>${cardsHtml}`;
+    assistantEl.insertBefore(panel, assistantEl.firstChild);
   },
 
   _isUnassignedTopic(topicId) {
@@ -2088,38 +2070,19 @@ const App = {
     const fullDiv = document.getElementById('contextFull');
     const labelEl = document.getElementById('contextBlockLabel');
 
-    if (meta && meta.type === 'direction_card') {
-      const cardType = Utils.escapeHtml(meta.cardType || 'extend');
-      const cardTitle = Utils.escapeHtml(meta.title || label || 'Suggested next question');
-      const cardQuestion = Utils.escapeHtml(meta.question || fullText);
-      compact.innerHTML = `<div class="context-preview-card type-${cardType}">
-        <div class="context-preview-type">${cardType}</div>
-        <div class="context-preview-title">${cardTitle}</div>
-        <div class="context-preview-question">${cardQuestion}</div>
-      </div>`;
-      if (labelEl) labelEl.textContent = 'Added module';
-    } else if (meta && meta.type === 'linked_chat_card') {
-      const cardTitle = Utils.escapeHtml(meta.title || label || 'Past chat');
-      const insight = Utils.escapeHtml(meta.insight || '');
-      const userAsked = Utils.escapeHtml(meta.userAsked || '');
-      const aiCovered = Utils.escapeHtml(meta.aiCovered || '');
-      compact.innerHTML = `<div class="context-preview-linked">
-        <div class="context-preview-linked-header">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
-            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-          </svg>
-          <span class="context-preview-linked-title">${cardTitle}</span>
-        </div>
-        ${userAsked ? `<div class="context-preview-linked-row"><span class="context-preview-linked-label">Asked</span><span class="context-preview-linked-value">${userAsked}</span></div>` : ''}
-        ${aiCovered ? `<div class="context-preview-linked-row"><span class="context-preview-linked-label">Learned</span><span class="context-preview-linked-value">${aiCovered}</span></div>` : ''}
-        ${insight ? `<div class="context-preview-linked-insight">${insight}</div>` : ''}
-      </div>`;
-      if (labelEl) labelEl.textContent = 'Added module';
-    } else {
-      compact.textContent = `• ${label}: "${Utils.truncate(fullText, 60)}"`;
-      if (labelEl) labelEl.textContent = 'Added context';
-    }
+    const phaseLabels = {
+      'past_chat': 'Past Context',
+      'current_profile': 'Current Profile',
+      'future_direction': 'Future Direction',
+      'direction_card': 'Future Direction',
+    };
+    const phaseLabel = (meta && phaseLabels[meta.type]) || 'Context';
+    if (labelEl) labelEl.textContent = phaseLabel;
+
+    const displayLabel = Utils.escapeHtml(label || '');
+    const displayExcerpt = Utils.escapeHtml(Utils.truncate(fullText.replace(/\[.*?\]\n\n/s, ''), 80));
+    compact.innerHTML = `<strong>${displayLabel}</strong> — ${displayExcerpt}`;
+
     fullArea.value = fullText;
     block.dataset.contextType = meta?.type || '';
     block.dataset.contextCardType = meta?.cardType || '';
@@ -2128,8 +2091,7 @@ const App = {
     fullDiv.style.display = 'none';
     document.getElementById('contextToggleBtn').textContent = 'Expand';
     block.style.display = 'block';
-    const sourceType = fullText.includes('--- Previous chat history ---') ? 'connection' : label === 'Status Summary' ? 'status' : 'direction';
-    StudyLog.event('context_block_added', { chatId: this.currentChatId, sourceType });
+    StudyLog.event('context_block_added', { chatId: this.currentChatId, sourceType: meta?.type || 'unknown' });
   },
 
   clearContextBlock() {
@@ -2199,11 +2161,10 @@ const App = {
     }
 
     if (!this._isUnassignedTopic(chat?.topicId)) {
-      const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant' && m.connections?.length > 0);
+      // Show past chats from the most recent assistant message that has injected context
+      const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant' && m.injectedPastChats?.length > 0);
       if (lastAssistant) {
-        Sidebar.showConnections(lastAssistant.connections);
-      } else {
-        Sidebar.clearConnections();
+        Sidebar.showPastChats(lastAssistant.injectedPastChats);
       }
     }
 
@@ -2248,7 +2209,7 @@ const App = {
       if (shuffleBtn) {
         shuffleBtn.addEventListener('click', (e) => {
           e.stopPropagation();
-          StudyLog.event('module3_shuffled', { location: 'welcome', topicId: null });
+          StudyLog.event('future_directions_refreshed', { location: 'welcome', topicId: null });
           // Re-render welcome with refreshed suggestions (triggers sidebar.shuffleDirections for each topic)
           shuffleBtn.classList.add('loading');
           const promises = suggestions.map(s => Sidebar.shuffleDirections('welcome', s.topicId));
@@ -2312,7 +2273,7 @@ const App = {
         const idx = parseInt(card.dataset.suggestionIdx, 10);
         const s = suggestions[idx];
         if (s) {
-          StudyLog.event('welcome_suggestion_clicked', { topicId: s.topicId, suggestionIdx: idx });
+          StudyLog.event('future_suggestion_clicked', { topicId: s.topicId, suggestionIdx: idx });
           this._startSuggestedChat(s);
         }
       });
@@ -2534,16 +2495,13 @@ const App = {
     let renderedContent;
     let isChunked = false;
     if (msg.role === 'assistant') {
-      const hasConns = msg.connections && msg.connections.length > 0 && msg.rawContent;
-      const rawText = hasConns ? msg.rawContent : msg.content;
+      const rawText = msg.content || '';
       const { html: chunkedHtml, chunked } = this._renderChunkedContent(rawText, msg.id || '', msg.chunkLabels);
       if (chunked) {
         isChunked = true;
         renderedContent = chunkedHtml;
-      } else if (hasConns) {
-        renderedContent = this._parseConnectionMarkers(Utils.renderMarkdown(msg.rawContent));
       } else {
-        renderedContent = Utils.renderMarkdown(msg.content);
+        renderedContent = this._parseConnectionMarkers(Utils.renderMarkdown(rawText));
       }
     } else {
       renderedContent = Utils.escapeHtml(displayContent);
@@ -2579,9 +2537,9 @@ const App = {
       });
     }
 
-    if (msg.role === 'assistant' && msg.connections && msg.connections.length > 0) {
-      const contentEl = el.querySelector('.message-content');
-      this._resolveConnectionMarkers(contentEl, msg.connections);
+    // Render injected past context panel if present
+    if (msg.role === 'assistant' && msg.injectedPastChats && msg.injectedPastChats.length > 0) {
+      this._renderInjectedPastPanel(el, msg.injectedPastChats);
     }
 
     if (isChunked) {

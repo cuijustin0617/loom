@@ -1,4 +1,4 @@
-/* Right sidebar: 3 modules + drag-and-drop */
+/* Right sidebar: Unified Past · Current · Future temporal context probe */
 
 const Sidebar = {
   currentTopicId: null,
@@ -6,37 +6,46 @@ const Sidebar = {
   _labelsDirty: false,
 
   init() {
-    this._initStatusEdit();
     this._initStatusDrag();
     this._initStatusUpdate();
     this._initMergeDialog();
-    this._initMoveDialog();
     this._initShuffle();
     this._initModuleCollapse();
+    if (localStorage.getItem('loom_sidebarTab') === 'graph') {
+      localStorage.setItem('loom_sidebarTab', 'list');
+    }
   },
+
+  _activateListTab() {
+    if (this.currentTopicId) {
+      ['sectionPast', 'sectionCurrent', 'sectionFuture'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = 'block';
+      });
+    }
+  },
+
+  // ── Lifecycle ─────────────────────────────────────────────────────────
 
   show(topicId) {
     if (STUDY_CONDITION === 'baseline') return;
     this.currentTopicId = topicId;
-    StudyLog.event('module1_viewed', { topicId });
+    StudyLog.event('past_lookup', { topicId });
     document.getElementById('sidebarEmpty').style.display = 'none';
-    document.getElementById('moduleStatus').style.display = 'block';
-    document.getElementById('moduleDirections').style.display = 'block';
 
     const topic = Storage.getTopic(topicId);
     if (topic) {
-      const statusTopicEl = document.getElementById('statusTopicName');
-      statusTopicEl.textContent = topic.name;
-      const badge = document.getElementById('topicBadge');
       const tc = Utils.getTopicColor(topic);
+      const badge = document.getElementById('topicBadge');
       badge.style.display = 'inline-block';
       badge.textContent = topic.name;
       badge.style.background = tc.light;
       badge.style.color = tc.color;
 
-      statusTopicEl.style.color = tc.color;
-      const statusIcon = document.querySelector('#moduleStatus .status-icon');
-      if (statusIcon) statusIcon.style.color = tc.color;
+      document.getElementById('pastTopicName').textContent = topic.name;
+      document.getElementById('currentTopicName').textContent = topic.name;
+
+      this._activateListTab();
 
       if (topic.sidebarCache) {
         this.currentData = topic.sidebarCache;
@@ -52,16 +61,14 @@ const Sidebar = {
     const baselineModule = document.getElementById('moduleBaseline');
     if (baselineModule) baselineModule.style.display = 'block';
     const details = Storage.getPersonalDetails();
-    if (details.length > 0) {
-      App._renderBaselineDetails(details);
-    }
+    if (details.length > 0) App._renderBaselineDetails(details);
   },
 
   hide() {
     this.currentTopicId = null;
-    document.getElementById('moduleStatus').style.display = 'none';
-    document.getElementById('moduleConnections').style.display = 'none';
-    document.getElementById('moduleDirections').style.display = 'none';
+    document.getElementById('sectionPast').style.display = 'none';
+    document.getElementById('sectionCurrent').style.display = 'none';
+    document.getElementById('sectionFuture').style.display = 'none';
     document.getElementById('topicBadge').style.display = 'none';
 
     if (STUDY_CONDITION === 'baseline') {
@@ -88,12 +95,10 @@ const Sidebar = {
     });
     if (messages.length === 0) return;
     this._labelsDirty = false;
-
     this._showLoading();
 
     try {
-      const allChats = Storage.getAllChatSummariesForTopic(topic.id)
-        .filter(c => c.id !== chatId);
+      const allChats = Storage.getAllChatSummariesForTopic(topic.id).filter(c => c.id !== chatId);
       const allConcepts = Storage.getConceptsByTopic(topic.id);
 
       const resp = await fetch('/api/sidebar/refresh', {
@@ -106,9 +111,7 @@ const Sidebar = {
           topicName: topic.name,
           topicStatus: this._serializeStatus(topic.statusSummary),
           allChatSummaries: allChats,
-          allConcepts: allConcepts.map(c => ({
-            id: c.id, title: c.title, preview: c.preview,
-          })),
+          allConcepts: allConcepts.map(c => ({ id: c.id, title: c.title, preview: c.preview })),
           model: Storage.getSidebarModel(),
         }),
       });
@@ -117,7 +120,6 @@ const Sidebar = {
       this.currentData = data;
       this.render(data, topic);
 
-      // Cache sidebar data on the topic
       const freshTopic = Storage.getTopic(topic.id);
       if (freshTopic) {
         freshTopic.sidebarCache = data;
@@ -133,153 +135,175 @@ const Sidebar = {
     if (!topic) topic = Storage.getTopic(this.currentTopicId);
     if (!topic) return;
 
-    // Module 1: Status
+    // Current: update profile if new data
     let statusData = data.statusUpdate || topic.statusSummary || null;
-    if (data.statusUpdate && data.statusUpdate !== topic.statusSummary) {
-      topic.statusSummary = data.statusUpdate;
+    if (data.statusUpdate) {
+      const oldConcepts = (topic.statusSummary && topic.statusSummary.concepts_traversed) || [];
+      const merged = {
+        overview: data.statusUpdate.overview || [],
+        concepts_traversed: this._sortConcepts(
+          this._mergeStances(data.statusUpdate.concepts_traversed || [], oldConcepts)
+        ),
+      };
+      topic.statusSummary = merged;
       topic.statusLastUpdated = Utils.timestamp();
       Storage.saveTopic(topic);
+      statusData = merged;
     }
     this._renderStatus(statusData);
 
-    // Module 3: Directions
+    // Past: clear loading skeleton — past chats are populated by showPastChats() after each response
+    const pastList = document.getElementById('pastChatsList');
+    if (pastList && pastList.querySelector('.skeleton')) {
+      pastList.innerHTML = '<p class="temporal-empty-hint">Past context will appear here after your first response.</p>';
+    }
+
+    // Future: directions — always breadth first, depth second
     const dirContainer = document.getElementById('directionCards');
     dirContainer.innerHTML = '';
-    const dirs = data.newDirections || [];
-    if (dirs.length === 0) {
-      dirContainer.innerHTML = '<p style="font-size:12px;color:var(--text-muted);">Keep chatting for suggestions.</p>';
-    }
-    dirs.forEach((dir, idx) => {
-      dirContainer.appendChild(this._createDirectionCard(dir, idx));
+    const dirs = [...(data.newDirections || [])].sort((a, b) => {
+      const order = { breadth: 0, depth: 1 };
+      return (order[a.type] ?? 2) - (order[b.type] ?? 2);
     });
+    if (dirs.length === 0) {
+      dirContainer.innerHTML = '<p class="temporal-empty-hint">Keep chatting to generate future directions.</p>';
+    }
+    dirs.forEach((dir, idx) => dirContainer.appendChild(this._createDirectionCard(dir, idx)));
   },
 
-  _createDirectionCard(dir, directionIdx) {
+  // ── Past: Persistent Section ──────────────────────────────────────────
+
+  /**
+   * Render the Past section with the injected past chats from this response.
+   * Called from app.js after each assistant response.
+   */
+  showPastChats(injectedPastChats) {
+    const container = document.getElementById('pastChatsList');
+    if (!container) return;
+    if (!injectedPastChats || injectedPastChats.length === 0) {
+      container.innerHTML = '<p class="temporal-empty-hint">No relevant past chats found for this question.</p>';
+      return;
+    }
+    container.innerHTML = '';
+    injectedPastChats.forEach((chat, idx) => {
+      container.appendChild(this._createPastChatCard(chat, idx));
+    });
+    StudyLog.event('past_lookup', { topicId: this.currentTopicId, count: injectedPastChats.length });
+  },
+
+  _createPastChatCard(chat, idx) {
     const el = document.createElement('div');
-    const dirType = dir.type || 'extend';
-    el.className = `direction-card type-${dirType}`;
+    el.className = 'temporal-card past-chat-card';
     el.draggable = true;
-    const threadLabel = dir.threadLabel ? Utils.escapeHtml(dir.threadLabel) : '';
-    const typeLabels = { strengthen: 'strengthen', bridge: 'bridge', extend: 'extend' };
-    const typeLabel = typeLabels[dirType] || 'explore';
-    const tagHtml = threadLabel
-      ? `<div class="direction-tag tag-${dirType}"><span class="direction-tag-type">${typeLabel}</span><span class="direction-tag-sep">&middot;</span><span class="direction-tag-thread">${threadLabel}</span></div>`
-      : '';
-    const reasonHtml = dir.reason
-      ? `<div class="direction-reason">${Utils.escapeHtml(dir.reason)}</div>`
-      : '';
+
+    const title = Utils.escapeHtml(chat.title || 'Past conversation');
+    const userAsked = chat.userAsked ? Utils.escapeHtml(chat.userAsked.slice(0, 120)) : '';
+    const aiCovered = chat.aiCovered ? Utils.escapeHtml(chat.aiCovered.slice(0, 80)) : '';
+
     el.innerHTML = `
-      ${tagHtml}
-      <div class="card-header">
-        <span class="card-title">${Utils.escapeHtml(dir.title || '')}</span>
+      <div class="temporal-card-header">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11" class="temporal-card-icon">
+          <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+          <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+        </svg>
+        <span class="temporal-card-title">${title}</span>
       </div>
-      <div class="card-question">${Utils.escapeHtml(dir.question || '')}</div>
-      ${reasonHtml}
-      <div class="card-actions-row">
-        <div class="card-drag-hint">⟶ Drag to chat</div>
-        <button class="card-new-chat-btn" title="Ask in new chat">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
-            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-          </svg>
-          New chat
-        </button>
+      ${userAsked ? `<div class="temporal-card-excerpt">${userAsked}</div>` : ''}
+      <div class="temporal-card-meta">Retrieved via text similarity</div>
+      <div class="temporal-card-actions">
+        <button class="probe-btn probe-relevant" data-idx="${idx}" title="Mark as relevant">Relevant</button>
+        <button class="probe-btn probe-not-relevant" data-idx="${idx}" title="Mark as not relevant">Not relevant</button>
+        <button class="past-build-btn" data-chat-id="${Utils.escapeHtml(chat.chatId || '')}" data-title="${title}" title="Build on this chat">Build on this →</button>
       </div>
     `;
-    this._setupDrag(el, dir.question || '', dir.title || '', directionIdx, {
-      type: 'direction_card',
-      cardType: dirType,
-      title: dir.title || '',
-      question: dir.question || '',
-    });
-    el.querySelector('.card-new-chat-btn').addEventListener('click', (e) => {
+
+    // Probe calibration buttons
+    el.querySelector('.probe-relevant').addEventListener('click', (e) => {
       e.stopPropagation();
-      StudyLog.event('module3_direction_new_chat', { topicId: this.currentTopicId, directionIdx });
-      this._startDirectionInNewChat(dir);
+      StudyLog.event('past_relevance_calibrated', { topicId: this.currentTopicId, chatId: chat.chatId, decision: 'relevant', idx });
+      el.querySelector('.probe-relevant').classList.add('probe-active');
+      el.querySelector('.probe-not-relevant').classList.remove('probe-active');
     });
-    return el;
-  },
+    el.querySelector('.probe-not-relevant').addEventListener('click', (e) => {
+      e.stopPropagation();
+      StudyLog.event('past_relevance_calibrated', { topicId: this.currentTopicId, chatId: chat.chatId, decision: 'not_relevant', idx });
+      el.querySelector('.probe-not-relevant').classList.add('probe-active');
+      el.querySelector('.probe-relevant').classList.remove('probe-active');
+    });
 
-  _startDirectionInNewChat(dir) {
-    const topicId = this.currentTopicId;
-    App.newChat();
-    
-    // Select the topic so it gets grouped and context is injected by App.sendMessage()
-    if (topicId) {
-      App.selectedTopicId = topicId;
-      const topicSel = document.getElementById('topicSelect');
-      if (topicSel) topicSel.value = topicId;
-    }
-    
-    // Enable search by default
-    App.useSearch = true;
-    const searchBtn = document.getElementById('searchToggleBtn');
-    if (searchBtn) {
-      searchBtn.classList.add('active');
-      searchBtn.title = 'Google Search ON';
-    }
-    
-    document.getElementById('chatInput').value = dir.question || '';
-    App.sendMessage();
-  },
-
-  _setupDrag(el, fullText, label, directionIdx, meta = null) {
-    el.addEventListener('dragstart', (e) => {
-      e.dataTransfer.setData('text/plain', fullText);
-      e.dataTransfer.setData('application/loom-label', label);
-      if (meta && meta.type) {
-        e.dataTransfer.setData('application/loom-context-type', meta.type);
-        e.dataTransfer.setData('application/loom-direction-type', meta.cardType || 'extend');
-        e.dataTransfer.setData('application/loom-question', meta.question || fullText);
+    // Build on this
+    el.querySelector('.past-build-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      StudyLog.event('past_build_on_click', { topicId: this.currentTopicId, chatId: chat.chatId, idx });
+      const pastMessages = Storage.getMessages(chat.chatId || '');
+      let contextText = '';
+      if (pastMessages.length > 0) {
+        const parts = ['--- Previous conversation ---'];
+        pastMessages.forEach(m => {
+          const role = m.role === 'user' ? 'User' : 'AI';
+          const text = (m.content || '').slice(0, 600);
+          parts.push(`${role}: ${text}${(m.content || '').length > 600 ? '...' : ''}`);
+        });
+        parts.push('--- End ---');
+        contextText = parts.join('\n');
+      } else {
+        contextText = chat.userAsked ? `[Past context] ${chat.userAsked}` : title;
       }
+      App.setContextBlock(contextText, `[Past Context] ${chat.title || 'Past conversation'}`, {
+        type: 'past_chat',
+        title: chat.title || '',
+      });
+    });
+
+    // Drag to chat
+    el.addEventListener('dragstart', (e) => {
+      const fullText = userAsked || title;
+      e.dataTransfer.setData('text/plain', fullText);
+      e.dataTransfer.setData('application/loom-label', `[Past Context] ${chat.title || 'Past conversation'}`);
+      e.dataTransfer.setData('application/loom-context-type', 'past_chat');
       el.classList.add('dragging');
-      StudyLog.event('module3_direction_dragged', { topicId: this.currentTopicId, directionIdx });
+      StudyLog.event('past_card_dragged', { topicId: this.currentTopicId, chatId: chat.chatId, idx });
     });
     el.addEventListener('dragend', () => el.classList.remove('dragging'));
 
-    el.addEventListener('click', () => {
-      StudyLog.event('module3_direction_clicked', { topicId: this.currentTopicId, directionIdx });
-      App.setContextBlock(fullText, label, meta);
-    });
+    return el;
   },
 
-  _getStatusContainer() {
-    return document.getElementById('statusStructured') || document.getElementById('statusText');
-  },
-
-  _showLoading() {
-    const sc = this._getStatusContainer();
-    if (sc) sc.innerHTML = `
-      <div class="skeleton skeleton-line" style="width:90%"></div>
-      <div class="skeleton skeleton-line" style="width:70%"></div>
-    `;
-    document.getElementById('directionCards').innerHTML = `
-      <div class="skeleton skeleton-card"></div>
-    `;
-  },
+  // ── Current: Concepts Traversed ───────────────────────────────────────
 
   _renderStatus(statusData) {
     const container = this._getStatusContainer();
     if (!container) return;
     if (!statusData) {
-      container.innerHTML = '<p class="status-empty">No status yet. Chat more to build your profile.</p>';
+      container.innerHTML = '<p class="temporal-empty-hint">Chat to build your current profile.</p>';
       return;
     }
-    if (container.id === 'statusText') {
-      container.textContent = this._serializeStatus(statusData);
-      return;
-    }
-    if (typeof statusData === 'string') {
-      container.innerHTML = `<div class="status-section"><div class="status-section-label">Overview</div><div class="status-item"><span class="status-item-text">${Utils.escapeHtml(statusData)}</span></div></div>`;
-      return;
-    }
-    const overview = statusData.overview || [];
-    const threads = statusData.threads || [];
-    const specifics = statusData.specifics || [];
+
+    const overview = (typeof statusData === 'string')
+      ? [statusData]
+      : (statusData.overview || []);
+    // Support new concepts_traversed schema; fall back gracefully for old data
+    const concepts = (typeof statusData === 'object' && statusData.concepts_traversed)
+      ? statusData.concepts_traversed
+      : this._migrateThreadsToConcepts(statusData);
+
     let html = '';
 
+    // Overview bullets
     if (overview.length > 0) {
       const overviewCollapsed = localStorage.getItem('loom_overviewCollapsed') === 'true';
-      html += '<div class="status-section status-section-overview"><div class="status-section-label collapsible' + (overviewCollapsed ? ' section-collapsed' : '') + '" data-section-toggle="overview"><span class="section-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="8" height="8"><polyline points="6 9 12 15 18 9"/></svg></span>Overview<button class="overview-ai-edit-btn" title="AI edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="10" height="10"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/><path d="M18 14l1 3 3 1-3 1-1 3-1-3-3-1 3-1 1-3z"/></svg></button></div><div class="overview-ai-prompt-slot"></div><div class="status-section-items' + (overviewCollapsed ? ' section-collapsed' : '') + '" data-section-items="overview">';
+      html += `
+        <div class="status-section status-section-overview">
+          <div class="status-section-label collapsible${overviewCollapsed ? ' section-collapsed' : ''}" data-section-toggle="overview">
+            <span class="section-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="8" height="8"><polyline points="6 9 12 15 18 9"/></svg></span>
+            Overview
+            <button class="overview-ai-edit-btn" title="AI edit">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="10" height="10"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/><path d="M18 14l1 3 3 1-3 1-1 3-1-3-3-1 3-1 1-3z"/></svg>
+            </button>
+          </div>
+          <div class="overview-ai-prompt-slot"></div>
+          <div class="status-section-items${overviewCollapsed ? ' section-collapsed' : ''}" data-section-items="overview">
+      `;
       overview.forEach((pt, i) => {
         html += `<div class="status-item" data-section="overview" data-idx="${i}">
           <span class="status-item-text">${Utils.escapeHtml(pt)}</span>
@@ -290,76 +314,137 @@ const Sidebar = {
       html += '</div></div>';
     }
 
-    if (threads.length > 0) {
-      html += '<div class="status-section status-section-threads"><div class="status-section-label">Knowledge Threads</div>';
-      threads.forEach((thread, ti) => {
-        const label = thread.label || 'Thread';
-        const steps = thread.steps || [];
-        const dotsHtml = steps.map((s, si) => {
-          const level = (typeof s === 'object' ? s.level : '') || 'brief';
-          const text = typeof s === 'object' ? s.text || '' : String(s);
-          return `<span class="thread-dot thread-dot-${level}" data-thread="${ti}" data-step="${si}" title="${Utils.escapeHtml(text)}"></span>`;
-        }).join('<span class="thread-connector"></span>');
-
-        html += `<div class="thread-row" data-thread-idx="${ti}">
-          <div class="thread-header">
-            <button class="thread-toggle" data-thread="${ti}">
-              <svg class="thread-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="10" height="10"><polyline points="9 18 15 12 9 6"/></svg>
-            </button>
-            <span class="thread-label">${Utils.escapeHtml(label)}</span>
-            <span class="thread-chain">${dotsHtml}</span>
-            <span class="status-item-actions">
-              <button class="status-item-btn thread-del-btn" data-thread="${ti}" title="Remove thread">×</button>
-            </span>
-          </div>
-          <div class="thread-steps" data-thread="${ti}" style="display:none;">
-            ${steps.map((s, si) => {
-          const text = typeof s === 'object' ? s.text || '' : String(s);
-          const level = (typeof s === 'object' ? s.level : '') || 'brief';
-          return `<div class="thread-step" data-thread="${ti}" data-step="${si}">
-                <span class="thread-step-dot thread-dot-${level}"></span>
-                <span class="thread-step-text">${Utils.escapeHtml(text)}</span>
-                <span class="status-level level-${level}">${Utils.escapeHtml(level)}</span>
-                <span class="status-item-actions">
-                  <button class="status-item-btn status-item-del" title="Remove step">×</button>
-                </span>
-              </div>`;
-        }).join('')}
-          </div>
-        </div>`;
-      });
-      html += '</div>';
+    // Concepts traversed — stance-tagged draggable chips (classified on top, neutral by frequency)
+    const sortedConcepts = this._sortConcepts(concepts);
+    if (typeof statusData === 'object') {
+      statusData.concepts_traversed = sortedConcepts;
     }
 
-    // Legacy specifics fallback
-    if (specifics.length > 0 && threads.length === 0) {
-      html += '<div class="status-section"><div class="status-section-label">Specifics</div>';
-      specifics.forEach((item, i) => {
-        const text = typeof item === 'string' ? item : item.text || '';
-        const level = typeof item === 'object' ? item.level || '' : '';
-        const levelClass = level ? ` level-${level}` : '';
-        html += `<div class="status-item" data-section="specifics" data-idx="${i}">
-          <span class="status-item-text">${Utils.escapeHtml(text)}</span>
-          ${level ? `<span class="status-level${levelClass}">${Utils.escapeHtml(level)}</span>` : ''}
-          <span class="status-item-actions">
-            <button class="status-item-btn status-item-del" title="Remove">×</button>
-          </span></div>`;
-      });
-      html += '</div>';
+    html += `<div class="status-section status-section-concepts">
+      <div class="status-section-label">Concepts Traversed <span style="font-weight:400;color:var(--text-muted);font-size:10px;">· drag to classify</span></div>
+      <div class="concept-drop-tray" id="conceptDropZones" style="display:none;">
+        <div class="drop-zone zone-interested" data-stance="interested">Interested</div>
+        <div class="drop-zone zone-understood" data-stance="understood">✓ Understood</div>
+        <div class="drop-zone zone-not-interested" data-stance="not_interested">✗ Not Relevant</div>
+      </div>
+      <div class="concept-tags-container" id="conceptTagsContainer">`;
+    if (sortedConcepts.length === 0) {
+      html += '<span class="temporal-empty-hint" style="font-size:11px;">No concepts tracked yet.</span>';
+    } else {
+      const stanceIcon = { interested: '', understood: '✓', not_interested: '✗', neutral: '' };
+      const classified = sortedConcepts.filter(c => c.stance && c.stance !== 'neutral');
+      const unclassified = sortedConcepts.filter(c => !c.stance || c.stance === 'neutral');
+
+      const renderTag = (c, i) => {
+        const title = Utils.escapeHtml(c.title || '');
+        const stance = c.stance || 'neutral';
+        const icon = stanceIcon[stance] || '';
+        const countBadge = stance === 'neutral'
+          ? `<span class="concept-count" title="Mentioned ${c.mentions || 1} time${(c.mentions || 1) !== 1 ? 's' : ''}">${c.mentions || 1}</span>`
+          : '';
+        return `<span class="concept-tag stance-${stance}" data-concept-idx="${i}" data-stance="${stance}" draggable="true" title="Drag to classify · × to remove">
+          ${icon ? `<span class="stance-icon">${icon}</span>` : ''}${title}${countBadge}<button class="concept-delete-btn" data-idx="${i}" title="Remove">×</button>
+        </span>`;
+      };
+
+      if (classified.length > 0) {
+        html += '<div class="concept-tags-group concept-tags-classified">';
+        classified.forEach(c => {
+          const i = sortedConcepts.indexOf(c);
+          html += renderTag(c, i);
+        });
+        html += '</div>';
+      }
+      if (unclassified.length > 0) {
+        if (classified.length > 0) html += '<div class="concept-tags-divider"></div>';
+        html += '<div class="concept-tags-group concept-tags-unclassified">';
+        if (classified.length > 0) {
+          html += '<div class="concept-tags-group-label">Unclassified · most mentioned first</div>';
+        }
+        unclassified.forEach(c => {
+          const i = sortedConcepts.indexOf(c);
+          html += renderTag(c, i);
+        });
+        html += '</div>';
+      }
     }
+    html += `</div></div>`;
 
     if (!html) {
-      html = '<p class="status-empty">No status yet. Chat more to build your profile.</p>';
+      html = '<p class="temporal-empty-hint">Chat more to build your profile.</p>';
     }
     container.innerHTML = html;
     this._bindStatusItemActions();
   },
 
+  /** Migrate old threads/specifics or checked:bool data to stance-based concept list */
+  _migrateThreadsToConcepts(statusData) {
+    if (!statusData || typeof statusData === 'string') return [];
+    const result = [];
+    // Extract from threads
+    (statusData.threads || []).forEach(thread => {
+      if (thread.label) result.push({ title: thread.label, stance: 'neutral' });
+      (thread.steps || []).forEach(s => {
+        const text = typeof s === 'string' ? s : (s.text || '');
+        if (text) result.push({ title: text.slice(0, 40), stance: 'neutral' });
+      });
+    });
+    // Extract from specifics
+    (statusData.specifics || []).forEach(s => {
+      const text = typeof s === 'string' ? s : (s.text || '');
+      if (text) result.push({ title: text.slice(0, 40), stance: 'neutral' });
+    });
+    return result.slice(0, 20);
+  },
+
+  _normalizeConcept(c) {
+    if (typeof c === 'string') return { title: c, stance: 'neutral', mentions: 1 };
+    const stance = c.stance || (c.checked ? 'understood' : 'neutral');
+    return {
+      title: c.title || '',
+      stance,
+      mentions: Math.max(1, c.mentions || 1),
+    };
+  },
+
+  _sortConcepts(concepts) {
+    const STANCE_ORDER = { interested: 0, understood: 1, not_interested: 2, neutral: 3 };
+    return (concepts || []).map(c => this._normalizeConcept(c)).sort((a, b) => {
+      const sa = STANCE_ORDER[a.stance] ?? 3;
+      const sb = STANCE_ORDER[b.stance] ?? 3;
+      if (sa !== sb) return sa - sb;
+      return (b.mentions || 1) - (a.mentions || 1);
+    });
+  },
+
+  /** Preserve user stances and mention counts when new concepts come in from backend */
+  _mergeStances(newConcepts, oldConcepts) {
+    const oldMap = Object.fromEntries(
+      (oldConcepts || []).map(c => {
+        const norm = this._normalizeConcept(c);
+        return [norm.title.toLowerCase(), norm];
+      })
+    );
+    return (newConcepts || []).map(c => {
+      const title = typeof c === 'object' ? c.title : c;
+      const key = title?.toLowerCase();
+      const prev = oldMap[key];
+      if (prev) {
+        return {
+          title,
+          stance: prev.stance,
+          mentions: prev.mentions + 1,
+        };
+      }
+      return { title, stance: 'neutral', mentions: 1 };
+    });
+  },
+
   _bindStatusItemActions() {
     const container = this._getStatusContainer();
-    if (!container || container.id !== 'statusStructured') return;
+    if (!container) return;
 
-    // Overview and legacy specifics delete
+    // Overview delete
     container.querySelectorAll('.status-item .status-item-del').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -370,59 +455,11 @@ const Sidebar = {
       });
     });
 
-    // Overview and legacy specifics inline edit
+    // Overview inline edit on double-click
     container.querySelectorAll('.status-item[data-section]').forEach(item => {
       item.addEventListener('dblclick', (e) => {
         e.stopPropagation();
-        const section = item.dataset.section;
-        const idx = parseInt(item.dataset.idx);
-        this._startInlineEdit(item, section, idx);
-      });
-    });
-
-    // Thread toggle expand/collapse
-    container.querySelectorAll('.thread-toggle').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const ti = btn.dataset.thread;
-        const stepsEl = container.querySelector(`.thread-steps[data-thread="${ti}"]`);
-        const chevron = btn.querySelector('.thread-chevron');
-        if (stepsEl) {
-          const open = stepsEl.style.display !== 'none';
-          stepsEl.style.display = open ? 'none' : 'block';
-          chevron?.classList.toggle('expanded', !open);
-          StudyLog.event('thread_toggled', { topicId: this.currentTopicId, threadIdx: parseInt(ti), expanded: !open });
-        }
-      });
-    });
-
-    // Thread delete
-    container.querySelectorAll('.thread-del-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const ti = parseInt(btn.dataset.thread);
-        this._deleteThread(ti);
-      });
-    });
-
-    // Thread step delete
-    container.querySelectorAll('.thread-step .status-item-del').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const step = btn.closest('.thread-step');
-        const ti = parseInt(step.dataset.thread);
-        const si = parseInt(step.dataset.step);
-        this._deleteThreadStep(ti, si);
-      });
-    });
-
-    // Thread step inline edit on double-click
-    container.querySelectorAll('.thread-step').forEach(step => {
-      step.addEventListener('dblclick', (e) => {
-        e.stopPropagation();
-        const ti = parseInt(step.dataset.thread);
-        const si = parseInt(step.dataset.step);
-        this._startThreadStepEdit(step, ti, si);
+        this._startInlineEdit(item, item.dataset.section, parseInt(item.dataset.idx));
       });
     });
 
@@ -434,6 +471,89 @@ const Sidebar = {
         this._showAiEditPrompt();
       });
     });
+
+    // Concept tag drag-to-classify
+    const dropTray = container.querySelector('#conceptDropZones');
+    let draggingIdx = null;
+
+    container.querySelectorAll('.concept-tag').forEach(tag => {
+      tag.addEventListener('dragstart', (e) => {
+        draggingIdx = parseInt(tag.dataset.conceptIdx);
+        tag.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        if (dropTray) {
+          dropTray.style.display = 'flex';
+          dropTray.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+      });
+      tag.addEventListener('dragend', () => {
+        tag.classList.remove('dragging');
+        draggingIdx = null;
+        if (dropTray) dropTray.style.display = 'none';
+        container.querySelectorAll('.drop-zone').forEach(z => z.classList.remove('drag-over'));
+      });
+    });
+
+    if (dropTray) {
+      dropTray.querySelectorAll('.drop-zone').forEach(zone => {
+        zone.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          zone.classList.add('drag-over');
+        });
+        zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+        zone.addEventListener('drop', (e) => {
+          e.preventDefault();
+          zone.classList.remove('drag-over');
+          if (draggingIdx !== null) {
+            this._setConceptStance(draggingIdx, zone.dataset.stance);
+          }
+          dropTray.style.display = 'none';
+        });
+      });
+    }
+
+    // Concept delete
+    container.querySelectorAll('.concept-delete-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const idx = parseInt(btn.dataset.idx);
+        this._deleteConcept(idx);
+      });
+    });
+  },
+
+  _setConceptStance(idx, stance) {
+    const topic = Storage.getTopic(this.currentTopicId);
+    if (!topic || typeof topic.statusSummary !== 'object') return;
+    const concepts = topic.statusSummary.concepts_traversed;
+    if (!concepts || idx < 0 || idx >= concepts.length) return;
+    const c = this._normalizeConcept(concepts[idx]);
+    const previousStance = c.stance;
+    const title = c.title;
+    concepts[idx] = { title, stance, mentions: c.mentions };
+    topic.statusSummary.concepts_traversed = this._sortConcepts(concepts);
+    topic.statusLastUpdated = Utils.timestamp();
+    Storage.saveTopic(topic);
+    this._renderStatus(topic.statusSummary);
+    StudyLog.event('current_concept_stance_set', {
+      topicId: this.currentTopicId,
+      conceptTitle: title,
+      stance,
+      previousStance,
+    });
+  },
+
+  _deleteConcept(idx) {
+    const topic = Storage.getTopic(this.currentTopicId);
+    if (!topic || typeof topic.statusSummary !== 'object') return;
+    const concepts = topic.statusSummary.concepts_traversed;
+    if (!concepts || idx < 0 || idx >= concepts.length) return;
+    concepts.splice(idx, 1);
+    topic.statusLastUpdated = Utils.timestamp();
+    Storage.saveTopic(topic);
+    this._renderStatus(topic.statusSummary);
+    StudyLog.event('current_concept_toggled', { topicId: this.currentTopicId, conceptIdx: idx, deleted: true });
   },
 
   _startInlineEdit(item, section, idx) {
@@ -465,35 +585,6 @@ const Sidebar = {
     });
   },
 
-  _startThreadStepEdit(stepEl, ti, si) {
-    const textEl = stepEl.querySelector('.thread-step-text');
-    if (!textEl) return;
-    const original = textEl.textContent;
-    const input = document.createElement('textarea');
-    input.className = 'status-inline-edit';
-    input.value = original;
-    input.rows = 1;
-    textEl.replaceWith(input);
-    input.style.height = 'auto';
-    input.style.height = input.scrollHeight + 'px';
-    input.focus();
-    input.select();
-    input.addEventListener('input', () => {
-      input.style.height = 'auto';
-      input.style.height = input.scrollHeight + 'px';
-    });
-    const save = () => {
-      const val = input.value.trim();
-      if (val && val !== original) this._editThreadStep(ti, si, val);
-      else this._renderStatus(this._getCurrentStatus());
-    };
-    input.addEventListener('blur', save);
-    input.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); input.blur(); }
-      if (ev.key === 'Escape') { input.value = original; input.blur(); }
-    });
-  },
-
   _getCurrentStatus() {
     if (!this.currentTopicId) return null;
     const topic = Storage.getTopic(this.currentTopicId);
@@ -505,12 +596,11 @@ const Sidebar = {
     if (!topic || typeof topic.statusSummary !== 'object') return;
     const arr = topic.statusSummary[section];
     if (!arr || idx < 0 || idx >= arr.length) return;
-    const oldValue = typeof arr[idx] === 'object' ? arr[idx].text : arr[idx];
     arr.splice(idx, 1);
     topic.statusLastUpdated = Utils.timestamp();
     Storage.saveTopic(topic);
     this._renderStatus(topic.statusSummary);
-    StudyLog.event('summary_edited', { topicId: this.currentTopicId, section, editType: 'delete', itemIdx: idx });
+    StudyLog.event('current_profile_edited', { topicId: this.currentTopicId, section, editType: 'delete', itemIdx: idx });
   },
 
   _editStatusItem(section, idx, newText) {
@@ -518,62 +608,15 @@ const Sidebar = {
     if (!topic || typeof topic.statusSummary !== 'object') return;
     const arr = topic.statusSummary[section];
     if (!arr || idx < 0 || idx >= arr.length) return;
-    const oldValue = typeof arr[idx] === 'object' ? arr[idx].text : arr[idx];
-    if (section === 'overview') {
-      arr[idx] = newText;
-    } else {
+    if (section === 'overview') arr[idx] = newText;
+    else {
       if (typeof arr[idx] === 'object') arr[idx].text = newText;
       else arr[idx] = newText;
     }
     topic.statusLastUpdated = Utils.timestamp();
     Storage.saveTopic(topic);
     this._renderStatus(topic.statusSummary);
-    StudyLog.event('summary_edited', { topicId: this.currentTopicId, section, editType: 'edit', itemIdx: idx });
-  },
-
-  _deleteThread(threadIdx) {
-    const topic = Storage.getTopic(this.currentTopicId);
-    if (!topic || typeof topic.statusSummary !== 'object') return;
-    const threads = topic.statusSummary.threads;
-    if (!threads || threadIdx < 0 || threadIdx >= threads.length) return;
-    const oldLabel = threads[threadIdx].label;
-    threads.splice(threadIdx, 1);
-    topic.statusLastUpdated = Utils.timestamp();
-    Storage.saveTopic(topic);
-    this._renderStatus(topic.statusSummary);
-    StudyLog.event('summary_edited', { topicId: this.currentTopicId, section: 'threads', editType: 'delete_thread', threadIdx });
-  },
-
-  _deleteThreadStep(threadIdx, stepIdx) {
-    const topic = Storage.getTopic(this.currentTopicId);
-    if (!topic || typeof topic.statusSummary !== 'object') return;
-    const threads = topic.statusSummary.threads;
-    if (!threads || threadIdx < 0 || threadIdx >= threads.length) return;
-    const steps = threads[threadIdx].steps;
-    if (!steps || stepIdx < 0 || stepIdx >= steps.length) return;
-    const oldValue = typeof steps[stepIdx] === 'object' ? steps[stepIdx].text : steps[stepIdx];
-    steps.splice(stepIdx, 1);
-    if (steps.length === 0) threads.splice(threadIdx, 1);
-    topic.statusLastUpdated = Utils.timestamp();
-    Storage.saveTopic(topic);
-    this._renderStatus(topic.statusSummary);
-    StudyLog.event('summary_edited', { topicId: this.currentTopicId, section: 'threads', editType: 'delete_step', threadIdx, stepIdx });
-  },
-
-  _editThreadStep(threadIdx, stepIdx, newText) {
-    const topic = Storage.getTopic(this.currentTopicId);
-    if (!topic || typeof topic.statusSummary !== 'object') return;
-    const threads = topic.statusSummary.threads;
-    if (!threads || threadIdx < 0 || threadIdx >= threads.length) return;
-    const steps = threads[threadIdx].steps;
-    if (!steps || stepIdx < 0 || stepIdx >= steps.length) return;
-    const oldValue = typeof steps[stepIdx] === 'object' ? steps[stepIdx].text : steps[stepIdx];
-    if (typeof steps[stepIdx] === 'object') steps[stepIdx].text = newText;
-    else steps[stepIdx] = newText;
-    topic.statusLastUpdated = Utils.timestamp();
-    Storage.saveTopic(topic);
-    this._renderStatus(topic.statusSummary);
-    StudyLog.event('summary_edited', { topicId: this.currentTopicId, section: 'threads', editType: 'edit_step', threadIdx, stepIdx });
+    StudyLog.event('current_profile_edited', { topicId: this.currentTopicId, section, editType: 'edit', itemIdx: idx });
   },
 
   _showAiEditPrompt() {
@@ -602,7 +645,7 @@ const Sidebar = {
       if (!text) return;
       this._submitAiEdit(text, row, sendBtn);
     };
-    const dismiss = () => { row.remove(); };
+    const dismiss = () => row.remove();
 
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
@@ -642,8 +685,8 @@ const Sidebar = {
       }
       Storage.saveTopic(topic);
       this._renderStatus(topic.statusSummary);
-      Utils.showToast('Overview updated', 'success');
-      StudyLog.event('summary_ai_edited', { topicId: this.currentTopicId });
+      Utils.showToast('Profile updated', 'success');
+      StudyLog.event('current_profile_edited', { topicId: this.currentTopicId, trigger: 'ai_edit' });
     } catch (err) {
       console.error('AI overview edit failed:', err);
       Utils.showToast('AI edit failed', 'error');
@@ -657,47 +700,168 @@ const Sidebar = {
     if (!statusSummary) return '';
     if (typeof statusSummary === 'string') return statusSummary;
     const parts = [];
-    if (statusSummary.overview) {
+    if (statusSummary.overview && statusSummary.overview.length > 0) {
       parts.push('Overview: ' + statusSummary.overview.join('; '));
     }
-    if (statusSummary.threads) {
+    const concepts = statusSummary.concepts_traversed || [];
+    if (concepts.length > 0) {
+      const byStance = { interested: [], understood: [], not_interested: [], neutral: [] };
+      concepts.forEach(c => {
+        const title = typeof c === 'object' ? c.title : c;
+        const stance = typeof c === 'object' ? (c.stance || (c.checked ? 'understood' : 'neutral')) : 'neutral';
+        if (title) (byStance[stance] || byStance.neutral).push(title);
+      });
+      if (byStance.interested.length > 0)
+        parts.push('Interested in (prioritize these): ' + byStance.interested.join(', '));
+      if (byStance.understood.length > 0)
+        parts.push('Understood already (assume base knowledge): ' + byStance.understood.join(', '));
+      if (byStance.not_interested.length > 0)
+        parts.push('Not interested (avoid): ' + byStance.not_interested.join(', '));
+      if (byStance.neutral.length > 0)
+        parts.push('Concepts encountered (neutral): ' + byStance.neutral.join(', '));
+    }
+    // Legacy fallback
+    if (statusSummary.threads && !statusSummary.concepts_traversed) {
       statusSummary.threads.forEach(t => {
         const stepStrs = (t.steps || []).map(s =>
-          typeof s === 'object' ? `${s.text} (${s.level || 'unknown'})` : s
+          typeof s === 'object' ? s.text : s
         );
-        parts.push(`Thread "${t.label}": ${stepStrs.join(' → ')}`);
+        parts.push(`Topic area "${t.label}": ${stepStrs.join(', ')}`);
       });
-    }
-    if (statusSummary.specifics) {
-      const items = statusSummary.specifics.map(s =>
-        typeof s === 'object' ? `${s.text} (${s.level || 'unknown'})` : s
-      );
-      parts.push('Specifics: ' + items.join('; '));
     }
     return parts.join('\n');
   },
 
-  _initStatusEdit() {
-    // Legacy edit button removed — editing is now inline per-item
+  // ── Future: Direction Cards ───────────────────────────────────────────
+
+  _createDirectionCard(dir, directionIdx) {
+    const el = document.createElement('div');
+    const typeClass = dir.type === 'breadth' ? 'type-breadth' : dir.type === 'depth' ? 'type-depth' : '';
+    el.className = `temporal-card direction-card${typeClass ? ' ' + typeClass : ''}`;
+    el.draggable = true;
+
+    const badgeHtml = dir.type === 'breadth'
+      ? `<div class="direction-type-badge badge-breadth"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="10" height="10"><path d="M17 18a5 5 0 0 0-10 0"/><line x1="12" y1="2" x2="12" y2="9"/><line x1="4.22" y1="10.22" x2="5.64" y2="11.64"/><line x1="1" y1="18" x2="3" y2="18"/><line x1="21" y1="18" x2="23" y2="18"/><line x1="18.36" y1="11.64" x2="19.78" y2="10.22"/></svg> Go Broader</div>`
+      : dir.type === 'depth'
+        ? `<div class="direction-type-badge badge-depth"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="10" height="10"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg> Go Deeper</div>`
+        : '';
+    const anchorHtml = dir.anchor
+      ? `<div class="direction-anchor">${Utils.escapeHtml(dir.anchor)}</div>`
+      : '';
+    const reasonHtml = dir.reason
+      ? `<div class="direction-reason">${Utils.escapeHtml(dir.reason)}</div>`
+      : '';
+
+    el.innerHTML = `
+      ${badgeHtml}
+      ${anchorHtml}
+      <div class="temporal-card-header">
+        <span class="temporal-card-title">${Utils.escapeHtml(dir.title || '')}</span>
+      </div>
+      <div class="temporal-card-question">${Utils.escapeHtml(dir.question || '')}</div>
+      ${reasonHtml}
+      <div class="temporal-card-actions">
+        <button class="probe-btn probe-accept" title="Accept this suggestion">Accept</button>
+        <button class="probe-btn probe-ignore" title="Ignore this suggestion">Ignore</button>
+        <button class="card-new-chat-btn" title="Ask in new chat">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
+            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          Ask
+        </button>
+      </div>
+    `;
+
+    // Probe action buttons
+    el.querySelector('.probe-accept').addEventListener('click', (e) => {
+      e.stopPropagation();
+      StudyLog.event('future_suggestion_accepted', { topicId: this.currentTopicId, directionIdx, title: dir.title });
+      el.querySelector('.probe-accept').classList.add('probe-active');
+      el.querySelector('.probe-ignore').classList.remove('probe-active');
+    });
+    el.querySelector('.probe-ignore').addEventListener('click', (e) => {
+      e.stopPropagation();
+      StudyLog.event('future_suggestion_ignored', { topicId: this.currentTopicId, directionIdx, title: dir.title });
+      el.querySelector('.probe-ignore').classList.add('probe-active');
+      el.querySelector('.probe-accept').classList.remove('probe-active');
+    });
+
+    // New chat
+    el.querySelector('.card-new-chat-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      StudyLog.event('future_direction_new_chat', { topicId: this.currentTopicId, directionIdx });
+      this._startDirectionInNewChat(dir);
+    });
+
+    // Drag to chat
+    el.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/plain', dir.question || '');
+      e.dataTransfer.setData('application/loom-label', `[Future Direction] ${dir.title || ''}`);
+      e.dataTransfer.setData('application/loom-context-type', 'future_direction');
+      e.dataTransfer.setData('application/loom-question', dir.question || '');
+      el.classList.add('dragging');
+      StudyLog.event('future_suggestion_dragged', { topicId: this.currentTopicId, directionIdx, title: dir.title });
+    });
+    el.addEventListener('dragend', () => el.classList.remove('dragging'));
+
+    // Click to inject in chat
+    el.addEventListener('click', () => {
+      StudyLog.event('future_direction_clicked', { topicId: this.currentTopicId, directionIdx });
+      App.setContextBlock(dir.question || '', `[Future Direction] ${dir.title || ''}`, {
+        type: 'future_direction',
+        title: dir.title || '',
+        question: dir.question || '',
+      });
+    });
+
+    return el;
   },
 
-  _initStatusDrag() {
-    const el = this._getStatusContainer();
-    if (!el) return;
-    el.addEventListener('dragstart', (e) => {
-      e.dataTransfer.setData('text/plain', this._serializeStatus(this._getCurrentStatus()));
-      e.dataTransfer.setData('application/loom-label', 'Status Summary');
-    });
+  _startDirectionInNewChat(dir) {
+    const topicId = this.currentTopicId;
+    App.newChat();
+    if (topicId) {
+      App.selectedTopicId = topicId;
+      const topicSel = document.getElementById('topicSelect');
+      if (topicSel) topicSel.value = topicId;
+    }
+    document.getElementById('chatInput').value = dir.question || '';
+    App.sendMessage();
   },
+
+  // ── Loading State ─────────────────────────────────────────────────────
+
+  _showLoading() {
+    const sc = this._getStatusContainer();
+    if (sc) sc.innerHTML = `
+      <div class="skeleton skeleton-line" style="width:90%"></div>
+      <div class="skeleton skeleton-line" style="width:70%"></div>
+      <div class="skeleton skeleton-line" style="width:80%"></div>
+    `;
+    // Past section is not loaded here — it's populated by showPastChats() from the SSE done event
+    const pastList = document.getElementById('pastChatsList');
+    if (pastList && !pastList.querySelector('.past-chat-card')) {
+      pastList.innerHTML = '<p class="temporal-empty-hint">Past context will appear here after your first response.</p>';
+    }
+    const dirCards = document.getElementById('directionCards');
+    if (dirCards) dirCards.innerHTML = '<div class="skeleton skeleton-card"></div>';
+  },
+
+  _getStatusContainer() {
+    return document.getElementById('statusStructured');
+  },
+
+  // ── Status Update Button ──────────────────────────────────────────────
 
   _initStatusUpdate() {
-    document.getElementById('statusUpdateHeaderBtn').addEventListener('click', async (e) => {
+    const btn = document.getElementById('statusUpdateHeaderBtn');
+    if (!btn) return;
+    btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       if (!this.currentTopicId) return;
       const topic = Storage.getTopic(this.currentTopicId);
       if (!topic) return;
 
-      const btn = document.getElementById('statusUpdateHeaderBtn');
       btn.classList.add('loading');
       btn.disabled = true;
 
@@ -724,8 +888,14 @@ const Sidebar = {
         });
         const data = await resp.json();
         let newStatus;
-        if (data.overview || data.threads) {
-          newStatus = { overview: data.overview || [], threads: data.threads || [] };
+        if (data.overview || data.concepts_traversed) {
+          const oldConcepts = (topic.statusSummary && topic.statusSummary.concepts_traversed) || [];
+          newStatus = {
+            overview: data.overview || [],
+            concepts_traversed: this._sortConcepts(
+              this._mergeStances(data.concepts_traversed || [], oldConcepts)
+            ),
+          };
         } else {
           newStatus = data.status || topic.statusSummary;
         }
@@ -734,11 +904,11 @@ const Sidebar = {
         if (topic.sidebarCache) topic.sidebarCache.statusUpdate = newStatus;
         Storage.saveTopic(topic);
         this._renderStatus(newStatus);
-        Utils.showToast('Status updated', 'success');
-        StudyLog.event('summary_updated', { topicId: this.currentTopicId, trigger: 'manual' });
+        Utils.showToast('Current profile updated', 'success');
+        StudyLog.event('current_profile_updated', { topicId: this.currentTopicId, trigger: 'manual' });
       } catch (err) {
         console.error('Status update failed:', err);
-        Utils.showToast('Status update failed', 'error');
+        Utils.showToast('Update failed', 'error');
       }
       btn.classList.remove('loading');
       btn.disabled = false;
@@ -775,8 +945,14 @@ const Sidebar = {
       }),
     }).then(resp => resp.json()).then(data => {
       let newStatus;
-      if (data.overview || data.threads) {
-        newStatus = { overview: data.overview || [], threads: data.threads || [] };
+      if (data.overview || data.concepts_traversed) {
+        const oldConcepts = (topic.statusSummary && topic.statusSummary.concepts_traversed) || [];
+        newStatus = {
+          overview: data.overview || [],
+          concepts_traversed: this._sortConcepts(
+            this._mergeStances(data.concepts_traversed || [], oldConcepts)
+          ),
+        };
       } else {
         newStatus = data.status || topic.statusSummary;
       }
@@ -787,124 +963,13 @@ const Sidebar = {
         if (freshTopic.sidebarCache) freshTopic.sidebarCache.statusUpdate = newStatus;
         Storage.saveTopic(freshTopic);
       }
-      StudyLog.event('summary_updated', { topicId, trigger: 'label_flush' });
+      StudyLog.event('current_profile_updated', { topicId, trigger: 'label_flush' });
     }).catch(err => {
       console.warn('Label flush status update failed:', err);
     });
   },
 
-  showConnections(connectionsJson) {
-    const module = document.getElementById('moduleConnections');
-    const container = document.getElementById('connectionSidebarCards');
-    if (!connectionsJson || connectionsJson.length === 0) {
-      module.style.display = 'none';
-      container.innerHTML = '';
-      return;
-    }
-    module.style.display = 'block';
-    container.innerHTML = '';
-    const chatId = Storage.getCurrentChatId();
-
-    // Group connections by chatId so the same past chat shows one card
-    const grouped = {};
-    const groupOrder = [];
-    connectionsJson.forEach(conn => {
-      StudyLog.event('module2_connection_shown', { chatId, connectionChatId: conn.chatId });
-      const key = conn.chatId || conn.id;
-      if (!grouped[key]) {
-        grouped[key] = [];
-        groupOrder.push(key);
-      }
-      grouped[key].push(conn);
-    });
-
-    groupOrder.forEach(key => {
-      const conns = grouped[key];
-      const first = conns[0];
-      const card = document.createElement('div');
-      card.className = 'conn-sidebar-card';
-      card.dataset.connId = first.id;
-      const title = Utils.escapeHtml(first.chatTitle || 'Past chat');
-      const userAsked = first.userAsked ? Utils.escapeHtml(first.userAsked) : '';
-      const aiCovered = first.aiCovered ? Utils.escapeHtml(first.aiCovered) : '';
-      let summaryHtml = '';
-      if (userAsked) summaryHtml += `<div class="conn-sb-row"><span class="conn-sb-label">Asked</span><span class="conn-sb-value">${userAsked}</span></div>`;
-      if (aiCovered) summaryHtml += `<div class="conn-sb-row"><span class="conn-sb-label">Learned</span><span class="conn-sb-value">${aiCovered}</span></div>`;
-
-      const insightsHtml = conns.map(c => {
-        const insight = Utils.escapeHtml(c.text || '');
-        return `<div class="conn-sb-insight-item" data-conn-id="${c.id}">${insight}</div>`;
-      }).join('');
-
-      card.innerHTML = `
-        <div class="conn-sb-header">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
-            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-          </svg>
-          <span class="conn-sb-title">${title}</span>
-          ${conns.length > 1 ? `<span class="conn-sb-count">${conns.length}</span>` : ''}
-        </div>
-        ${summaryHtml ? `<div class="conn-sb-summary">${summaryHtml}</div>` : ''}
-        <div class="conn-sb-insights">${insightsHtml}</div>
-      `;
-
-      // Bind hover/click per-insight for cross-referencing with markers
-      card.querySelectorAll('.conn-sb-insight-item').forEach(item => {
-        const connId = item.dataset.connId;
-        item.addEventListener('mouseenter', () => this._highlightMarker(connId, true));
-        item.addEventListener('mouseleave', () => this._highlightMarker(connId, false));
-        item.addEventListener('click', (e) => {
-          e.stopPropagation();
-          StudyLog.event('connection_sidebar_card_clicked', { connId, chatId, connectionChatId: first.chatId || '' });
-          const marker = document.querySelector(`.conn-marker.resolved[data-conn-id="${connId}"]`);
-          if (marker) {
-            marker.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            App._showConnCard(marker);
-          }
-        });
-      });
-
-      // Card-level hover highlights first connection's marker
-      card.addEventListener('mouseenter', () => {
-        conns.forEach(c => this._highlightMarker(c.id, true));
-      });
-      card.addEventListener('mouseleave', () => {
-        conns.forEach(c => this._highlightMarker(c.id, false));
-      });
-      card.addEventListener('click', () => {
-        StudyLog.event('connection_sidebar_card_clicked', { connId: first.id, chatId, connectionChatId: first.chatId || '' });
-        const marker = document.querySelector(`.conn-marker.resolved[data-conn-id="${first.id}"]`);
-        if (marker) {
-          marker.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          App._showConnCard(marker);
-        }
-      });
-
-      container.appendChild(card);
-    });
-  },
-
-  clearConnections() {
-    const module = document.getElementById('moduleConnections');
-    if (module) module.style.display = 'none';
-    const container = document.getElementById('connectionSidebarCards');
-    if (container) container.innerHTML = '';
-  },
-
-  _highlightMarker(connId, active) {
-    const marker = document.querySelector(`.conn-marker.resolved[data-conn-id="${connId}"]`);
-    if (marker) {
-      marker.classList.toggle('highlighted', active);
-    }
-  },
-
-  highlightSidebarCard(connId, active) {
-    const card = document.querySelector(`.conn-sidebar-card[data-conn-id="${connId}"]`);
-    if (card) {
-      card.classList.toggle('highlighted', active);
-    }
-  },
+  // ── Shuffle / Refresh Directions ──────────────────────────────────────
 
   _initShuffle() {
     const btn = document.getElementById('shuffleDirectionsBtn');
@@ -938,6 +1003,13 @@ const Sidebar = {
     const messages = chatId ? Storage.getMessages(chatId) : [];
     const currentSummary = messages.slice(-4).map(m => `${m.role}: ${m.content}`).join('\n');
 
+    // Build covered concepts string from current profile
+    let coveredConcepts = '';
+    if (topic.statusSummary && typeof topic.statusSummary === 'object') {
+      const concepts = topic.statusSummary.concepts_traversed || [];
+      coveredConcepts = concepts.map(c => typeof c === 'object' ? c.title : c).join(', ');
+    }
+
     try {
       const resp = await fetch('/api/sidebar/directions', {
         method: 'POST',
@@ -945,6 +1017,7 @@ const Sidebar = {
         body: JSON.stringify({
           topicName: topic.name,
           topicStatus: this._serializeStatus(topic.statusSummary),
+          coveredConcepts,
           allConcepts: Storage.getConceptsByTopic(topic.id).map(c => ({
             id: c.id, title: c.title, preview: c.preview,
           })),
@@ -956,40 +1029,57 @@ const Sidebar = {
       const data = await resp.json();
       const newDirs = data.newDirections || [];
 
-      // Update cache
       const freshTopic = Storage.getTopic(topic.id);
       if (freshTopic) {
         if (!freshTopic.sidebarCache) freshTopic.sidebarCache = {};
         freshTopic.sidebarCache.newDirections = newDirs;
         Storage.saveTopic(freshTopic);
       }
-      
+
       if (location === 'sidebar' && topicId === this.currentTopicId) {
-        // Update UI
         const dirContainer = document.getElementById('directionCards');
         if (dirContainer) {
           dirContainer.innerHTML = '';
-          if (newDirs.length === 0) {
-            dirContainer.innerHTML = '<p style="font-size:12px;color:var(--text-muted);">Keep chatting for suggestions.</p>';
+          const sortedDirs = [...newDirs].sort((a, b) => {
+            const order = { breadth: 0, depth: 1 };
+            return (order[a.type] ?? 2) - (order[b.type] ?? 2);
+          });
+          if (sortedDirs.length === 0) {
+            dirContainer.innerHTML = '<p class="temporal-empty-hint">Keep chatting for suggestions.</p>';
           }
-          newDirs.forEach(dir => dirContainer.appendChild(this._createDirectionCard(dir)));
+          sortedDirs.forEach((dir, idx) => dirContainer.appendChild(this._createDirectionCard(dir, idx)));
         }
         if (this.currentData) this.currentData.newDirections = newDirs;
       }
 
-      StudyLog.event('module3_shuffled', {
-        topicId: topicId,
+      StudyLog.event('future_directions_refreshed', {
+        topicId,
         location,
         oldCount: oldDirs.length,
         newCount: newDirs.length,
       });
     } catch (err) {
       console.error('Shuffle directions failed:', err);
-      if (location === 'sidebar') Utils.showToast('Failed to shuffle suggestions', 'error');
+      if (location === 'sidebar') Utils.showToast('Failed to refresh suggestions', 'error');
     }
 
     if (btn) btn.classList.remove('loading');
   },
+
+  // ── Drag from Status Block ────────────────────────────────────────────
+
+  _initStatusDrag() {
+    const el = this._getStatusContainer();
+    if (!el) return;
+    el.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/plain', this._serializeStatus(this._getCurrentStatus()));
+      e.dataTransfer.setData('application/loom-label', '[Current Profile]');
+      e.dataTransfer.setData('application/loom-context-type', 'current_profile');
+      StudyLog.event('current_profile_dragged', { topicId: this.currentTopicId });
+    });
+  },
+
+  // ── Dialog Management ─────────────────────────────────────────────────
 
   _initMergeDialog() {
     document.getElementById('mergeCancelBtn').addEventListener('click', () => {
@@ -1007,15 +1097,11 @@ const Sidebar = {
     });
   },
 
-  _initMoveDialog() {
-    // Move-chat now uses an inline popover managed by App._showMoveDropdown
-  },
+  // ── Collapse / Expand Sections ────────────────────────────────────────
 
   _initModuleCollapse() {
-    // Module collapse: clicking header or collapse button toggles module body
     document.querySelectorAll('.module-collapse-btn').forEach(btn => {
       const moduleId = btn.dataset.module;
-      // Restore persisted state
       const collapsed = localStorage.getItem('loom_moduleCollapse_' + moduleId) === 'true';
       if (collapsed) {
         const body = document.getElementById(moduleId + 'Body');
@@ -1029,16 +1115,17 @@ const Sidebar = {
       });
     });
 
-    document.querySelectorAll('.module-header[data-module]').forEach(header => {
+    document.querySelectorAll('.temporal-section-header').forEach(header => {
       header.addEventListener('click', (e) => {
-        // Don't toggle if clicking the update or shuffle button
-        if (e.target.closest('.status-update-btn') || e.target.closest('.shuffle-btn')) return;
-        const moduleId = header.dataset.module;
+        if (e.target.closest('.module-collapse-btn') || e.target.closest('.status-update-btn') || e.target.closest('.shuffle-btn')) return;
+        const sectionId = header.dataset.section;
+        if (!sectionId) return;
+        const moduleId = sectionId.replace('section', 'section');
         this._toggleModuleCollapse(moduleId);
       });
     });
 
-    // Overview section collapse within Module 1
+    // Overview section collapse within Current
     document.addEventListener('click', (e) => {
       const label = e.target.closest('.status-section-label.collapsible');
       if (!label) return;
@@ -1048,7 +1135,7 @@ const Sidebar = {
       const isCollapsed = label.classList.toggle('section-collapsed');
       itemsEl.classList.toggle('section-collapsed', isCollapsed);
       localStorage.setItem('loom_overviewCollapsed', isCollapsed);
-      StudyLog.event('overview_section_toggled', { section: sectionKey, collapsed: isCollapsed });
+      StudyLog.event('current_profile_section_toggled', { section: sectionKey, collapsed: isCollapsed });
     });
   },
 
@@ -1059,6 +1146,6 @@ const Sidebar = {
     const collapsed = body.classList.toggle('collapsed');
     if (btn) btn.classList.toggle('collapsed', collapsed);
     localStorage.setItem('loom_moduleCollapse_' + moduleId, collapsed);
-    StudyLog.event('module_collapsed', { moduleId, collapsed });
+    StudyLog.event('section_collapsed', { moduleId, collapsed });
   },
 };

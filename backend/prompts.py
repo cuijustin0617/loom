@@ -1,4 +1,6 @@
-"""All prompt templates for the Loom knowledge sidebar system."""
+"""All prompt templates for the Loom Personal Context Probe (Past / Current / Future)."""
+
+# ── Chat Response Prompts ─────────────────────────────────────────────────────
 
 CHAT_RESPONSE_PROMPT = """You are a helpful AI assistant. Respond naturally and helpfully to the user's message.
 
@@ -25,7 +27,7 @@ You MUST return valid JSON in this exact format:
 Rules:
 - "response" should be a natural, helpful answer to the user's question
 - "topic.name" should be a broad domain name like "Machine Learning", "Fitness", "Chinese Language"
-- "topic.matchedExistingId": STRONGLY PREFER matching to an existing topic. Use the id of an existing topic if the chat falls within the same broad domain, even if the specific sub-topic differs. Only null if truly no existing topic is relevant.
+- "topic.matchedExistingId": STRONGLY PREFER matching to an existing topic. Only null if truly no existing topic is relevant.
 - "topic.confidence" is 0-1. If matched to an existing topic, should be at least 0.5 unless very tenuous.
 - "concepts" should list 1-4 key concepts discussed, each with a short title and preview
 - Concept titles should be max 5 words, previews max 15 words"""
@@ -75,10 +77,12 @@ A sharp chef's knife and proper cutting technique{{~1}} will save you the most t
 {{~END~}}
 ---
 
-User's past conversations:
+User's relevant past conversations:
 {past_chats_json}
 
-Now respond to the user's message."""
+{stance_context}Now respond to the user's message."""
+
+# ── Metadata Extraction ───────────────────────────────────────────────────────
 
 CHAT_METADATA_PROMPT = """Analyze this conversation and extract topic classification and key concepts.
 
@@ -87,7 +91,7 @@ Existing topics the user has:
 
 The full conversation is given as messages. Your job is ONLY to classify.
 
-IMPORTANT: You should PREFER matching to an existing topic. A chat belongs to an existing topic if it falls within the same broad domain, even if the specific sub-topic is different. For example, a chat about "gradient descent" belongs to an existing "Machine Learning" topic; a chat about "deadlifts" belongs to an existing "Fitness" topic. Only return null for matchedExistingId if the chat truly has NO relationship to any existing topic.
+IMPORTANT: PREFER matching to an existing topic. A chat belongs to an existing topic if it falls within the same broad domain. Only return null for matchedExistingId if the chat truly has NO relationship to any existing topic.
 
 Return JSON:
 {{
@@ -105,157 +109,94 @@ Return JSON:
 Rules:
 - "topic.name": broad domain like "Machine Learning", "Fitness"
 - "topic.matchedExistingId": MUST be the id of an existing topic if the chat is related to that domain. Only null if truly no existing topic is relevant.
-- "topic.confidence": 0-1. If matched to an existing topic, confidence should be at least 0.5 unless the match is very tenuous.
-- "isOneOff": true ONLY for trivial one-off requests unlikely to be followed up — things like formatting an email, quick factual lookups, translations, or random specific tasks that don't represent ongoing learning. When in doubt, set false.
+- "topic.confidence": 0-1. If matched to an existing topic, confidence should be at least 0.5.
+- "isOneOff": true ONLY for trivial one-off requests unlikely to be followed up — formatting an email, quick factual lookups, translations. When in doubt, set false.
 - "concepts": 1-4 key concepts, title max 5 words, preview max 15 words"""
 
-SIDEBAR_BRIDGE_QUESTIONS_PROMPT = """You help users connect their current conversation to their past knowledge.
+# ── Current Profile (Status) Update ──────────────────────────────────────────
 
-Current conversation (most recent messages):
-{current_messages}
-
-Current topic: {topic_name}
-User's status in this topic: {topic_status}
-
-Here are the user's most relevant past chats and concepts (ranked by relevance):
-{ranked_items_json}
-
-For each item, generate a personalized bridge question that connects it to the CURRENT conversation. The question should:
-- Reference what the user previously discussed specifically
-- Naturally connect the past knowledge to the current topic
-- Read like something the user would naturally ask
-- Include personal details if relevant (e.g., "I learned about X before...")
-
-Return JSON:
-{{
-  "relatedCards": [
-    {{
-      "sourceType": "chat" or "concept",
-      "sourceId": "the_source_id",
-      "sourceTitle": "Title of past chat or concept",
-      "sourceSummary": "Brief 1-line summary of the past item",
-      "bridgeQuestion": "A natural question connecting past knowledge to current chat"
-    }}
-  ]
-}}
-
-Return 3-5 cards maximum. If fewer relevant items exist, return fewer."""
-
-SIDEBAR_NEW_DIRECTIONS_PROMPT = """Suggest directions that strengthen, bridge, or extend the user's learning threads within this topic.
+STATUS_UPDATE_PROMPT = """You maintain a structured summary of a user's current state in a topic for a personal context probe.
 
 Topic: {topic_name}
-User's learning threads and status: {topic_status}
-Concepts they've already covered:
-{covered_concepts}
-
-Current conversation context:
-{current_summary}
-
-Previously suggested directions (DO NOT SUGGEST THESE AGAIN):
-{previously_suggested}
-
-Generate 2-3 suggestions. Each must be one of these types:
-- "strengthen": Target a step the user has at brief or familiar level — deepen their understanding there
-- "bridge": Connect two of the user's threads that relate to each other but haven't been linked yet
-- "extend": Push the frontier of an existing thread — suggest the natural next step beyond where they stopped
-
-Rules:
-- Each suggestion must reference a specific thread label (or two for bridge type)
-- Include a short reason (1 sentence) explaining why this direction matters for the user
-- Questions should be OPEN-ENDED and CONCISE — phrased as simple, curiosity-driven questions the user could naturally ask, like "What is X?", "How does X work?", "How do X and Y connect?", "What are the tradeoffs of X?"
-- Do NOT write long, multi-part, or overly specific questions. The user hasn't asked these yet, so keep them approachable and suggestive — not prescriptive
-- Aim for a mix of types when possible, but don't force a type if it doesn't fit
-
-Return JSON:
-{{
-  "newDirections": [
-    {{
-      "title": "Short Title 3-5 Words",
-      "question": "A short, open-ended question like 'What is X?' or 'How does X work?'",
-      "type": "strengthen",
-      "threadLabel": "Consensus & Raft",
-      "reason": "Your grasp of leader election is familiar — this deepens it"
-    }},
-    {{
-      "title": "Connecting X and Y",
-      "question": "How do X and Y relate?",
-      "type": "bridge",
-      "threadLabel": "Thread A & Thread B",
-      "reason": "These two threads share a common foundation you haven't linked yet"
-    }},
-    {{
-      "title": "Next Step Beyond Z",
-      "question": "What comes after Z?",
-      "type": "extend",
-      "threadLabel": "Thread Name",
-      "reason": "You've covered the basics — this is the natural next frontier"
-    }}
-  ]
-}}"""
-
-STATUS_UPDATE_PROMPT = """You maintain a structured summary of a user's learning trajectory in a topic.
-
-Topic: {topic_name}
-Current status: {current_status}
+Current profile: {current_status}
 Current chat messages:
 {current_messages}
 Past chat summaries (newest first):
 {recent_summaries}
 
-Update the status with two sections:
+Update the profile with two sections:
 
-1. **Overview**: 2-4 bullet points summarizing the user's overall profile in this topic. Think big-picture: user's background, context, traits, level, stats, goals, timeline. Incorporate any self-reported knowledge, notes, or stated expertise the user has shared.
+1. **Overview**: 2-4 bullet points summarizing the user's overall profile in this topic. Think big-picture: user's background, context, stated goals, skill level, timeline. Incorporate any self-reported information the user has shared.
 
-2. **Threads**: Organize the user's exploration into learning threads. Each thread is a coherent sequence of related concepts/questions that build on each other — like a trail through the topic space showing how the user's understanding evolved.
-
-Rules for threads:
-- Group related chats into threads that show a logical learning PROGRESSION, not just topical similarity
-- A thread should read as a story: "started here, then went there, then explored this"
-- Each thread has a short label (3-6 words) describing the direction
-- Each thread has 1-5 ordered steps showing what the user explored, earliest to latest
-- Each step has a short text description (5-15 words) and an understanding level
-- System (assistant) messages may contain optional inline user labels: `[USER: understood this section]` means the user confirmed they read and understood that section; `[USER: unsure about this section]` means they flagged confusion. Unlabeled sections should be treated as briefly skimmed at best — do NOT assume the user absorbed unlabeled content.
-- User-applied labels (`[USER: understood this section]` / `[USER: unsure about this section]`) take priority over inferred levels — if a label is present on a chunk, that label determines the step level and should override any prior inference.
-- Infer understanding primarily from the USER's own actions — their questions, follow-up reactions, and chunk labels:
-  - "solid": user demonstrated mastery through deep follow-ups, applied the concept correctly, or labeled it as understood
-  - "familiar": user must have raised or asked about this concept in their own message (not just received it in an AI response), AND engaged with the response via follow-up questions or an understood label
-  - "unsure": user explicitly flagged confusion — either via an [USER: unsure about this section] label, or by expressing lack of understanding in their messages (e.g. "I don't get this", "this is confusing", asking for re-explanation)
-  - "brief": concept was only mentioned by the system with no user engagement signal (no follow-up, no label)
-- If a concept was introduced by the system (AI) in its response — not explicitly asked for by the user — default to "brief" regardless of how much the AI said about it. Only promote to "familiar" or higher if the user subsequently engaged.
-- Do NOT mark concepts as "familiar" or "solid" just because the system explained them. The system's response alone is not evidence the user understood it.
-- If the user explicitly states what they know or shares notes, that can be a step with "solid"/"familiar"
-- If a new chat extends an existing thread, append or update a step; if it opens a new direction, start a new thread
-- Avoid single-step threads unless the concept is truly standalone
-- Max 5 threads, max 6 steps per thread
-- If current status has old-format "specifics", reorganize them into threads
+2. **Concepts Traversed**: A flat list of key concepts the user has encountered or discussed across their chats in this topic. Each concept is simply a short title (2-6 words). Do NOT assign mastery levels or infer psychological states — just track what concepts have appeared.
 
 Rules for overview:
-- mainly ADD or EDIT(more detailed) information, don't remove existing info unless contradicted
+- Mainly ADD or EDIT information, don't remove existing info unless contradicted
 - Keep each point to 1 short-medium line
+- Only include information the user explicitly shared or clearly demonstrated
+
+Rules for concepts:
+- Extract distinct concepts, topics, techniques, or terms the user has actively engaged with
+- Include concepts from both the current chat and past summaries
+- Keep titles concise (2-6 words), deduplicate, merge near-duplicates
+- Max 20 concepts total
+- Include a "stance" field defaulting to "neutral" — do NOT override stances the user has set
 
 Return JSON:
 {{
   "overview": ["point 1", "point 2"],
-  "threads": [
+  "concepts_traversed": [
+    {{"title": "Concept A", "stance": "neutral"}},
+    {{"title": "Concept B", "stance": "neutral"}}
+  ]
+}}"""
+
+# ── Future Directions ─────────────────────────────────────────────────────────
+
+SIDEBAR_NEW_DIRECTIONS_PROMPT = """Suggest exactly two focused directions for the user — one breadth direction and one depth direction.
+
+Topic: {topic_name}
+User's current profile:
+{topic_status}
+Concepts they've already encountered:
+{covered_concepts}
+Recent conversation context:
+{current_summary}
+Previously suggested (DO NOT REPEAT):
+{previously_suggested}
+
+Generate exactly 2 directions, one of each type:
+
+- "breadth": An adjacent topic or concept the user has NOT yet touched, but is directly relevant to their profile and goals. Opens a new area — do NOT go deeper into something they already know.
+- "depth": A more advanced, technical, or nuanced angle on a concept they HAVE already traversed. Extends mastery of something familiar — do NOT introduce new areas.
+
+Rules:
+- Each suggestion must be grounded in a specific concept or profile bullet (reference it as the anchor)
+- Framed as a short, open-ended question the user could naturally ask
+- Do NOT repeat previously suggested directions
+- breadth must reference something NOT in their concepts list; depth must reference something that IS
+
+Return JSON:
+{{
+  "newDirections": [
     {{
-      "label": "Consensus & Raft",
-      "steps": [
-        {{"text": "Consensus basics and approaches", "level": "solid"}},
-        {{"text": "Raft protocol implementation", "level": "familiar"}},
-        {{"text": "Leader election mechanics", "level": "brief"}},
-        {{"text": "Log replication", "level": "brief"}},
-        {{"text": "Split-brain scenarios", "level": "unsure"}}
-      ]
+      "type": "breadth",
+      "title": "Short Title 3-5 Words",
+      "question": "A short open-ended question like 'What is X?' or 'How does X connect to Y?'",
+      "anchor": "From current profile: [specific concept or profile bullet this builds on]",
+      "reason": "One sentence explaining why this adjacent area matters for the user right now"
     }},
     {{
-      "label": "CAP theorem exploration",
-      "steps": [
-        {{"text": "CAP theorem tradeoffs", "level": "familiar"}},
-        {{"text": "Eventual consistency models", "level": "brief"}}
-      ]
+      "type": "depth",
+      "title": "Short Title 3-5 Words",
+      "question": "A short open-ended question like 'How does X work at a deeper level?' or 'What are the advanced tradeoffs of X?'",
+      "anchor": "From current profile: [specific concept already traversed that this deepens]",
+      "reason": "One sentence explaining why going deeper here is valuable right now"
     }}
   ]
 }}"""
+
+# ── Chat Summarization ────────────────────────────────────────────────────────
 
 CHAT_SUMMARIZE_PROMPT = """Summarize this conversation as a structured card. Generate:
 1. A short title (3-6 words)
@@ -270,9 +211,11 @@ Return JSON:
 {{
   "title": "Short Title Here",
   "summary": "1-2 sentence summary of the conversation.",
-  "userAsked": "Concise description of what the user wanted to know, their question, or context they provided (1-2 sentences)",
-  "aiCovered": "Key points the AI addressed, taught, or recommended — what the user could take away (1-2 sentences)"
+  "userAsked": "Concise description of what the user wanted to know or their context (1-2 sentences)",
+  "aiCovered": "Key points the AI addressed or recommended — what the user could take away (1-2 sentences)"
 }}"""
+
+# ── Topic Management ──────────────────────────────────────────────────────────
 
 TOPIC_AUTO_DETECT_PROMPT = """Analyze these recent chat summaries. Your PRIMARY goal is to assign as many chats as possible to existing topics. Your secondary goal is to identify new topic clusters.
 
@@ -293,10 +236,54 @@ Return JSON:
 }}
 
 Rules:
-- FIRST: Check every unassigned chat against existing topics. If a chat is even loosely related to an existing topic's domain, assign it via assignToExisting. Be generous — a chat about any sub-topic within a domain belongs to that topic. Even a SINGLE chat can be assigned to an existing topic.
+- FIRST: Check every unassigned chat against existing topics. If a chat is even loosely related to an existing topic's domain, assign it via assignToExisting. Be generous.
 - SECOND: If remaining chats form a new cluster (2+ chats in same domain), add to newTopics
-- Only leave out chats that are truly random one-off requests (formatting emails, quick lookups, translations)
+- Only leave out chats that are truly random one-off requests
 - If no groupings are found, return {{ "newTopics": [], "assignToExisting": [] }}"""
+
+TOPIC_RENAME_CHECK_PROMPT = """A user renamed their learning topic from "{old_name}" to "{new_name}".
+
+Here are the current overview bullets for this topic:
+{current_overview}
+
+Check whether any of these bullets specifically reference the old topic name "{old_name}" and would read awkwardly or incorrectly now. If so, update ONLY the bullets that reference the old name — replace the old name with the new name or rephrase naturally. Leave all other bullets UNCHANGED.
+
+If no bullets reference the old name at all, return them as-is with needsUpdate: false.
+
+Return JSON:
+{{
+  "needsUpdate": true,
+  "overview": ["bullet 1", "bullet 2"]
+}}"""
+
+# ── Overview AI Edit ──────────────────────────────────────────────────────────
+
+OVERVIEW_AI_EDIT_PROMPT = """You edit a user's current profile overview based on their natural-language instruction.
+
+Topic: {topic_name}
+Current overview bullet points:
+{current_overview}
+
+User's instruction: {instruction}
+
+Apply the user's instruction to the overview. You may:
+- Add new bullet points if the user provides new information about themselves
+- Edit existing bullet points to reflect updated goals, focus, or context
+- Remove bullet points the user says are no longer relevant
+- Rephrase or merge bullet points for clarity
+
+Rules:
+- Preserve existing bullets that are NOT affected by the instruction
+- Keep each bullet to 1 short-medium line
+- Return 1-6 bullet points total
+- Do NOT invent information the user didn't provide
+
+Return JSON:
+{{
+  "overview": ["updated point 1", "updated point 2"]
+}}"""
+
+# ── Baseline Condition ────────────────────────────────────────────────────────
 
 BASELINE_PERSONAL_DETAILS_PROMPT = """You are a helpful system that extracts personal details about the user from their conversations. Your goal is to maintain a running bullet-point list of what the system knows about the user.
 
@@ -323,46 +310,4 @@ Rules:
 Return JSON:
 {{
   "details": ["detail 1", "detail 2", "detail 3"]
-}}"""
-
-OVERVIEW_AI_EDIT_PROMPT = """You edit a user's learning overview based on their natural-language instruction.
-
-Topic: {topic_name}
-Current overview bullet points:
-{current_overview}
-
-User's instruction: {instruction}
-
-Apply the user's instruction to the overview. You may:
-- Add new bullet points if the user provides new information about themselves
-- Edit existing bullet points to reflect updated goals, focus, or context
-- Remove bullet points the user says are no longer relevant
-- Rephrase or merge bullet points for clarity
-- Reorder if it improves logical flow
-
-Rules:
-- Preserve existing bullets that are NOT affected by the instruction
-- Keep each bullet to 1 short-medium line (same style as the existing ones)
-- Return 1-6 bullet points total
-- Do NOT invent information the user didn't provide or imply
-- If the instruction is unclear, make the most reasonable interpretation
-
-Return JSON:
-{{
-  "overview": ["updated point 1", "updated point 2"]
-}}"""
-
-TOPIC_RENAME_CHECK_PROMPT = """A user renamed their learning topic from "{old_name}" to "{new_name}".
-
-Here are the current overview bullets for this topic:
-{current_overview}
-
-Check whether any of these bullets specifically reference the old topic name "{old_name}" and would read awkwardly or incorrectly now. If so, update ONLY the bullets that reference the old name — replace the old name with the new name or rephrase naturally. Leave all other bullets UNCHANGED.
-
-If no bullets reference the old name at all, return them as-is with needsUpdate: false.
-
-Return JSON:
-{{
-  "needsUpdate": true/false,
-  "overview": ["bullet 1", "bullet 2"]
 }}"""

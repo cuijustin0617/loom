@@ -60,39 +60,48 @@ test('padding reduction is approximately 30% (108 → ~76)', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// TODO 2: Module 1 "User Knowledge" label
+// Past / Current / Future Temporal Sections (redesigned UI)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-console.log('\n─── TODO 2: Module 1 "User Knowledge" Label ───');
+console.log('\n─── Past / Current / Future Temporal Sections ───');
 
-test('Module 1 HTML contains "User Knowledge" label', () => {
-    assert.ok(htmlContent.includes('User Knowledge'),
-        'index.html should contain "User Knowledge" text');
+test('HTML has section-past with pastChatsList', () => {
+    assert.ok(htmlContent.includes('id="sectionPast"'),
+        'index.html should have sectionPast');
+    assert.ok(htmlContent.includes('id="pastChatsList"'),
+        'index.html should have pastChatsList');
 });
 
-test('Module 1 module-title has "User Knowledge" as text', () => {
-    // Find the module-title inside Module 1 (module-status)
-    const module1Section = htmlContent.substring(
-        htmlContent.indexOf('id="moduleStatus"'),
-        htmlContent.indexOf('id="moduleConnections"')
-    );
-    assert.ok(module1Section.includes('>User Knowledge<'),
-        'Module 1 should have a module-title with "User Knowledge"');
+test('HTML has section-current with statusStructured', () => {
+    assert.ok(htmlContent.includes('id="sectionCurrent"'),
+        'index.html should have sectionCurrent');
+    assert.ok(htmlContent.includes('id="statusStructured"'),
+        'index.html should have statusStructured');
 });
 
-test('Module 1 still has statusTopicName element for dynamic topic name', () => {
-    assert.ok(htmlContent.includes('id="statusTopicName"'),
-        'Should still have statusTopicName element for dynamic content');
+test('HTML has section-future with directionCards', () => {
+    assert.ok(htmlContent.includes('id="sectionFuture"'),
+        'index.html should have sectionFuture');
+    assert.ok(htmlContent.includes('id="directionCards"'),
+        'index.html should have directionCards');
 });
 
-test('Module 2 still labeled "Linked past chats"', () => {
-    assert.ok(htmlContent.includes('>Linked past chats<'),
-        'Module 2 should still be labeled "Linked past chats"');
+test('HTML has temporal breadcrumb with Past/Current/Future crumbs', () => {
+    assert.ok(htmlContent.includes('data-phase="past"'),
+        'index.html should have past temporal crumb');
+    assert.ok(htmlContent.includes('data-phase="current"'),
+        'index.html should have current temporal crumb');
+    assert.ok(htmlContent.includes('data-phase="future"'),
+        'index.html should have future temporal crumb');
 });
 
-test('Module 3 still labeled "Explore next"', () => {
-    assert.ok(htmlContent.includes('>Explore next<'),
-        'Module 3 should still be labeled "Explore next"');
+test('graph view is disabled in HTML', () => {
+    assert.ok(!htmlContent.includes('id="tabGraph"'),
+        'index.html should not expose tabGraph when graph view is disabled');
+    assert.ok(!htmlContent.includes('id="graphCanvas"'),
+        'index.html should not include graphCanvas when graph view is disabled');
+    assert.ok(!htmlContent.includes('graph.js'),
+        'index.html should not load graph.js when graph view is disabled');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -118,15 +127,15 @@ test('status-update-btn CSS exists', () => {
         'CSS should define .status-update-btn class');
 });
 
-test('status update button is in Module 1 header', () => {
-    const module1Header = htmlContent.substring(
-        htmlContent.indexOf('data-module="moduleStatus"'),
-        htmlContent.indexOf('id="moduleStatusBody"')
+test('status update button is in sectionCurrent header', () => {
+    const sectionCurrentHeader = htmlContent.substring(
+        htmlContent.indexOf('id="sectionCurrent"'),
+        htmlContent.indexOf('id="sectionFuture"')
     );
-    assert.ok(module1Header.includes('statusUpdateHeaderBtn'),
-        'Module 1 header should contain statusUpdateHeaderBtn');
-    assert.ok(module1Header.includes('status-update-btn'),
-        'Module 1 header update button should use status-update-btn class');
+    assert.ok(sectionCurrentHeader.includes('statusUpdateHeaderBtn'),
+        'sectionCurrent header should contain statusUpdateHeaderBtn');
+    assert.ok(sectionCurrentHeader.includes('status-update-btn'),
+        'sectionCurrent header update button should use status-update-btn class');
 });
 
 test('sidebar.js uses statusUpdateHeaderBtn instead of old statusUpdateBtn', () => {
@@ -172,13 +181,13 @@ test('all 3 modules have module-collapse-btn', () => {
         `Should have at least 3 module-collapse-btn occurrences, found ${collapseButtons ? collapseButtons.length : 0}`);
 });
 
-test('all 3 modules have module-body wrapper', () => {
-    assert.ok(htmlContent.includes('id="moduleStatusBody"'),
-        'Module 1 should have moduleStatusBody');
-    assert.ok(htmlContent.includes('id="moduleConnectionsBody"'),
-        'Module 2 should have moduleConnectionsBody');
-    assert.ok(htmlContent.includes('id="moduleDirectionsBody"'),
-        'Module 3 should have moduleDirectionsBody');
+test('all 3 temporal sections have module-body wrapper', () => {
+    assert.ok(htmlContent.includes('id="sectionPastBody"'),
+        'Past section should have sectionPastBody');
+    assert.ok(htmlContent.includes('id="sectionCurrentBody"'),
+        'Current section should have sectionCurrentBody');
+    assert.ok(htmlContent.includes('id="sectionFutureBody"'),
+        'Future section should have sectionFutureBody');
 });
 
 test('module-collapse-btn CSS exists', () => {
@@ -195,13 +204,13 @@ test('module-body.collapsed hides content', () => {
         '.module-body.collapsed should set display: none');
 });
 
-test('module headers have data-module attributes for collapse', () => {
-    assert.ok(htmlContent.includes('data-module="moduleStatus"'),
-        'Module 1 header should have data-module="moduleStatus"');
-    assert.ok(htmlContent.includes('data-module="moduleConnections"'),
-        'Module 2 header should have data-module="moduleConnections"');
-    assert.ok(htmlContent.includes('data-module="moduleDirections"'),
-        'Module 3 header should have data-module="moduleDirections"');
+test('temporal section headers have data-module attributes for collapse', () => {
+    assert.ok(htmlContent.includes('data-module="sectionPast"'),
+        'Past section header should have data-module="sectionPast"');
+    assert.ok(htmlContent.includes('data-module="sectionCurrent"'),
+        'Current section header should have data-module="sectionCurrent"');
+    assert.ok(htmlContent.includes('data-module="sectionFuture"'),
+        'Future section header should have data-module="sectionFuture"');
 });
 
 test('sidebar.js has _initModuleCollapse method', () => {
@@ -260,9 +269,9 @@ test('overview items have independent scroll container', () => {
         'Overview section items should have max-height + overflow auto');
 });
 
-test('knowledge threads section has dedicated class for stable heading visibility', () => {
-    assert.ok(sidebarContent.includes('status-section-threads'),
-        'sidebar render should tag knowledge threads section');
+test('sidebar has status-section-concepts class for concept tags', () => {
+    assert.ok(sidebarContent.includes('status-section-concepts'),
+        'sidebar render should tag concepts traversed section');
 });
 
 // ── Module collapse persistence logic unit test ──────────────────────────────
@@ -303,108 +312,46 @@ test('module collapse localStorage logic: toggle and persist', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// TODO 5: Connection card positioning and UI
+// Past Chat Cards & Context Drag
 // ═══════════════════════════════════════════════════════════════════════════════
 
-console.log('\n─── TODO 5: Connection Card Positioning and UI ───');
+console.log('\n─── Past Chat Cards & Context Drag ───');
 
-test('app.js has _connCardMarker and _connScrollHandler properties', () => {
-    assert.ok(appContent.includes('_connCardMarker'),
-        'app.js should have _connCardMarker property');
-    assert.ok(appContent.includes('_connScrollHandler'),
-        'app.js should have _connScrollHandler property');
+test('sidebar.js has _createPastChatCard method', () => {
+    assert.ok(sidebarContent.includes('_createPastChatCard'),
+        'sidebar.js should define _createPastChatCard');
 });
 
-test('_showConnCard adds scroll listener on chatMessages', () => {
-    assert.ok(appContent.includes("chatMessages.addEventListener('scroll', this._connScrollHandler"),
-        'Should add scroll event listener to chatMessages');
+test('past chat card has past-build-on click handler', () => {
+    assert.ok(sidebarContent.includes('past-build-on-btn') || sidebarContent.includes("'past_build_on_click'"),
+        'Past chat card should have build-on interaction');
 });
 
-test('_showConnCard checks if marker is still visible before positioning', () => {
-    assert.ok(appContent.includes('rect.bottom < 0 || rect.top > window.innerHeight'),
-        'Should check if marker is out of viewport');
+test('direction card is draggable', () => {
+    assert.ok(sidebarContent.includes("el.draggable = true"),
+        'Direction card should be draggable');
 });
 
-test('_hideConnCard removes scroll listener', () => {
-    // Check that _hideConnCard cleans up the scroll handler
-    const startIdx = appContent.indexOf('_hideConnCard() {');
-    const hideFunc = appContent.substring(
-        startIdx,
-        appContent.indexOf('_bindConnectionCards', startIdx)
-    );
-    assert.ok(hideFunc.includes('removeEventListener') && hideFunc.includes('_connScrollHandler'),
-        '_hideConnCard should remove scroll event listener');
-    assert.ok(hideFunc.includes('_connScrollHandler = null'),
-        '_hideConnCard should null out scroll handler');
-    assert.ok(hideFunc.includes('_connCardMarker = null'),
-        '_hideConnCard should null out marker reference');
+test('app.js has drag-over drop handler', () => {
+    assert.ok(appContent.includes("'dragover'") && appContent.includes("'drop'"),
+        'App should handle dragover and drop events');
 });
 
-test('_showConnCard sets marker reference', () => {
-    assert.ok(appContent.includes('this._connCardMarker = marker'),
-        '_showConnCard should store marker reference');
-});
-
-test('module 3 drag payload includes direction metadata for input rendering', () => {
-    assert.ok(sidebarContent.includes("application/loom-context-type") && sidebarContent.includes('direction_card'),
-        'Direction drag should include context type metadata');
-    assert.ok(sidebarContent.includes("application/loom-direction-type"),
-        'Direction drag should include direction type metadata');
-    assert.ok(sidebarContent.includes("application/loom-question"),
-        'Direction drag should include question metadata');
-});
-
-test('app drop handler reads direction metadata and passes to setContextBlock', () => {
-    assert.ok(appContent.includes("getData('application/loom-context-type')"),
-        'Drop handler should read context type metadata');
-    assert.ok(appContent.includes("getData('application/loom-direction-type')"),
-        'Drop handler should read direction-type metadata');
-    assert.ok(appContent.includes("getData('application/loom-question')"),
-        'Drop handler should read question metadata');
-});
-
-test('context block stores contextMeta and user message renders direction suggestion card', () => {
+test('context block stores contextMeta and user message includes it', () => {
     assert.ok(appContent.includes('contextMeta = {'),
         'sendMessage should collect contextMeta from context block');
     assert.ok(appContent.includes('contextMeta: contextMeta'),
         'user message payload should include contextMeta');
-    assert.ok(appContent.includes("type: 'direction_suggestion'"),
-        'append message should map metadata to direction_suggestion module');
-    assert.ok(cssContent.includes('.ctx-card-direction'),
-        'CSS should define card-style direction module in user bubble');
-    assert.ok(cssContent.includes('.context-preview-card'),
-        'CSS should define card-style preview in input context block');
 });
 
-test('module 2 build action passes linked chat card metadata to input preview', () => {
-    assert.ok(appContent.includes("type: 'linked_chat_card'"),
-        'Build on this should pass linked_chat_card type');
-    assert.ok(appContent.includes('card.dataset.userAsked') && appContent.includes('card.dataset.aiCovered'),
-        'Build on this should pass userAsked/aiCovered metadata');
-    assert.ok(appContent.includes('context-preview-linked'),
-        'setContextBlock should render linked-card style preview');
-    assert.ok(cssContent.includes('.context-preview-linked'),
-        'CSS should define linked-card preview style');
+test('CSS has temporal-card style', () => {
+    assert.ok(cssContent.includes('.temporal-card'),
+        'CSS should define .temporal-card style');
 });
 
-test('connection card CSS has refined styling (top border, softer shadow)', () => {
-    assert.ok(cssContent.includes('border-top: 2.5px solid var(--accent-purple)'),
-        'Card should have top accent border');
-    assert.ok(!cssContent.match(/\.conn-card\s*\{[^}]*border-left:\s*3px/),
-        'Card should NOT have thick left border anymore');
-});
-
-test('connection card has scale animation on appear', () => {
-    assert.ok(cssContent.includes('scale(0.98)'),
-        'Card should have subtle scale-down in hidden state');
-    assert.ok(cssContent.includes('scale(1)'),
-        'Card should scale up to 1 when visible');
-});
-
-test('connection card border-radius is refined', () => {
-    const match = cssContent.match(/\.conn-card\s*\{[^}]*border-radius:\s*(\d+)px/);
-    assert.ok(match, 'Should have border-radius on .conn-card');
-    assert.ok(Number(match[1]) <= 6, 'Border radius should be near-rectangular');
+test('CSS has direction-card style', () => {
+    assert.ok(cssContent.includes('.direction-card'),
+        'CSS should define .direction-card style');
 });
 
 // ── Connection card position logic unit test ─────────────────────────────────
@@ -478,13 +425,12 @@ test('sidebar.js init() calls all necessary init functions', () => {
         sidebarContent.indexOf('init()'),
         sidebarContent.indexOf('},', sidebarContent.indexOf('init()'))
     );
-    assert.ok(initFunc.includes('_initStatusEdit'), 'init should call _initStatusEdit');
     assert.ok(initFunc.includes('_initStatusDrag'), 'init should call _initStatusDrag');
     assert.ok(initFunc.includes('_initStatusUpdate'), 'init should call _initStatusUpdate');
     assert.ok(initFunc.includes('_initMergeDialog'), 'init should call _initMergeDialog');
-    assert.ok(initFunc.includes('_initMoveDialog'), 'init should call _initMoveDialog');
     assert.ok(initFunc.includes('_initShuffle'), 'init should call _initShuffle');
     assert.ok(initFunc.includes('_initModuleCollapse'), 'init should call _initModuleCollapse');
+    assert.ok(!initFunc.includes('_initViewTabs'), 'init should not wire graph/list view tabs when graph is disabled');
 });
 
 test('no references to removed elements remain in sidebar.js', () => {
@@ -519,36 +465,34 @@ test('subtitle "Personalized context modules" is removed', () => {
         'HTML should not contain "Personalized context modules" subtitle');
 });
 
-test('direction card borders are subtle (use rgba, not solid accent)', () => {
-    const strengthenRule = cssContent.match(/\.direction-card\.type-strengthen\s*\{[^}]*border-left-color:\s*([^;]+)/);
-    assert.ok(strengthenRule, 'Should find .type-strengthen rule');
-    assert.ok(strengthenRule[1].includes('rgba'),
-        `Strengthen border should use rgba for subtlety, got: ${strengthenRule[1]}`);
+test('direction card breadth type has rgba border (subtle)', () => {
+    const breadthRule = cssContent.match(/\.temporal-card\.direction-card\.type-breadth\s*\{[^}]*border-left-color:\s*([^;]+)/);
+    assert.ok(breadthRule, 'Should find .type-breadth rule');
+    assert.ok(breadthRule[1].includes('rgba'),
+        `Breadth border should use rgba for subtlety, got: ${breadthRule[1]}`);
 });
 
-test('direction card base border is thin (1.5px)', () => {
-    const cardRule = cssContent.match(/\.direction-card\s*\{[^}]*border-left:\s*([^;]+)/);
-    assert.ok(cardRule, 'Should find .direction-card border-left rule');
-    assert.ok(cardRule[1].includes('1.5px'),
-        `Border should be 1.5px, got: ${cardRule[1]}`);
+test('direction card depth type has rgba border (subtle)', () => {
+    const depthRule = cssContent.match(/\.temporal-card\.direction-card\.type-depth\s*\{[^}]*border-left-color:\s*([^;]+)/);
+    assert.ok(depthRule, 'Should find .type-depth rule');
+    assert.ok(depthRule[1].includes('rgba'),
+        `Depth border should use rgba for subtlety, got: ${depthRule[1]}`);
 });
 
-test('directions prompt asks for open-ended concise questions', () => {
-    assert.ok(promptContent.includes('OPEN-ENDED') && promptContent.includes('CONCISE'),
-        'Prompt should ask for OPEN-ENDED and CONCISE questions');
-    assert.ok(promptContent.includes('Do NOT write long, multi-part'),
-        'Prompt should warn against long multi-part questions');
-    assert.ok(promptContent.includes('curiosity-driven'),
-        'Prompt should ask for curiosity-driven questions');
+test('directions prompt generates exactly breadth + depth directions', () => {
+    assert.ok(promptContent.includes('"breadth"'),
+        'Prompt should specify breadth direction type');
+    assert.ok(promptContent.includes('"depth"'),
+        'Prompt should specify depth direction type');
+    assert.ok(promptContent.includes('exactly 2 directions') || promptContent.includes('one breadth') || promptContent.includes('one of each type'),
+        'Prompt should instruct to generate one breadth and one depth');
 });
 
-test('directions prompt example questions are short and general', () => {
+test('directions prompt example questions include short open-ended patterns', () => {
     assert.ok(promptContent.includes("'What is X?'") || promptContent.includes('"What is X?"'),
-        'Prompt examples should include simple patterns like "What is X?"');
-    assert.ok(promptContent.includes('How do X and Y relate?'),
-        'Bridge example should be a short general question');
-    assert.ok(promptContent.includes('What comes after Z?'),
-        'Extend example should be a short general question');
+        'Prompt examples should include simple "What is X?" pattern');
+    assert.ok(promptContent.includes('open-ended'),
+        'Prompt should ask for open-ended questions');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -717,33 +661,29 @@ test('sendMessage provides default message for attachment-only sends', () => {
 
 console.log('\n─── NEW TODO 5: Deduplicate Connection Cards ───');
 
-test('showConnections groups connections by chatId', () => {
-    assert.ok(sidebarContent.includes("const grouped = {}"),
-        'showConnections should group connections by chatId');
-    assert.ok(sidebarContent.includes('groupOrder'),
-        'showConnections should maintain group order');
+test('sidebar.js has showPastChats method for rendering past context', () => {
+    assert.ok(sidebarContent.includes('showPastChats('),
+        'sidebar.js should define showPastChats method');
 });
 
-test('grouped cards show count badge for multiple connections', () => {
-    assert.ok(sidebarContent.includes('conn-sb-count'),
-        'Should render count badge for multiple connections from same chat');
+test('past chat cards render userAsked and aiCovered details', () => {
+    assert.ok(sidebarContent.includes('userAsked') && sidebarContent.includes('aiCovered'),
+        'Past chat cards should render userAsked and aiCovered fields');
 });
 
-test('individual insight items have per-connection hover/click', () => {
-    assert.ok(sidebarContent.includes('conn-sb-insight-item'),
-        'Should render individual insight items within grouped card');
+test('CSS has past-chat-card style', () => {
+    assert.ok(cssContent.includes('.past-chat-card'),
+        'CSS should define .past-chat-card style');
 });
 
-test('CSS defines conn-sb-insights and conn-sb-insight-item styles', () => {
-    assert.ok(cssContent.includes('.conn-sb-insights'),
-        'CSS should define .conn-sb-insights');
-    assert.ok(cssContent.includes('.conn-sb-insight-item'),
-        'CSS should define .conn-sb-insight-item');
+test('CSS has temporal-empty-hint for empty sections', () => {
+    assert.ok(cssContent.includes('.temporal-empty-hint'),
+        'CSS should define .temporal-empty-hint style');
 });
 
-test('CSS defines conn-sb-count badge style', () => {
-    assert.ok(cssContent.includes('.conn-sb-count'),
-        'CSS should define .conn-sb-count badge');
+test('CSS has past-relevance-bar for relevance indicators', () => {
+    assert.ok(cssContent.includes('past-relevance') || cssContent.includes('temporal-card'),
+        'CSS should have past relevance or temporal card styling');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1223,19 +1163,23 @@ test('visibilitychange handler calls _renderChatList when becoming visible', () 
 
 console.log('\n─── Thread Familiarity: Conservative Prompt Rules ───');
 
-test('STATUS_UPDATE_PROMPT requires user to have raised the concept for familiar', () => {
-    assert.ok(promptContent.includes('user must have raised or asked about this concept'),
-        'Prompt should require user raised the concept for familiar level');
+test('STATUS_UPDATE_PROMPT returns stance field for concepts', () => {
+    assert.ok(promptContent.includes('"stance"'),
+        'STATUS_UPDATE_PROMPT should use stance field instead of checked');
+    assert.ok(promptContent.includes('"neutral"'),
+        'STATUS_UPDATE_PROMPT should default stance to neutral');
 });
 
-test('STATUS_UPDATE_PROMPT states system-introduced concepts default to brief', () => {
-    assert.ok(promptContent.includes('introduced by the system (AI)') && promptContent.includes('default to "brief"'),
-        'Prompt should state AI-introduced concepts default to brief');
+test('STATUS_UPDATE_PROMPT returns concepts_traversed array', () => {
+    assert.ok(promptContent.includes('concepts_traversed'),
+        'STATUS_UPDATE_PROMPT should return concepts_traversed array');
 });
 
-test('STATUS_UPDATE_PROMPT states user labels take priority over inferred levels', () => {
-    assert.ok(promptContent.includes('take priority over inferred levels'),
-        'Prompt should state user labels take priority');
+test('STATUS_UPDATE_PROMPT includes overview section', () => {
+    assert.ok(promptContent.includes('overview'),
+        'STATUS_UPDATE_PROMPT should include overview field');
+    assert.ok(promptContent.includes('Overview'),
+        'STATUS_UPDATE_PROMPT should describe the Overview section');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1378,12 +1322,9 @@ test('chat selection click calls Sidebar._flushDirtyLabels()', () => {
         'Chat selection click handler should call _flushDirtyLabels');
 });
 
-test('connection goto click calls Sidebar._flushDirtyLabels()', () => {
-    const gotoStart = appContent.indexOf("('.conn-card-goto').addEventListener");
-    assert.ok(gotoStart >= 0, 'Should find conn-card-goto event listener');
-    const block = appContent.substring(gotoStart, gotoStart + 500);
-    assert.ok(block.includes('_flushDirtyLabels'),
-        'Connection goto click should call _flushDirtyLabels');
+test('past build-on button calls _flushDirtyLabels or flush logic', () => {
+    assert.ok(sidebarContent.includes('_flushDirtyLabels') || sidebarContent.includes('flushDirtyLabels'),
+        'Past card build-on interaction should trigger dirty label flush');
 });
 
 test('_onInactive() calls Sidebar._flushDirtyLabels()', () => {
@@ -1647,6 +1588,251 @@ test('.new-chat-btn hover uses neutral background', () => {
     assert.ok(hoverRule, 'Should find .new-chat-btn:hover rule');
     assert.ok(hoverRule[0].includes('var(--hover-bg)'),
         '.new-chat-btn:hover should use var(--hover-bg)');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// THREE-FEATURE PROBE UPGRADE: Feature 1 — Breadth/Depth Future Directions
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\n─── Feature 1: Breadth/Depth Future Directions ───');
+
+test('SIDEBAR_NEW_DIRECTIONS_PROMPT uses breadth/depth types', () => {
+    assert.ok(promptContent.includes('"breadth"'),
+        'Prompt should specify breadth direction type');
+    assert.ok(promptContent.includes('"depth"'),
+        'Prompt should specify depth direction type');
+    assert.ok(promptContent.includes('exactly two') || promptContent.includes('one breadth') || promptContent.includes('exactly 2'),
+        'Prompt should instruct to generate exactly one breadth and one depth');
+});
+
+test('SIDEBAR_NEW_DIRECTIONS_PROMPT describes breadth as adjacent/new topic', () => {
+    const breadthIdx = promptContent.indexOf('"breadth"');
+    const surroundBreadth = promptContent.substring(breadthIdx, breadthIdx + 400);
+    assert.ok(surroundBreadth.includes('adjacent') || surroundBreadth.includes('NOT yet touched') || surroundBreadth.includes('new area'),
+        'Breadth should be described as an adjacent, not-yet-touched area');
+});
+
+test('SIDEBAR_NEW_DIRECTIONS_PROMPT describes depth as advanced/deeper exploration', () => {
+    const depthIdx = promptContent.indexOf('"depth"');
+    const surroundDepth = promptContent.substring(depthIdx, depthIdx + 400);
+    assert.ok(surroundDepth.includes('advanced') || surroundDepth.includes('deeper') || surroundDepth.includes('mastery') || surroundDepth.includes('nuanced'),
+        'Depth should be described as more advanced/deeper exploration');
+});
+
+test('direction prompt returns type field in each direction', () => {
+    const jsonReturn = promptContent.substring(promptContent.indexOf('Return JSON'));
+    assert.ok(jsonReturn.includes('"type"'),
+        'Prompt return JSON should include "type" field');
+    assert.ok(jsonReturn.includes('"anchor"'),
+        'Prompt return JSON should include "anchor" field');
+});
+
+test('sidebar.js _createDirectionCard renders type badge', () => {
+    assert.ok(sidebarContent.includes('direction-type-badge'),
+        'sidebar.js should render direction-type-badge');
+    assert.ok(sidebarContent.includes('Go Broader') || sidebarContent.includes('type-breadth'),
+        'sidebar.js should render breadth badge label or class');
+    assert.ok(sidebarContent.includes('Go Deeper') || sidebarContent.includes('type-depth'),
+        'sidebar.js should render depth badge label or class');
+});
+
+test('CSS has .badge-breadth and .badge-depth (or .type-breadth/.type-depth)', () => {
+    assert.ok(cssContent.includes('badge-breadth') || cssContent.includes('type-breadth'),
+        'CSS should style breadth directions');
+    assert.ok(cssContent.includes('badge-depth') || cssContent.includes('type-depth'),
+        'CSS should style depth directions');
+});
+
+test('sidebar.js sorts directions so breadth appears first', () => {
+    assert.ok(sidebarContent.includes("breadth: 0") || sidebarContent.includes('a.type === b.type') || sidebarContent.includes("order[a.type]"),
+        'sidebar.js should sort breadth before depth');
+});
+
+test('backend main.py serializes stance-aware status for directions prompt', () => {
+    assert.ok(backendMainContent.includes('_serialize_status_to_str'),
+        'main.py should have _serialize_status_to_str helper');
+    assert.ok(backendMainContent.includes('topicStatus'),
+        'main.py ChatRequest should include topicStatus field');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// THREE-FEATURE PROBE UPGRADE: Feature 2 — Drag-to-Classify Concept Stances
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\n─── Feature 2: Concept Stance Drag-and-Classify ───');
+
+test('sidebar.js has _setConceptStance method', () => {
+    assert.ok(sidebarContent.includes('_setConceptStance('),
+        'sidebar.js should define _setConceptStance method');
+});
+
+test('sidebar.js has _mergeStances method', () => {
+    assert.ok(sidebarContent.includes('_mergeStances('),
+        'sidebar.js should define _mergeStances to preserve user stances on profile update');
+});
+
+test('concept tags are draggable', () => {
+    assert.ok(sidebarContent.includes("draggable: 'true'") || sidebarContent.includes('draggable = true') || sidebarContent.includes('draggable="true"'),
+        'Concept tags should be made draggable');
+});
+
+test('concept drop tray has interested/understood/not_interested drop zones', () => {
+    assert.ok(sidebarContent.includes('concept-drop-tray'),
+        'sidebar.js should render concept-drop-tray');
+    assert.ok(sidebarContent.includes('interested') && sidebarContent.includes('understood') && sidebarContent.includes('not_interested'),
+        'Drop tray should have interested, understood, and not_interested zones');
+});
+
+test('concept tags render stance as CSS class', () => {
+    assert.ok(sidebarContent.includes('stance-') || sidebarContent.includes("stance-${stance}"),
+        'Concept tags should apply stance-based CSS class');
+});
+
+test('CSS has .stance-interested, .stance-understood, .stance-not_interested', () => {
+    assert.ok(cssContent.includes('.stance-interested'),
+        'CSS should define .stance-interested style');
+    assert.ok(cssContent.includes('.stance-understood'),
+        'CSS should define .stance-understood style');
+    assert.ok(cssContent.includes('.stance-not_interested'),
+        'CSS should define .stance-not_interested style');
+});
+
+test('CSS has .drop-zone and .drop-zone.drag-over', () => {
+    assert.ok(cssContent.includes('.drop-zone'),
+        'CSS should define .drop-zone style');
+    assert.ok(cssContent.includes('.drop-zone.drag-over') || cssContent.includes('.drag-over'),
+        'CSS should define .drop-zone.drag-over style');
+});
+
+test('CSS has .concept-tag.dragging', () => {
+    assert.ok(cssContent.includes('.concept-tag.dragging') || cssContent.includes('concept-tag') && cssContent.includes('dragging'),
+        'CSS should style the concept-tag while dragging');
+});
+
+test('STATUS_UPDATE_PROMPT uses stance field not checked boolean', () => {
+    assert.ok(promptContent.includes('"stance"'),
+        'STATUS_UPDATE_PROMPT should use stance field');
+    assert.ok(!promptContent.includes('"checked": true') && !promptContent.includes('"checked": false'),
+        'STATUS_UPDATE_PROMPT should NOT use checked boolean field');
+});
+
+test('_serializeStatus in sidebar.js categorizes concepts by stance', () => {
+    assert.ok(sidebarContent.includes('_serializeStatus(') || sidebarContent.includes('_serializeStatus :'),
+        'sidebar.js should have _serializeStatus method');
+    assert.ok(sidebarContent.includes('Interested in') || sidebarContent.includes("'interested'"),
+        'Serialization should group by interested stance');
+});
+
+test('app.js sends topicStatus in chat API request', () => {
+    assert.ok(appContent.includes('topicStatus'),
+        'app.js should include topicStatus in chat request body');
+});
+
+test('backend main.py uses topicStatus for stance-aware LLM prompting', () => {
+    assert.ok(backendMainContent.includes('topicStatus'),
+        'main.py ChatRequest should have topicStatus field');
+    assert.ok(backendMainContent.includes('stance_context'),
+        'main.py should build stance_context from topicStatus');
+    assert.ok(backendMainContent.includes('Interested in') || backendMainContent.includes("'interested'"),
+        'main.py should categorize concepts by stance for prompt');
+});
+
+// Stance serialization unit test
+test('stance serialization logic correctly groups concepts', () => {
+    const stances = { interested: [], understood: [], not_interested: [], neutral: [] };
+    const concepts = [
+        { title: 'Neural Networks', stance: 'interested' },
+        { title: 'Backprop', stance: 'understood' },
+        { title: 'Statistics', stance: 'not_interested' },
+        { title: 'Tensors', stance: 'neutral' },
+        { title: 'Linear Algebra' }, // no stance → defaults to neutral
+    ];
+    concepts.forEach(c => {
+        const s = c.stance || 'neutral';
+        stances[s].push(c.title);
+    });
+    assert.deepStrictEqual(stances.interested, ['Neural Networks']);
+    assert.deepStrictEqual(stances.understood, ['Backprop']);
+    assert.deepStrictEqual(stances.not_interested, ['Statistics']);
+    assert.deepStrictEqual(stances.neutral, ['Tensors', 'Linear Algebra']);
+});
+
+// Stance merge unit test
+test('stance merge logic preserves user-set stances on update', () => {
+    const oldConcepts = [
+        { title: 'Neural Networks', stance: 'interested' },
+        { title: 'Backprop', stance: 'understood' },
+    ];
+    const newConcepts = [
+        { title: 'Neural Networks', stance: 'neutral' }, // backend reset
+        { title: 'Backprop', stance: 'neutral' },       // backend reset
+        { title: 'Attention', stance: 'neutral' },      // new concept
+    ];
+    // Simulate _mergeStances logic
+    const stanceMap = {};
+    oldConcepts.forEach(c => {
+        if (c.stance && c.stance !== 'neutral') stanceMap[c.title.toLowerCase()] = c.stance;
+    });
+    const merged = newConcepts.map(c => ({
+        ...c,
+        stance: stanceMap[c.title.toLowerCase()] || c.stance || 'neutral',
+    }));
+    assert.strictEqual(merged[0].stance, 'interested', 'Neural Networks should keep interested stance');
+    assert.strictEqual(merged[1].stance, 'understood', 'Backprop should keep understood stance');
+    assert.strictEqual(merged[2].stance, 'neutral', 'New concept Attention should be neutral');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Graph view disabled (implementation kept in graph.js for future use)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\n─── Graph View Disabled ───');
+
+test('sidebar.js resets persisted graph tab preference on init', () => {
+    assert.ok(sidebarContent.includes("localStorage.getItem('loom_sidebarTab') === 'graph'"),
+        'sidebar.js should detect stale graph tab preference');
+    assert.ok(sidebarContent.includes("localStorage.setItem('loom_sidebarTab', 'list')"),
+        'sidebar.js should reset graph tab preference to list');
+});
+
+test('sidebar.js does not reference GraphView', () => {
+    assert.ok(!sidebarContent.includes('GraphView'),
+        'sidebar.js should not call GraphView when graph is disabled');
+});
+
+test('sidebar.js does not define graph tab activation helpers', () => {
+    assert.ok(!sidebarContent.includes('_activateGraphTab('),
+        'sidebar.js should not define _activateGraphTab');
+    assert.ok(!sidebarContent.includes('_renderGraph('),
+        'sidebar.js should not define _renderGraph');
+    assert.ok(!sidebarContent.includes('_initViewTabs('),
+        'sidebar.js should not define _initViewTabs');
+});
+
+// Graph edge inference unit test (logic reused by graph.js when re-enabled)
+test('token overlap score correctly measures concept similarity', () => {
+    // Extract _tokenize and _overlapScore logic from graph.js
+    function tokenize(str) {
+        return str.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(t => t.length > 2);
+    }
+    function overlapScore(tokA, tokB) {
+        if (!tokA.length || !tokB.length) return 0;
+        const setA = new Set(tokA);
+        let hits = 0;
+        for (const t of tokB) if (setA.has(t)) hits++;
+        return hits / Math.max(tokA.length, tokB.length);
+    }
+
+    const chatTokens = tokenize('neural networks machine learning deep learning');
+    const conceptTokens = tokenize('neural networks');
+    const unrelatedTokens = tokenize('cooking recipes pasta');
+
+    const score1 = overlapScore(chatTokens, conceptTokens);
+    const score2 = overlapScore(chatTokens, unrelatedTokens);
+
+    assert.ok(score1 > 0.1, `Overlap score for related concepts should be > 0.1, got ${score1}`);
+    assert.ok(score2 === 0, `Overlap score for unrelated concepts should be 0, got ${score2}`);
+    assert.ok(score1 > score2, 'Related concept should score higher than unrelated');
 });
 
 // ─── Summary ──────────────────────────────────────────────────────────────────

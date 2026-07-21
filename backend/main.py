@@ -34,7 +34,7 @@ from prompts import (
     TOPIC_RENAME_CHECK_PROMPT,
 )
 
-load_dotenv()
+load_dotenv(override=True)
 
 app = FastAPI(title="Loom Knowledge Sidebar")
 app.add_middleware(
@@ -153,6 +153,7 @@ class ChatRequest(BaseModel):
     allChatSummaries: list[dict] = []
     condition: str = "loom"
     personalDetails: list[str] = []
+    topicStatus: Union[str, dict] = ""
 
 
 class SidebarRefreshRequest(BaseModel):
@@ -253,7 +254,7 @@ def _parse_condition(user_id: str) -> str:
 
 
 def _serialize_status_to_str(status) -> str:
-    """Convert structured status (dict with overview + threads/specifics) to a string for prompts."""
+    """Convert structured status (dict with overview + concepts_traversed) to a string for prompts."""
     if isinstance(status, str):
         return status
     if not isinstance(status, dict):
@@ -261,21 +262,35 @@ def _serialize_status_to_str(status) -> str:
     parts = []
     for pt in status.get("overview", []):
         parts.append(f"- {pt}")
-    # New threads format
+    concepts = status.get("concepts_traversed", [])
+    if concepts:
+        by_stance: dict[str, list[str]] = {"interested": [], "understood": [], "not_interested": [], "neutral": []}
+        for c in concepts:
+            if isinstance(c, dict):
+                title = c.get("title", "")
+                stance = c.get("stance") or ("understood" if c.get("checked") else "neutral")
+            else:
+                title = str(c)
+                stance = "neutral"
+            if title:
+                by_stance.get(stance, by_stance["neutral"]).append(title)
+        if by_stance["interested"]:
+            parts.append("Interested in (prioritize these): " + ", ".join(by_stance["interested"]))
+        if by_stance["understood"]:
+            parts.append("Understood already (assume base knowledge): " + ", ".join(by_stance["understood"]))
+        if by_stance["not_interested"]:
+            parts.append("Not interested (avoid): " + ", ".join(by_stance["not_interested"]))
+        if by_stance["neutral"]:
+            parts.append("Concepts encountered (neutral): " + ", ".join(by_stance["neutral"]))
+    # Legacy threads/specifics fallback for old stored data
     for thread in status.get("threads", []):
         label = thread.get("label", "Thread")
         steps = thread.get("steps", [])
-        step_strs = []
-        for s in steps:
-            text = s.get("text", s) if isinstance(s, dict) else str(s)
-            level = s.get("level", "") if isinstance(s, dict) else ""
-            step_strs.append(f"{text} ({level})" if level else text)
-        parts.append(f"- Thread: {label}: {' → '.join(step_strs)}")
-    # Legacy specifics format
+        step_strs = [s.get("text", s) if isinstance(s, dict) else str(s) for s in steps]
+        parts.append(f"- Topic area: {label}: {', '.join(step_strs)}")
     for item in status.get("specifics", []):
         text = item.get("text", item) if isinstance(item, dict) else str(item)
-        level = item.get("level", "") if isinstance(item, dict) else ""
-        parts.append(f"- {text} ({level})" if level else f"- {text}")
+        parts.append(f"- {text}")
     return "\n".join(parts) if parts else ""
 
 
@@ -334,54 +349,25 @@ async def chat_stream_endpoint(req: ChatRequest):
     )
     attachments_data = [{"mimeType": a.mimeType, "data": a.data} for a in req.attachments] if req.attachments else None
 
-    # ── Module 2 Debug ───────────────────────────────────────────────────
-    print("\n" + "=" * 70)
-    print("🔗 MODULE 2 CONNECTION RETRIEVAL DEBUG")
-    print("=" * 70)
-    total_summaries = len(req.allChatSummaries)
-    print(f"📥 allChatSummaries received: {total_summaries}")
-    for i, s in enumerate(req.allChatSummaries):
-        has_emb = "✅" if s.get("embedding") else "❌"
-        has_ua = "✅" if s.get("userAsked") else "❌"
-        has_ac = "✅" if s.get("aiCovered") else "❌"
-        print(f"   [{i}] id={s.get('id','?')[:12]}  title={s.get('title','?')[:30]}  "
-              f"emb={has_emb}  userAsked={has_ua}  aiCovered={has_ac}  "
-              f"topicId={s.get('topicId','none')}")
-
     # Retrieve relevant past chats via embedding similarity
     past_chats_for_prompt = []
     candidates_with_embeddings = [
         c for c in req.allChatSummaries if c.get("embedding")
     ]
-    print(f"\n🔍 Candidates with embeddings: {len(candidates_with_embeddings)} / {total_summaries}")
-    if not candidates_with_embeddings:
-        print("   ⚠️  NO candidates have embeddings — memory prompt SKIPPED")
 
     if candidates_with_embeddings:
         query_text = " ".join(
             m.content for m in req.messages[-3:] if m.role == "user"
         )
-        print(f"📝 Query text (last 3 user msgs): \"{query_text[:120]}{'...' if len(query_text) > 120 else ''}\"")
-        if not query_text.strip():
-            print("   ⚠️  Query text is EMPTY (no user messages) — memory prompt SKIPPED")
         if query_text.strip():
             try:
                 query_embedding = await embedder.embed_text(query_text)
-                print(f"✅ Query embedding generated (dim={len(query_embedding)})")
                 ranked = rank_by_similarity(query_embedding, candidates_with_embeddings)
-                print(f"\n📊 Similarity ranking (ALL candidates, no threshold):")
-                for j, r in enumerate(ranked):
-                    marker = "→ SELECTED" if j < 5 else "  skipped"
-                    print(f"   [{j}] score={r['score']:.4f}  id={r['id'][:12]}  "
-                          f"title=\"{r.get('title','?')[:35]}\"  {marker}")
-                past_chats_for_prompt = []
-                for r in ranked[:5]:
+                for r in ranked[:3]:
                     ua = r.get("userAsked", "")
                     ac = r.get("aiCovered", "")
                     if not ua and not ac:
-                        fallback = r.get("summary", "")
-                        ua = fallback
-                        ac = ""
+                        ua = r.get("summary", "")
                     past_chats_for_prompt.append({
                         "chatId": r["id"],
                         "title": r.get("title", ""),
@@ -389,9 +375,8 @@ async def chat_stream_endpoint(req: ChatRequest):
                         "aiCovered": ac,
                     })
             except Exception as e:
-                print(f"❌ EMBEDDING ERROR (silently caught): {type(e).__name__}: {e}")
+                print(f"[past-context] Embedding error (silently caught): {type(e).__name__}: {e}")
 
-    print(f"\n🧠 Past chats injected into prompt: {len(past_chats_for_prompt)}")
     if req.condition == "baseline" and req.personalDetails:
         details_str = "\n".join(f"- {d}" for d in req.personalDetails)
         prompt_mode = "BASELINE prompt (with user profile)"
@@ -402,20 +387,17 @@ async def chat_stream_endpoint(req: ChatRequest):
         system_prompt = CHAT_STREAM_SYSTEM_PROMPT
     elif past_chats_for_prompt:
         prompt_mode = "MEMORY prompt (with connections)"
+        # Build stance context block if topic status has non-neutral stances
+        stance_context = ""
+        topic_status_str = _serialize_status_to_str(req.topicStatus) if req.topicStatus else ""
+        if topic_status_str and any(s in topic_status_str for s in ["Interested in", "Understood already", "Not interested"]):
+            stance_context = f"User's current concept stances:\n{topic_status_str}\n\n"
         system_prompt = CHAT_STREAM_MEMORY_PROMPT.format(
-            past_chats_json=json.dumps(past_chats_for_prompt, indent=2)
+            past_chats_json=json.dumps(past_chats_for_prompt, indent=2),
+            stance_context=stance_context,
         )
-        for pc in past_chats_for_prompt:
-            print(f"   • {pc['chatId'][:12]}  \"{pc['title'][:35]}\"")
-            if pc['userAsked']:
-                print(f"     userAsked: {pc['userAsked'][:60]}")
-            if pc['aiCovered']:
-                print(f"     aiCovered: {pc['aiCovered'][:60]}")
     else:
-        prompt_mode = "STANDARD prompt (no connections)"
         system_prompt = CHAT_STREAM_SYSTEM_PROMPT
-    print(f"📤 Prompt mode: {prompt_mode}")
-    print("=" * 70)
 
     async def event_generator():
         full_response_parts = []
@@ -434,39 +416,6 @@ async def chat_stream_endpoint(req: ChatRequest):
             return
 
         full_response = "".join(full_response_parts)
-
-        # ── Module 2 Response Debug ──────────────────────────────────────
-        _markers = re.findall(r'\{~(\d+)\}', full_response)
-        _has_conn_block = '{~CONNECTIONS~}' in full_response and '{~END~}' in full_response
-        print("\n" + "-" * 70)
-        print("🤖 MODULE 2 LLM RESPONSE DEBUG")
-        print("-" * 70)
-        print(f"📏 Response length: {len(full_response)} chars")
-        print(f"🔖 Connection markers found: {_markers if _markers else 'NONE'}")
-        print(f"📦 Connection block present: {'✅ YES' if _has_conn_block else '❌ NO'}")
-        if _has_conn_block:
-            _conn_start = full_response.index('{~CONNECTIONS~}')
-            _conn_end = full_response.index('{~END~}')
-            _conn_json_str = full_response[_conn_start + len('{~CONNECTIONS~}'):_conn_end].strip()
-            try:
-                _conn_data = json.loads(_conn_json_str)
-                print(f"📋 Connections parsed: {len(_conn_data)} items")
-                for _c in _conn_data:
-                    print(f"   • id={_c.get('id')}  chatId={_c.get('chatId','?')[:12]}  "
-                          f"title=\"{_c.get('chatTitle','?')[:30]}\"")
-                    if _c.get('userAsked'):
-                        print(f"     userAsked: {_c['userAsked'][:60]}")
-                    if _c.get('text'):
-                        print(f"     insight: {_c['text'][:60]}")
-            except json.JSONDecodeError as _e:
-                print(f"   ⚠️  Connection JSON parse error: {_e}")
-                print(f"   Raw: {_conn_json_str[:200]}")
-        elif _markers:
-            print("   ⚠️  Markers exist but no connection block — LLM forgot {~CONNECTIONS~}...{~END~}")
-        else:
-            print("   ℹ️  LLM chose not to add any connections (or wasn't given memory prompt)")
-        print(f"📄 Response preview: \"{full_response[:150]}{'...' if len(full_response) > 150 else ''}\"")
-        print("-" * 70 + "\n")
 
         # Lightweight metadata extraction (topic + concepts)
         try:
@@ -491,7 +440,7 @@ async def chat_stream_endpoint(req: ChatRequest):
         if not isinstance(metadata, dict):
             metadata = {}
 
-        yield f"data: {json.dumps({'type': 'done', 'response': full_response, 'topic': metadata.get('topic', {}), 'concepts': metadata.get('concepts', [])})}\n\n"
+        yield f"data: {json.dumps({'type': 'done', 'response': full_response, 'topic': metadata.get('topic', {}), 'concepts': metadata.get('concepts', []), 'injectedPastChats': past_chats_for_prompt})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -556,7 +505,7 @@ async def sidebar_refresh(req: SidebarRefreshRequest):
 
     status_update = None
     if isinstance(status_result, dict):
-        if "overview" in status_result or "threads" in status_result:
+        if "overview" in status_result or "concepts_traversed" in status_result:
             status_update = status_result
         elif "status" in status_result:
             status_update = status_result.get("status")

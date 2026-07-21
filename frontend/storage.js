@@ -450,6 +450,16 @@ const Storage = {
 
   // ── Model Preferences ───────────────────────────────────────────────────
 
+  MODEL_OPTIONS: [
+    { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash' },
+    { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
+  ],
+
+  getModelLabel(modelId) {
+    const match = this.MODEL_OPTIONS.find((m) => m.id === modelId);
+    return match ? match.label : modelId;
+  },
+
   getChatModel() {
     return localStorage.getItem('loom_chatModel') || 'gemini-3-flash-preview';
   },

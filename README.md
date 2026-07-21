@@ -32,8 +32,9 @@ Set in `backend/.env`:
 |---|---|
 | `OPENAI_API_KEY` | OpenAI models + embeddings |
 | `GEMINI_API_KEY` | Google Gemini models + embeddings |
-| `LLM_PROVIDER` | `openai` or `gemini` |
-| `EMBEDDING_PROVIDER` | `openai` or `gemini` |
+| `OPENROUTER_API_KEY` | OpenRouter API key (routes Gemini chat via `google/gemini-3-flash-preview`) |
+| `LLM_PROVIDER` | `openai`, `gemini`, or `openrouter` |
+| `EMBEDDING_PROVIDER` | `openai`, `openrouter`, or `gemini` |
 
 ## Tests
 

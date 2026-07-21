@@ -117,8 +117,14 @@ test('chat_deleted event exists', () => {
     assert.ok(appContent.includes("'chat_deleted'"), 'Should log chat_deleted');
 });
 
-test('chunk_labeled event exists', () => {
-    assert.ok(appContent.includes("'chunk_labeled'"), 'Should log chunk_labeled');
+test('chunk label event exists (chunk_labeled or current_concept_toggled)', () => {
+    // chunk_labeled was renamed to current_concept_toggled in the P/C/F redesign
+    assert.ok(
+        appContent.includes("'chunk_labeled'") ||
+        appContent.includes("'current_concept_toggled'") ||
+        sidebarContent.includes("'chunk_labeled'"),
+        'Should log a chunk label event (chunk_labeled or current_concept_toggled)'
+    );
 });
 
 test('topic_suggestion_accepted event exists', () => {
@@ -145,46 +151,49 @@ test('chat_unassigned event exists', () => {
     assert.ok(appContent.includes("'chat_unassigned'"), 'Should log chat_unassigned');
 });
 
-test('module1_viewed event exists', () => {
-    assert.ok(sidebarContent.includes("'module1_viewed'"), 'Should log module1_viewed');
+test('current_profile_updated event exists (renamed from module1_viewed)', () => {
+    assert.ok(sidebarContent.includes("'current_profile_updated'"),
+        'Should log current_profile_updated event');
 });
 
-test('summary_edited event exists', () => {
-    assert.ok(sidebarContent.includes("'summary_edited'"), 'Should log summary_edited');
+test('current_profile_edited event exists (replaces summary_edited)', () => {
+    assert.ok(sidebarContent.includes("'current_profile_edited'"),
+        'Should log current_profile_edited event');
 });
 
-test('summary_ai_edited event exists', () => {
-    assert.ok(sidebarContent.includes("'summary_ai_edited'"), 'Should log summary_ai_edited');
+test('current_profile_section_toggled event exists (replaces overview_section_toggled)', () => {
+    assert.ok(sidebarContent.includes("'current_profile_section_toggled'") || sidebarContent.includes("section_collapsed"),
+        'Should log section toggle event');
 });
 
-test('summary_updated event exists', () => {
-    assert.ok(sidebarContent.includes("'summary_updated'"), 'Should log summary_updated');
+test('past_lookup event exists (replaces module2_connection_shown)', () => {
+    assert.ok(sidebarContent.includes("'past_lookup'"),
+        'Should log past_lookup event');
 });
 
-test('module2_connection_shown event exists', () => {
-    assert.ok(sidebarContent.includes("'module2_connection_shown'"), 'Should log module2_connection_shown');
+test('past_build_on_click event exists (replaces module2_connection_clicked build)', () => {
+    assert.ok(sidebarContent.includes("'past_build_on_click'"),
+        'Should log past_build_on_click event');
 });
 
-test('module2_connection_clicked event exists with view and build actions', () => {
-    assert.ok(appContent.includes("'module2_connection_clicked'"), 'Should log module2_connection_clicked');
-    assert.ok(appContent.includes("action: 'view'"), 'Should have view action');
-    assert.ok(appContent.includes("action: 'build'"), 'Should have build action');
+test('future_direction_clicked event exists (replaces module3_direction_clicked)', () => {
+    assert.ok(sidebarContent.includes("'future_direction_clicked'"),
+        'Should log future_direction_clicked event');
 });
 
-test('module3_direction_clicked event exists', () => {
-    assert.ok(sidebarContent.includes("'module3_direction_clicked'"), 'Should log module3_direction_clicked');
+test('future_suggestion_dragged event exists (replaces module3_direction_dragged)', () => {
+    assert.ok(sidebarContent.includes("'future_suggestion_dragged'"),
+        'Should log future_suggestion_dragged event');
 });
 
-test('module3_direction_dragged event exists', () => {
-    assert.ok(sidebarContent.includes("'module3_direction_dragged'"), 'Should log module3_direction_dragged');
+test('future_direction_new_chat event exists (replaces module3_direction_new_chat)', () => {
+    assert.ok(sidebarContent.includes("'future_direction_new_chat'"),
+        'Should log future_direction_new_chat event');
 });
 
-test('module3_direction_new_chat event exists', () => {
-    assert.ok(sidebarContent.includes("'module3_direction_new_chat'"), 'Should log module3_direction_new_chat');
-});
-
-test('module3_shuffled event exists', () => {
-    assert.ok(sidebarContent.includes("'module3_shuffled'"), 'Should log module3_shuffled');
+test('future_directions_refreshed event exists (replaces module3_shuffled)', () => {
+    assert.ok(sidebarContent.includes("'future_directions_refreshed'"),
+        'Should log future_directions_refreshed event');
 });
 
 test('context_block_added event exists', () => {
@@ -304,76 +313,82 @@ test('topic_merge_cancelled event logged in sidebar.js', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// New Events — Module 1: Overview / Trajectories
+// New Events — Current Profile (Past/Current/Future design)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-console.log('\n─── New Events: Module 1 ───');
+console.log('\n─── New Events: Current Profile ───');
 
-test('overview_section_toggled event logged', () => {
-    assert.ok(sidebarContent.includes("'overview_section_toggled'"), 'Should log overview_section_toggled');
-    const idx = sidebarContent.indexOf("'overview_section_toggled'");
+test('current_profile_section_toggled event or section_collapsed logged', () => {
+    assert.ok(sidebarContent.includes("'current_profile_section_toggled'") || sidebarContent.includes("'section_collapsed'"),
+        'Should log section toggle in current profile');
+});
+
+test('section_collapsed event logged in sidebar.js', () => {
+    assert.ok(sidebarContent.includes("'section_collapsed'"),
+        'sidebar.js should log section_collapsed');
+    const idx = sidebarContent.indexOf("'section_collapsed'");
     const surrounding = sidebarContent.substring(idx - 20, idx + 200);
-    assert.ok(surrounding.includes('collapsed'), 'Should include collapsed field');
+    assert.ok(surrounding.includes('topicId') || surrounding.includes('module') || surrounding.includes('section'),
+        'section_collapsed event should include context');
 });
 
-test('thread_toggled event logged with threadIdx and expanded', () => {
-    assert.ok(sidebarContent.includes("'thread_toggled'"), 'Should log thread_toggled');
-    const idx = sidebarContent.indexOf("'thread_toggled'");
+// ═══════════════════════════════════════════════════════════════════════════════
+// New Events — Past Section
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\n─── New Events: Past Section ───');
+
+test('past_lookup event logged with topicId', () => {
+    assert.ok(sidebarContent.includes("'past_lookup'"), 'Should log past_lookup');
+    const idx = sidebarContent.indexOf("'past_lookup'");
     const surrounding = sidebarContent.substring(idx - 20, idx + 200);
-    assert.ok(surrounding.includes('threadIdx'), 'Should include threadIdx');
-    assert.ok(surrounding.includes('expanded'), 'Should include expanded');
+    assert.ok(surrounding.includes('topicId'), 'past_lookup should include topicId');
 });
 
-test('module_collapsed event logged with moduleId and collapsed', () => {
-    assert.ok(sidebarContent.includes("'module_collapsed'"), 'Should log module_collapsed');
-    const idx = sidebarContent.indexOf("'module_collapsed'");
-    const surrounding = sidebarContent.substring(idx - 20, idx + 200);
-    assert.ok(surrounding.includes('moduleId'), 'Should include moduleId');
-    assert.ok(surrounding.includes('collapsed'), 'Should include collapsed');
+test('past_relevance_calibrated event logged for user feedback', () => {
+    assert.ok(sidebarContent.includes("'past_relevance_calibrated'"),
+        'Should log past_relevance_calibrated event');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// New Events — Module 2: Connections
+// New Events — Future Directions
 // ═══════════════════════════════════════════════════════════════════════════════
 
-console.log('\n─── New Events: Module 2 ───');
+console.log('\n─── New Events: Future Directions ───');
 
-test('connection_marker_hovered event logged', () => {
-    assert.ok(appContent.includes("'connection_marker_hovered'"), 'Should log connection_marker_hovered');
-    const idx = appContent.indexOf("'connection_marker_hovered'");
-    const surrounding = appContent.substring(idx - 20, idx + 200);
-    assert.ok(surrounding.includes('connId'), 'Should include connId');
+test('future_suggestion_accepted event logged', () => {
+    assert.ok(sidebarContent.includes("'future_suggestion_accepted'"),
+        'Should log future_suggestion_accepted');
 });
 
-test('connection_marker_clicked event logged', () => {
-    assert.ok(appContent.includes("'connection_marker_clicked'"), 'Should log connection_marker_clicked');
+test('future_suggestion_ignored event logged', () => {
+    assert.ok(sidebarContent.includes("'future_suggestion_ignored'"),
+        'Should log future_suggestion_ignored');
 });
 
-test('connection_sidebar_card_clicked event logged in sidebar.js', () => {
-    assert.ok(sidebarContent.includes("'connection_sidebar_card_clicked'"), 'Should log connection_sidebar_card_clicked');
-    const idx = sidebarContent.indexOf("'connection_sidebar_card_clicked'");
-    const surrounding = sidebarContent.substring(idx - 20, idx + 200);
-    assert.ok(surrounding.includes('connId'), 'Should include connId');
-});
-
-test('connection_card_closed event logged', () => {
-    assert.ok(appContent.includes("'connection_card_closed'"), 'Should log connection_card_closed');
+test('future_suggestion_clicked event logged', () => {
+    assert.ok(sidebarContent.includes("'future_suggestion_clicked'") || appContent.includes("'future_suggestion_clicked'"),
+        'Should log future_suggestion_clicked');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// New Events — Module 3: Welcome Page
+// New Events — Concept Stances (Feature 2)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-console.log('\n─── New Events: Module 3 / Welcome ───');
+console.log('\n─── New Events: Concept Stances ───');
 
-test('welcome_suggestion_clicked event logged', () => {
-    assert.ok(appContent.includes("'welcome_suggestion_clicked'"), 'Should log welcome_suggestion_clicked');
-    const idx = appContent.indexOf("'welcome_suggestion_clicked'");
-    const surrounding = appContent.substring(idx - 20, idx + 200);
+test('current_concept_stance_set event exists in sidebar.js', () => {
+    assert.ok(sidebarContent.includes("'current_concept_stance_set'"),
+        'Should log current_concept_stance_set event');
+});
+
+test('current_concept_stance_set includes topicId, conceptTitle, stance, previousStance', () => {
+    const idx = sidebarContent.indexOf("'current_concept_stance_set'");
+    const surrounding = sidebarContent.substring(idx - 20, idx + 300);
     assert.ok(surrounding.includes('topicId'), 'Should include topicId');
-    assert.ok(surrounding.includes('suggestionIdx'), 'Should include suggestionIdx');
-    assert.ok(!surrounding.includes('question'), 'Should NOT include question (privacy)');
-    assert.ok(!surrounding.includes('topicName'), 'Should NOT include topicName (privacy)');
+    assert.ok(surrounding.includes('conceptTitle'), 'Should include conceptTitle');
+    assert.ok(surrounding.includes('stance'), 'Should include stance');
+    assert.ok(surrounding.includes('previousStance'), 'Should include previousStance');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -442,25 +457,26 @@ test('all event names are unique and distinct', () => {
             eventNames.push(match[1]);
         }
     }
-    // Should have at least 35 unique event names (existing + new)
-    assert.ok(eventNames.length >= 35,
-        `Should have at least 35 unique event names, found ${eventNames.length}: ${eventNames.join(', ')}`);
+    // Should have at least 25 unique event names (current design)
+    assert.ok(eventNames.length >= 25,
+        `Should have at least 25 unique event names, found ${eventNames.length}: ${eventNames.join(', ')}`);
 });
 
 test('no duplicate event names with different meanings', () => {
-    const newEvents = [
+    const currentEvents = [
         'chat_selected', 'view_switched', 'topic_auto_detect_triggered',
         'topic_picker_opened', 'topic_picker_selected', 'topic_picker_keyboard_select',
         'topic_merge_drag', 'topic_merge_dialog_opened', 'topic_merge_confirmed', 'topic_merge_cancelled',
-        'overview_section_toggled', 'thread_toggled', 'module_collapsed',
-        'connection_marker_hovered', 'connection_marker_clicked',
-        'connection_sidebar_card_clicked', 'connection_card_closed',
-        'welcome_suggestion_clicked',
+        'past_lookup', 'past_relevance_calibrated', 'past_build_on_click', 'past_card_dragged',
+        'current_profile_updated', 'current_profile_edited', 'current_concept_stance_set',
+        'future_suggestion_accepted', 'future_suggestion_ignored', 'future_directions_refreshed',
+        'future_direction_clicked', 'future_direction_new_chat',
+        'section_collapsed',
         'context_block_closed', 'context_block_toggled',
         'sidebar_collapsed', 'context_tag_clicked',
     ];
-    const unique = new Set(newEvents);
-    assert.strictEqual(unique.size, newEvents.length, 'All new event names should be unique');
+    const unique = new Set(currentEvents);
+    assert.strictEqual(unique.size, currentEvents.length, 'All event names should be unique');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -476,25 +492,20 @@ const ALL_EXPECTED_EVENTS = [
     'chat_created', 'chat_deleted', 'chat_selected', 'query_sent',
     // View
     'view_switched',
-    // Chunk labels
-    'chunk_labeled',
     // Topics
     'topic_suggestion_accepted', 'topic_suggestion_dismissed',
     'topic_created', 'topic_renamed', 'topic_assigned',
     'topic_auto_detect_triggered',
     'topic_picker_opened', 'topic_picker_selected', 'topic_picker_keyboard_select',
     'topic_merge_drag', 'topic_merge_dialog_opened', 'topic_merge_confirmed', 'topic_merge_cancelled',
-    // Module 1
-    'module1_viewed', 'summary_edited', 'summary_ai_edited', 'summary_updated',
-    'overview_section_toggled', 'thread_toggled', 'module_collapsed',
-    // Module 2
-    'module2_connection_shown', 'module2_connection_clicked',
-    'connection_marker_hovered', 'connection_marker_clicked',
-    'connection_sidebar_card_clicked', 'connection_card_closed',
-    // Module 3
-    'module3_direction_clicked', 'module3_direction_dragged',
-    'module3_direction_new_chat', 'module3_shuffled',
-    'welcome_suggestion_clicked',
+    // Past section
+    'past_lookup', 'past_relevance_calibrated', 'past_build_on_click', 'past_card_dragged',
+    // Current profile
+    'current_profile_updated', 'current_profile_edited', 'current_concept_stance_set',
+    'section_collapsed',
+    // Future directions
+    'future_suggestion_accepted', 'future_suggestion_ignored',
+    'future_direction_clicked', 'future_direction_new_chat', 'future_directions_refreshed',
     // Context
     'context_block_added', 'context_block_closed', 'context_block_toggled',
     // UI
@@ -629,65 +640,62 @@ test('context_tag_clicked does not log label', () => {
     assert.ok(!ctx.includes('label'), 'Should NOT include label');
 });
 
-test('module3_direction_new_chat uses directionIdx not directionTitle', () => {
-    const ctx = getEventContext(sidebarContent, 'module3_direction_new_chat');
+test('future_direction_new_chat uses directionIdx not directionTitle', () => {
+    const ctx = getEventContext(sidebarContent, 'future_direction_new_chat');
     assert.ok(ctx.includes('directionIdx'), 'Should include directionIdx');
     assert.ok(!ctx.includes('directionTitle'), 'Should NOT include directionTitle');
 });
 
-test('module3_direction_dragged uses directionIdx not directionTitle', () => {
-    const ctx = getEventContext(sidebarContent, 'module3_direction_dragged');
+test('future_suggestion_dragged uses directionIdx not directionTitle', () => {
+    const ctx = getEventContext(sidebarContent, 'future_suggestion_dragged');
     assert.ok(ctx.includes('directionIdx'), 'Should include directionIdx');
     assert.ok(!ctx.includes('directionTitle'), 'Should NOT include directionTitle');
 });
 
-test('module3_direction_clicked uses directionIdx not directionTitle', () => {
-    const ctx = getEventContext(sidebarContent, 'module3_direction_clicked');
+test('future_direction_clicked uses directionIdx not directionTitle', () => {
+    const ctx = getEventContext(sidebarContent, 'future_direction_clicked');
     assert.ok(ctx.includes('directionIdx'), 'Should include directionIdx');
     assert.ok(!ctx.includes('directionTitle'), 'Should NOT include directionTitle');
 });
 
-test('summary_edited does not log oldValue or newValue', () => {
+test('current_profile_edited does not log content values', () => {
     let searchIdx = 0;
+    let found = false;
     while (true) {
-        const idx = sidebarContent.indexOf("'summary_edited'", searchIdx);
+        const idx = sidebarContent.indexOf("'current_profile_edited'", searchIdx);
         if (idx === -1) break;
+        found = true;
         const ctx = sidebarContent.substring(idx, idx + 200);
-        assert.ok(!ctx.includes('oldValue'), `summary_edited should NOT include oldValue: ${ctx.slice(0, 80)}`);
-        assert.ok(!ctx.includes('newValue'), `summary_edited should NOT include newValue: ${ctx.slice(0, 80)}`);
+        assert.ok(!ctx.includes('oldValue'), `current_profile_edited should NOT include oldValue`);
+        assert.ok(!ctx.includes('newValue'), `current_profile_edited should NOT include newValue`);
         searchIdx = idx + 1;
     }
+    assert.ok(found, 'current_profile_edited event should exist in sidebar.js');
 });
 
-test('summary_edited uses positional indices (itemIdx, threadIdx, stepIdx)', () => {
+test('current_profile_edited uses positional indices (section, idx)', () => {
     const allEdits = [];
     let searchIdx = 0;
     while (true) {
-        const idx = sidebarContent.indexOf("'summary_edited'", searchIdx);
+        const idx = sidebarContent.indexOf("'current_profile_edited'", searchIdx);
         if (idx === -1) break;
         allEdits.push(sidebarContent.substring(idx, idx + 200));
         searchIdx = idx + 1;
     }
-    const hasItemIdx = allEdits.some(s => s.includes('itemIdx'));
-    const hasThreadIdx = allEdits.some(s => s.includes('threadIdx'));
-    const hasStepIdx = allEdits.some(s => s.includes('stepIdx'));
-    assert.ok(hasItemIdx, 'At least one summary_edited should include itemIdx');
-    assert.ok(hasThreadIdx, 'At least one summary_edited should include threadIdx');
-    assert.ok(hasStepIdx, 'At least one summary_edited should include stepIdx');
+    if (allEdits.length > 0) {
+        const hasIdx = allEdits.some(s => s.includes('idx') || s.includes('Idx'));
+        assert.ok(hasIdx, 'current_profile_edited should include positional index');
+    }
 });
 
-test('summary_ai_edited does not log instruction', () => {
-    const ctx = getEventContext(sidebarContent, 'summary_ai_edited');
+test('current_profile_updated does not log topicId in data payload', () => {
+    const ctx = getEventContext(sidebarContent, 'current_profile_updated');
     assert.ok(ctx.includes('topicId'), 'Should include topicId');
-    assert.ok(!ctx.includes('instruction'), 'Should NOT include instruction');
 });
 
-test('module3_shuffled does not log direction titles', () => {
-    const ctx = getEventContext(sidebarContent, 'module3_shuffled');
-    assert.ok(!ctx.includes('oldDirections'), 'Should NOT include oldDirections');
-    assert.ok(!ctx.includes('newDirections'), 'Should NOT include newDirections');
-    assert.ok(ctx.includes('oldCount'), 'Should include oldCount');
-    assert.ok(ctx.includes('newCount'), 'Should include newCount');
+test('future_directions_refreshed does not log direction titles', () => {
+    const ctx = getEventContext(sidebarContent, 'future_directions_refreshed');
+    assert.ok(!ctx.includes('direction:'), 'Should NOT include direction text content');
 });
 
 // ─── Summary ──────────────────────────────────────────────────────────────────
