@@ -53,6 +53,7 @@ const Storage = {
       for (const key of Object.keys(defaults)) {
         if (!(key in parsed)) parsed[key] = defaults[key];
       }
+      if (Array.isArray(parsed.topics)) parsed.topics.forEach(t => this._migrateTopic(t));
       if (this._stripAttachmentBase64(parsed)) {
         try { localStorage.setItem(this._KEY, JSON.stringify(parsed)); } catch { /* quota */ }
       }
@@ -82,6 +83,48 @@ const Storage = {
       }
     }
     return changed;
+  },
+
+  // Normalize a topic to the current schema. Idempotent; runs on every _getAll().
+  _migrateTopic(topic) {
+    if (!topic || typeof topic !== 'object') return topic;
+    if (!Array.isArray(topic.statusHistory)) topic.statusHistory = [];
+    if (topic.pendingProposal === undefined) topic.pendingProposal = null;
+    if (!Array.isArray(topic.intentions)) topic.intentions = [];
+    if (!Array.isArray(topic.excludedChatIds)) topic.excludedChatIds = [];
+    if (!Array.isArray(topic.dismissedDirections)) topic.dismissedDirections = [];
+    const s = topic.statusSummary;
+    if (s && typeof s === 'object') {
+      if (Array.isArray(s.overview)) {
+        s.overview = s.overview.map(pt =>
+          typeof pt === 'string' ? { text: pt, source: 'inferred' } : pt
+        );
+      }
+      // One-time archive of concepts_traversed (removed from the framework)
+      if (Array.isArray(s.concepts_traversed) && s.concepts_traversed.length > 0) {
+        if (!Array.isArray(topic._archivedConcepts)) topic._archivedConcepts = [];
+        topic._archivedConcepts = topic._archivedConcepts.concat(s.concepts_traversed);
+        const interested = s.concepts_traversed
+          .map(c => (typeof c === 'object' ? c : { title: c }))
+          .filter(c => c.stance === 'interested' && c.title)
+          .map(c => c.title);
+        if (interested.length > 0) {
+          if (!Array.isArray(s.overview)) s.overview = [];
+          const already = s.overview.some(pt => {
+            const t = (typeof pt === 'string' ? pt : (pt && pt.text) || '').toLowerCase();
+            return t.startsWith('interested in:');
+          });
+          if (!already) {
+            s.overview.push({ text: 'Interested in: ' + interested.join(', '), source: 'user' });
+          }
+        }
+        delete s.concepts_traversed;
+      }
+    }
+    if (topic.statusHistory.length > 10) {
+      topic.statusHistory = topic.statusHistory.slice(-10);
+    }
+    return topic;
   },
 
   _saveAll(data) {
@@ -251,8 +294,25 @@ const Storage = {
       statusLastUpdated: Utils.timestamp(),
       userCreated: true,
       lastActive: Utils.timestamp(),
+      statusHistory: [],
+      pendingProposal: null,
+      intentions: [],
+      excludedChatIds: [],
+      dismissedDirections: [],
     };
     return this.saveTopic(topic);
+  },
+
+  pushStatusSnapshot(topic, trigger) {
+    if (!Array.isArray(topic.statusHistory)) topic.statusHistory = [];
+    topic.statusHistory.push({
+      ts: Utils.timestamp(),
+      trigger,
+      statusSummary: JSON.parse(JSON.stringify(topic.statusSummary ?? null)),
+    });
+    if (topic.statusHistory.length > 10) {
+      topic.statusHistory = topic.statusHistory.slice(-10);
+    }
   },
 
   migrateTopicColors() {
@@ -341,6 +401,12 @@ const Storage = {
     const ok = this._saveAll(data);
     if (!ok) return null;
     return message;
+  },
+
+  saveMessages(chatId, messages) {
+    const data = this._getAll();
+    data.messages[chatId] = messages;
+    this._saveAll(data);
   },
 
   // ── Current Chat ────────────────────────────────────────────────────────

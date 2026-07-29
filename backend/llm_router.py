@@ -27,7 +27,7 @@ def _extract_json(text: str) -> dict:
         raise ValueError(f"Could not extract JSON from: {text[:200]}")
 
 
-_FALLBACK = {"response": "", "topic": {"name": "", "matchedExistingId": None, "confidence": 0}, "concepts": []}
+_FALLBACK = {"response": "", "topic": {"name": "", "matchedExistingId": None, "confidence": 0}}
 
 
 def _fallback_response(raw: str) -> dict:

@@ -60,10 +60,10 @@ test('padding reduction is approximately 30% (108 → ~76)', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Past / Current / Future Temporal Sections (redesigned UI)
+// Construct / Apply / Evolve Temporal Sections (redesigned UI)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-console.log('\n─── Past / Current / Future Temporal Sections ───');
+console.log('\n─── Construct / Apply / Evolve Temporal Sections ───');
 
 test('HTML has section-past with pastChatsList', () => {
     assert.ok(htmlContent.includes('id="sectionPast"'),
@@ -86,13 +86,13 @@ test('HTML has section-future with directionCards', () => {
         'index.html should have directionCards');
 });
 
-test('HTML has temporal breadcrumb with Past/Current/Future crumbs', () => {
-    assert.ok(htmlContent.includes('data-phase="past"'),
-        'index.html should have past temporal crumb');
-    assert.ok(htmlContent.includes('data-phase="current"'),
-        'index.html should have current temporal crumb');
-    assert.ok(htmlContent.includes('data-phase="future"'),
-        'index.html should have future temporal crumb');
+test('HTML has temporal breadcrumb with Construct/Apply/Evolve crumbs', () => {
+    assert.ok(htmlContent.includes('data-phase="construct"'),
+        'index.html should have construct temporal crumb');
+    assert.ok(htmlContent.includes('data-phase="apply"'),
+        'index.html should have apply temporal crumb');
+    assert.ok(htmlContent.includes('data-phase="evolve"'),
+        'index.html should have evolve temporal crumb');
 });
 
 test('graph view is disabled in HTML', () => {
@@ -269,9 +269,11 @@ test('overview items have independent scroll container', () => {
         'Overview section items should have max-height + overflow auto');
 });
 
-test('sidebar has status-section-concepts class for concept tags', () => {
-    assert.ok(sidebarContent.includes('status-section-concepts'),
-        'sidebar render should tag concepts traversed section');
+test('sidebar has no Concepts Traversed section (concepts removed)', () => {
+    assert.ok(!sidebarContent.includes('status-section-concepts'),
+        'sidebar should not render concepts traversed section');
+    assert.ok(!sidebarContent.includes('Concepts Traversed'),
+        'Concepts Traversed label should be gone');
 });
 
 // ── Module collapse persistence logic unit test ──────────────────────────────
@@ -1163,16 +1165,18 @@ test('visibilitychange handler calls _renderChatList when becoming visible', () 
 
 console.log('\n─── Thread Familiarity: Conservative Prompt Rules ───');
 
-test('STATUS_UPDATE_PROMPT returns stance field for concepts', () => {
-    assert.ok(promptContent.includes('"stance"'),
-        'STATUS_UPDATE_PROMPT should use stance field instead of checked');
-    assert.ok(promptContent.includes('"neutral"'),
-        'STATUS_UPDATE_PROMPT should default stance to neutral');
+test('STATUS_UPDATE_PROMPT has no stance field for concepts', () => {
+    assert.ok(!promptContent.includes('"stance"') || !promptContent.includes('concepts_traversed'),
+        'STATUS_UPDATE_PROMPT should not use concept stance fields');
+    assert.ok(!promptContent.includes('"neutral"'),
+        'STATUS_UPDATE_PROMPT should not default concept stance to neutral');
 });
 
-test('STATUS_UPDATE_PROMPT returns concepts_traversed array', () => {
-    assert.ok(promptContent.includes('concepts_traversed'),
-        'STATUS_UPDATE_PROMPT should return concepts_traversed array');
+test('STATUS_UPDATE_PROMPT returns overview only (no concepts_traversed)', () => {
+    assert.ok(!promptContent.includes('concepts_traversed'),
+        'STATUS_UPDATE_PROMPT should not return concepts_traversed');
+    assert.ok(promptContent.includes('"overview"'),
+        'STATUS_UPDATE_PROMPT should return overview array');
 });
 
 test('STATUS_UPDATE_PROMPT includes overview section', () => {
@@ -1182,11 +1186,11 @@ test('STATUS_UPDATE_PROMPT includes overview section', () => {
         'STATUS_UPDATE_PROMPT should describe the Overview section');
 });
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Chunk Labels in Status Updates
+// ════════════════════════════════════════════════════════════════════════════════
+// Text Annotations in Status Updates
 // ═══════════════════════════════════════════════════════════════════════════════
 
-console.log('\n─── Chunk Labels in Status Updates ───');
+console.log('\n─── Text Annotations in Status Updates ───');
 
 // -- Sidebar: _labelsDirty flag --
 
@@ -1197,21 +1201,25 @@ test('sidebar.js declares _labelsDirty property', () => {
         '_labelsDirty should be initialized to false');
 });
 
-// -- _initStatusUpdate includes currentMessages with labels --
+// -- _initStatusUpdate includes annotations --
 
-test('_initStatusUpdate gathers messages with injected chunk labels', () => {
+test('_initStatusUpdate gathers annotations for status update', () => {
     const fnStart = sidebarContent.indexOf('_initStatusUpdate() {');
     assert.ok(fnStart >= 0, 'Should find _initStatusUpdate definition');
-    const fnBlock = sidebarContent.substring(fnStart, fnStart + 1500);
-    assert.ok(fnBlock.includes('_injectChunkLabels'),
-        '_initStatusUpdate should call _injectChunkLabels to include labels in messages');
+    const fnBlock = sidebarContent.substring(fnStart, fnStart + 2200);
+    assert.ok(fnBlock.includes('_collectPendingAnnotations'),
+        '_initStatusUpdate should collect pending annotations');
     assert.ok(fnBlock.includes('currentMessages'),
         '_initStatusUpdate should send currentMessages in the POST body');
+    assert.ok(fnBlock.includes('annotations:'),
+        '_initStatusUpdate should send annotations in the POST body');
+    assert.ok(!fnBlock.includes('_injectChunkLabels'),
+        '_initStatusUpdate should not inject chunk labels');
 });
 
 test('_initStatusUpdate clears _labelsDirty', () => {
     const fnStart = sidebarContent.indexOf('_initStatusUpdate() {');
-    const fnBlock = sidebarContent.substring(fnStart, fnStart + 1500);
+    const fnBlock = sidebarContent.substring(fnStart, fnStart + 2200);
     assert.ok(fnBlock.includes('this._labelsDirty = false'),
         '_initStatusUpdate should clear _labelsDirty after gathering messages');
 });
@@ -1221,7 +1229,7 @@ test('_initStatusUpdate clears _labelsDirty', () => {
 test('refresh() clears _labelsDirty before fetch', () => {
     const fnStart = sidebarContent.indexOf('async refresh() {');
     assert.ok(fnStart >= 0, 'Should find refresh() definition');
-    const fnBlock = sidebarContent.substring(fnStart, fnStart + 1200);
+    const fnBlock = sidebarContent.substring(fnStart, fnStart + 1600);
     assert.ok(fnBlock.includes('this._labelsDirty = false'),
         'refresh() should clear _labelsDirty');
     const labelsClearIdx = fnBlock.indexOf('this._labelsDirty = false');
@@ -1235,49 +1243,52 @@ test('refresh() clears _labelsDirty before fetch', () => {
 test('_flushDirtyLabels method exists and checks _labelsDirty', () => {
     assert.ok(sidebarContent.includes('_flushDirtyLabels()'),
         'Sidebar should define _flushDirtyLabels');
-    const fnStart = sidebarContent.indexOf('_flushDirtyLabels()');
-    const fnBlock = sidebarContent.substring(fnStart, fnStart + 1200);
+    const fnStart = sidebarContent.indexOf('_flushDirtyLabels() {');
+    const fnBlock = sidebarContent.substring(fnStart, fnStart + 1600);
     assert.ok(fnBlock.includes('this._labelsDirty'),
         '_flushDirtyLabels should check _labelsDirty');
     assert.ok(fnBlock.includes('this.currentTopicId'),
         '_flushDirtyLabels should check currentTopicId');
 });
 
-test('_flushDirtyLabels calls /api/topic/status/update with currentMessages', () => {
-    const fnStart = sidebarContent.indexOf('_flushDirtyLabels()');
-    const fnBlock = sidebarContent.substring(fnStart, fnStart + 1200);
+test('_flushDirtyLabels calls /api/topic/status/update with annotations', () => {
+    const fnStart = sidebarContent.indexOf('_flushDirtyLabels() {');
+    const fnBlock = sidebarContent.substring(fnStart, fnStart + 2400);
     assert.ok(fnBlock.includes('/api/topic/status/update'),
         '_flushDirtyLabels should POST to /api/topic/status/update');
     assert.ok(fnBlock.includes('currentMessages'),
         '_flushDirtyLabels should send currentMessages');
-    assert.ok(fnBlock.includes('_injectChunkLabels'),
-        '_flushDirtyLabels should inject chunk labels into messages');
+    assert.ok(fnBlock.includes('annotations:'),
+        '_flushDirtyLabels should send annotations');
+    assert.ok(!fnBlock.includes('_injectChunkLabels'),
+        '_flushDirtyLabels should not inject chunk labels');
 });
 
 test('_flushDirtyLabels clears _labelsDirty', () => {
-    const fnStart = sidebarContent.indexOf('_flushDirtyLabels()');
-    const fnBlock = sidebarContent.substring(fnStart, fnStart + 1200);
+    const fnStart = sidebarContent.indexOf('_flushDirtyLabels() {');
+    const fnBlock = sidebarContent.substring(fnStart, fnStart + 1600);
     assert.ok(fnBlock.includes('this._labelsDirty = false'),
         '_flushDirtyLabels should clear _labelsDirty');
 });
 
 test('_flushDirtyLabels is fire-and-forget (uses .then not await)', () => {
-    const fnStart = sidebarContent.indexOf('_flushDirtyLabels()');
-    const fnBlock = sidebarContent.substring(fnStart, fnStart + 1200);
+    const fnStart = sidebarContent.indexOf('_flushDirtyLabels() {');
+    const fnEnd = sidebarContent.indexOf('\n  _collectPendingAnnotations');
+    const fnBlock = sidebarContent.substring(fnStart, fnEnd > fnStart ? fnEnd : fnStart + 2400);
     assert.ok(fnBlock.includes('.then('),
         '_flushDirtyLabels should use .then() for fire-and-forget');
-    assert.ok(!fnBlock.includes('async'),
+    assert.ok(!/\basync\b/.test(fnBlock),
         '_flushDirtyLabels should not be async (fire-and-forget)');
 });
 
-// -- _toggleChunkLabel sets Sidebar._labelsDirty --
+// -- _applyAnnotation sets Sidebar._labelsDirty --
 
-test('_toggleChunkLabel sets Sidebar._labelsDirty = true', () => {
-    const fnStart = appContent.indexOf('_toggleChunkLabel(chunkEl, msgId, chunkIdx, label) {');
-    assert.ok(fnStart >= 0, 'Should find _toggleChunkLabel definition');
-    const fnBlock = appContent.substring(fnStart, fnStart + 1500);
+test('_applyAnnotation sets Sidebar._labelsDirty = true for quick labels', () => {
+    const fnStart = appContent.indexOf("_applyAnnotation(label, comment = '') {");
+    assert.ok(fnStart >= 0, 'Should find _applyAnnotation definition');
+    const fnBlock = appContent.substring(fnStart, fnStart + 3500);
     assert.ok(fnBlock.includes('Sidebar._labelsDirty = true'),
-        '_toggleChunkLabel should set Sidebar._labelsDirty to true');
+        '_applyAnnotation should set Sidebar._labelsDirty to true');
 });
 
 // -- All 7 leave-chat sites call _flushDirtyLabels --
@@ -1335,26 +1346,30 @@ test('_onInactive() calls Sidebar._flushDirtyLabels()', () => {
         '_onInactive should call _flushDirtyLabels');
 });
 
-// -- Backend: StatusUpdateRequest includes currentMessages --
+// -- Backend: StatusUpdateRequest includes currentMessages + annotations --
 
 test('backend StatusUpdateRequest model includes currentMessages field', () => {
     const classStart = backendMainContent.indexOf('class StatusUpdateRequest');
     assert.ok(classStart >= 0, 'Should find StatusUpdateRequest class');
-    const block = backendMainContent.substring(classStart, classStart + 300);
+    const block = backendMainContent.substring(classStart, classStart + 400);
     assert.ok(block.includes('currentMessages'),
         'StatusUpdateRequest should have currentMessages field');
     assert.ok(block.includes('MessageItem'),
         'currentMessages should be typed as list[MessageItem]');
+    assert.ok(block.includes('annotations'),
+        'StatusUpdateRequest should have annotations field');
 });
 
 test('backend update_topic_status formats currentMessages when provided', () => {
     const fnStart = backendMainContent.indexOf('async def update_topic_status');
     assert.ok(fnStart >= 0, 'Should find update_topic_status function');
-    const block = backendMainContent.substring(fnStart, fnStart + 600);
+    const block = backendMainContent.substring(fnStart, fnStart + 800);
     assert.ok(block.includes('req.currentMessages'),
         'update_topic_status should reference req.currentMessages');
     assert.ok(block.includes('current_messages_text'),
         'update_topic_status should build current_messages_text from request');
+    assert.ok(block.includes('_serialize_annotations'),
+        'update_topic_status should serialize annotations into the prompt');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1448,7 +1463,7 @@ test('sendMessage restores input on storage failure', () => {
 test('sendBtn uses try/finally to always re-enable', () => {
     const sendFn = appContent.substring(
         appContent.indexOf('async sendMessage()'),
-        appContent.indexOf('// ── Chunk Labeling')
+        appContent.indexOf('// ── Free-text selection annotations')
     );
     assert.ok(sendFn.includes('} finally {'),
         'sendMessage should have a finally block');
@@ -1648,79 +1663,59 @@ test('sidebar.js sorts directions so breadth appears first', () => {
         'sidebar.js should sort breadth before depth');
 });
 
-test('backend main.py serializes stance-aware status for directions prompt', () => {
+test('backend main.py serializes status for directions prompt', () => {
     assert.ok(backendMainContent.includes('_serialize_status_to_str'),
         'main.py should have _serialize_status_to_str helper');
     assert.ok(backendMainContent.includes('topicStatus'),
         'main.py ChatRequest should include topicStatus field');
+    assert.ok(backendMainContent.includes('_build_coverage_str'),
+        'main.py should build coverage for directions from overview + past chats');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // THREE-FEATURE PROBE UPGRADE: Feature 2 — Drag-to-Classify Concept Stances
 // ═══════════════════════════════════════════════════════════════════════════════
 
-console.log('\n─── Feature 2: Concept Stance Drag-and-Classify ───');
+console.log('\n─── Feature 2: Concept Stance UI Removed (overview-only) ───');
 
-test('sidebar.js has _setConceptStance method', () => {
-    assert.ok(sidebarContent.includes('_setConceptStance('),
-        'sidebar.js should define _setConceptStance method');
+test('sidebar.js has no _setConceptStance method', () => {
+    assert.ok(!sidebarContent.includes('_setConceptStance('),
+        'sidebar.js should not define _setConceptStance (concepts removed)');
 });
 
-test('sidebar.js has _mergeStances method', () => {
-    assert.ok(sidebarContent.includes('_mergeStances('),
-        'sidebar.js should define _mergeStances to preserve user stances on profile update');
+test('sidebar.js has no _mergeStances method', () => {
+    assert.ok(!sidebarContent.includes('_mergeStances('),
+        'sidebar.js should not define _mergeStances (concepts removed)');
 });
 
-test('concept tags are draggable', () => {
-    assert.ok(sidebarContent.includes("draggable: 'true'") || sidebarContent.includes('draggable = true') || sidebarContent.includes('draggable="true"'),
-        'Concept tags should be made draggable');
+test('sidebar.js has no concept drop tray / zones', () => {
+    assert.ok(!sidebarContent.includes('concept-drop-tray'),
+        'sidebar.js should not render concept-drop-tray');
+    assert.ok(!sidebarContent.includes('conceptDropZones'),
+        'sidebar.js should not have concept drop zones');
 });
 
-test('concept drop tray has interested/understood/not_interested drop zones', () => {
-    assert.ok(sidebarContent.includes('concept-drop-tray'),
-        'sidebar.js should render concept-drop-tray');
-    assert.ok(sidebarContent.includes('interested') && sidebarContent.includes('understood') && sidebarContent.includes('not_interested'),
-        'Drop tray should have interested, understood, and not_interested zones');
+test('sidebar.js renders overview status items', () => {
+    assert.ok(sidebarContent.includes('status-section-overview'),
+        'sidebar.js should render overview section');
+    assert.ok(sidebarContent.includes('status-item'),
+        'sidebar.js should render status-item bullets');
 });
 
-test('concept tags render stance as CSS class', () => {
-    assert.ok(sidebarContent.includes('stance-') || sidebarContent.includes("stance-${stance}"),
-        'Concept tags should apply stance-based CSS class');
-});
-
-test('CSS has .stance-interested, .stance-understood, .stance-not_interested', () => {
-    assert.ok(cssContent.includes('.stance-interested'),
-        'CSS should define .stance-interested style');
-    assert.ok(cssContent.includes('.stance-understood'),
-        'CSS should define .stance-understood style');
-    assert.ok(cssContent.includes('.stance-not_interested'),
-        'CSS should define .stance-not_interested style');
-});
-
-test('CSS has .drop-zone and .drop-zone.drag-over', () => {
-    assert.ok(cssContent.includes('.drop-zone'),
-        'CSS should define .drop-zone style');
-    assert.ok(cssContent.includes('.drop-zone.drag-over') || cssContent.includes('.drag-over'),
-        'CSS should define .drop-zone.drag-over style');
-});
-
-test('CSS has .concept-tag.dragging', () => {
-    assert.ok(cssContent.includes('.concept-tag.dragging') || cssContent.includes('concept-tag') && cssContent.includes('dragging'),
-        'CSS should style the concept-tag while dragging');
-});
-
-test('STATUS_UPDATE_PROMPT uses stance field not checked boolean', () => {
-    assert.ok(promptContent.includes('"stance"'),
-        'STATUS_UPDATE_PROMPT should use stance field');
+test('STATUS_UPDATE_PROMPT uses overview only (no stance/checked concepts)', () => {
+    assert.ok(promptContent.includes('"overview"'),
+        'STATUS_UPDATE_PROMPT should use overview field');
+    assert.ok(!promptContent.includes('concepts_traversed'),
+        'STATUS_UPDATE_PROMPT should not return concepts_traversed');
     assert.ok(!promptContent.includes('"checked": true') && !promptContent.includes('"checked": false'),
         'STATUS_UPDATE_PROMPT should NOT use checked boolean field');
 });
 
-test('_serializeStatus in sidebar.js categorizes concepts by stance', () => {
+test('_serializeStatus in sidebar.js serializes overview (not stance groups)', () => {
     assert.ok(sidebarContent.includes('_serializeStatus(') || sidebarContent.includes('_serializeStatus :'),
         'sidebar.js should have _serializeStatus method');
-    assert.ok(sidebarContent.includes('Interested in') || sidebarContent.includes("'interested'"),
-        'Serialization should group by interested stance');
+    assert.ok(!sidebarContent.includes('User flagged interest'),
+        'Serialization should not group by interested stance');
 });
 
 test('app.js sends topicStatus in chat API request', () => {
@@ -1728,58 +1723,20 @@ test('app.js sends topicStatus in chat API request', () => {
         'app.js should include topicStatus in chat request body');
 });
 
-test('backend main.py uses topicStatus for stance-aware LLM prompting', () => {
+test('backend main.py uses topicStatus without stance_context', () => {
     assert.ok(backendMainContent.includes('topicStatus'),
         'main.py ChatRequest should have topicStatus field');
-    assert.ok(backendMainContent.includes('stance_context'),
-        'main.py should build stance_context from topicStatus');
-    assert.ok(backendMainContent.includes('Interested in') || backendMainContent.includes("'interested'"),
-        'main.py should categorize concepts by stance for prompt');
+    assert.ok(!backendMainContent.includes('stance_context'),
+        'main.py should not build stance_context from topicStatus');
+    assert.ok(backendMainContent.includes('_serialize_status_to_str'),
+        'main.py should serialize overview for prompts');
 });
 
-// Stance serialization unit test
-test('stance serialization logic correctly groups concepts', () => {
-    const stances = { interested: [], understood: [], not_interested: [], neutral: [] };
-    const concepts = [
-        { title: 'Neural Networks', stance: 'interested' },
-        { title: 'Backprop', stance: 'understood' },
-        { title: 'Statistics', stance: 'not_interested' },
-        { title: 'Tensors', stance: 'neutral' },
-        { title: 'Linear Algebra' }, // no stance → defaults to neutral
-    ];
-    concepts.forEach(c => {
-        const s = c.stance || 'neutral';
-        stances[s].push(c.title);
-    });
-    assert.deepStrictEqual(stances.interested, ['Neural Networks']);
-    assert.deepStrictEqual(stances.understood, ['Backprop']);
-    assert.deepStrictEqual(stances.not_interested, ['Statistics']);
-    assert.deepStrictEqual(stances.neutral, ['Tensors', 'Linear Algebra']);
-});
-
-// Stance merge unit test
-test('stance merge logic preserves user-set stances on update', () => {
-    const oldConcepts = [
-        { title: 'Neural Networks', stance: 'interested' },
-        { title: 'Backprop', stance: 'understood' },
-    ];
-    const newConcepts = [
-        { title: 'Neural Networks', stance: 'neutral' }, // backend reset
-        { title: 'Backprop', stance: 'neutral' },       // backend reset
-        { title: 'Attention', stance: 'neutral' },      // new concept
-    ];
-    // Simulate _mergeStances logic
-    const stanceMap = {};
-    oldConcepts.forEach(c => {
-        if (c.stance && c.stance !== 'neutral') stanceMap[c.title.toLowerCase()] = c.stance;
-    });
-    const merged = newConcepts.map(c => ({
-        ...c,
-        stance: stanceMap[c.title.toLowerCase()] || c.stance || 'neutral',
-    }));
-    assert.strictEqual(merged[0].stance, 'interested', 'Neural Networks should keep interested stance');
-    assert.strictEqual(merged[1].stance, 'understood', 'Backprop should keep understood stance');
-    assert.strictEqual(merged[2].stance, 'neutral', 'New concept Attention should be neutral');
+test('directions prompt uses coverage not covered_concepts', () => {
+    assert.ok(promptContent.includes('{coverage}'),
+        'SIDEBAR_NEW_DIRECTIONS_PROMPT should use {coverage}');
+    assert.ok(!promptContent.includes('{covered_concepts}'),
+        'SIDEBAR_NEW_DIRECTIONS_PROMPT should not use {covered_concepts}');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════

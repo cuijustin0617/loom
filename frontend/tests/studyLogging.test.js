@@ -117,14 +117,10 @@ test('chat_deleted event exists', () => {
     assert.ok(appContent.includes("'chat_deleted'"), 'Should log chat_deleted');
 });
 
-test('chunk label event exists (chunk_labeled or current_concept_toggled)', () => {
-    // chunk_labeled was renamed to current_concept_toggled in the P/C/F redesign
-    assert.ok(
-        appContent.includes("'chunk_labeled'") ||
-        appContent.includes("'current_concept_toggled'") ||
-        sidebarContent.includes("'chunk_labeled'"),
-        'Should log a chunk label event (chunk_labeled or current_concept_toggled)'
-    );
+test('text label events exist (text_label_applied / removed / comment)', () => {
+    assert.ok(appContent.includes("'text_label_applied'"), 'Should log text_label_applied');
+    assert.ok(appContent.includes("'text_label_removed'"), 'Should log text_label_removed');
+    assert.ok(appContent.includes("'text_comment_committed'"), 'Should log text_comment_committed');
 });
 
 test('topic_suggestion_accepted event exists', () => {
@@ -151,9 +147,11 @@ test('chat_unassigned event exists', () => {
     assert.ok(appContent.includes("'chat_unassigned'"), 'Should log chat_unassigned');
 });
 
-test('current_profile_updated event exists (renamed from module1_viewed)', () => {
-    assert.ok(sidebarContent.includes("'current_profile_updated'"),
-        'Should log current_profile_updated event');
+test('proposal_shown event exists (supersedes current_profile_updated)', () => {
+    assert.ok(sidebarContent.includes("'proposal_shown'"),
+        'Should log proposal_shown event');
+    assert.ok(!sidebarContent.includes("'current_profile_updated'"),
+        'current_profile_updated should be superseded by proposal events');
 });
 
 test('current_profile_edited event exists (replaces summary_edited)', () => {
@@ -345,9 +343,19 @@ test('past_lookup event logged with topicId', () => {
     assert.ok(surrounding.includes('topicId'), 'past_lookup should include topicId');
 });
 
-test('past_relevance_calibrated event logged for user feedback', () => {
-    assert.ok(sidebarContent.includes("'past_relevance_calibrated'"),
-        'Should log past_relevance_calibrated event');
+test('connection_contested event logged for user feedback', () => {
+    assert.ok(sidebarContent.includes("'connection_contested'"),
+        'Should log connection_contested event');
+});
+
+test('context_suppressed_in_chat event logged for chat-level suppression', () => {
+    assert.ok(sidebarContent.includes("'context_suppressed_in_chat'"),
+        'Should log context_suppressed_in_chat event');
+});
+
+test('context_item_scoped event logged for scope toggles', () => {
+    assert.ok(sidebarContent.includes("'context_item_scoped'"),
+        'Should log context_item_scoped event');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -356,14 +364,34 @@ test('past_relevance_calibrated event logged for user feedback', () => {
 
 console.log('\n─── New Events: Future Directions ───');
 
-test('future_suggestion_accepted event logged', () => {
-    assert.ok(sidebarContent.includes("'future_suggestion_accepted'"),
-        'Should log future_suggestion_accepted');
+test('intention_saved event logged', () => {
+    assert.ok(sidebarContent.includes("'intention_saved'"),
+        'Should log intention_saved');
 });
 
-test('future_suggestion_ignored event logged', () => {
-    assert.ok(sidebarContent.includes("'future_suggestion_ignored'"),
-        'Should log future_suggestion_ignored');
+test('intention_dismissed event logged', () => {
+    assert.ok(sidebarContent.includes("'intention_dismissed'"),
+        'Should log intention_dismissed');
+});
+
+test('intention_explored event logged', () => {
+    assert.ok(sidebarContent.includes("'intention_explored'"),
+        'Should log intention_explored');
+});
+
+test('intention_modified event logged', () => {
+    assert.ok(sidebarContent.includes("'intention_modified'"),
+        'Should log intention_modified');
+});
+
+test('intention_authored event logged', () => {
+    assert.ok(sidebarContent.includes("'intention_authored'"),
+        'Should log intention_authored');
+});
+
+test('intention_removed event logged', () => {
+    assert.ok(sidebarContent.includes("'intention_removed'"),
+        'Should log intention_removed');
 });
 
 test('future_suggestion_clicked event logged', () => {
@@ -372,23 +400,19 @@ test('future_suggestion_clicked event logged', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// New Events — Concept Stances (Feature 2)
+// Concept Stances removed — event no longer logged from sidebar
 // ═══════════════════════════════════════════════════════════════════════════════
 
-console.log('\n─── New Events: Concept Stances ───');
+console.log('\n─── Concept Stance Events Removed ───');
 
-test('current_concept_stance_set event exists in sidebar.js', () => {
-    assert.ok(sidebarContent.includes("'current_concept_stance_set'"),
-        'Should log current_concept_stance_set event');
+test('current_concept_stance_set event removed from sidebar.js', () => {
+    assert.ok(!sidebarContent.includes("'current_concept_stance_set'"),
+        'Should not log current_concept_stance_set (stance UI removed)');
 });
 
-test('current_concept_stance_set includes topicId, conceptTitle, stance, previousStance', () => {
-    const idx = sidebarContent.indexOf("'current_concept_stance_set'");
-    const surrounding = sidebarContent.substring(idx - 20, idx + 300);
-    assert.ok(surrounding.includes('topicId'), 'Should include topicId');
-    assert.ok(surrounding.includes('conceptTitle'), 'Should include conceptTitle');
-    assert.ok(surrounding.includes('stance'), 'Should include stance');
-    assert.ok(surrounding.includes('previousStance'), 'Should include previousStance');
+test('current_concept_toggled removed with chunk labels', () => {
+    assert.ok(!appContent.includes("'current_concept_toggled'"),
+        'Chunk label event current_concept_toggled should be removed');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -467,9 +491,14 @@ test('no duplicate event names with different meanings', () => {
         'chat_selected', 'view_switched', 'topic_auto_detect_triggered',
         'topic_picker_opened', 'topic_picker_selected', 'topic_picker_keyboard_select',
         'topic_merge_drag', 'topic_merge_dialog_opened', 'topic_merge_confirmed', 'topic_merge_cancelled',
-        'past_lookup', 'past_relevance_calibrated', 'past_build_on_click', 'past_card_dragged',
-        'current_profile_updated', 'current_profile_edited', 'current_concept_stance_set',
-        'future_suggestion_accepted', 'future_suggestion_ignored', 'future_directions_refreshed',
+        'past_lookup', 'past_build_on_click', 'past_card_dragged',
+        'connection_contested', 'context_suppressed_in_chat', 'context_item_scoped',
+        'current_profile_edited',
+        'proposal_shown', 'proposal_accepted', 'proposal_edited', 'proposal_dismissed',
+        'proposal_empty', 'proposal_superseded',
+        'intention_saved', 'intention_dismissed', 'intention_explored',
+        'intention_modified', 'intention_authored', 'intention_removed',
+        'future_directions_refreshed',
         'future_direction_clicked', 'future_direction_new_chat',
         'section_collapsed',
         'context_block_closed', 'context_block_toggled',
@@ -499,12 +528,16 @@ const ALL_EXPECTED_EVENTS = [
     'topic_picker_opened', 'topic_picker_selected', 'topic_picker_keyboard_select',
     'topic_merge_drag', 'topic_merge_dialog_opened', 'topic_merge_confirmed', 'topic_merge_cancelled',
     // Past section
-    'past_lookup', 'past_relevance_calibrated', 'past_build_on_click', 'past_card_dragged',
+    'past_lookup', 'past_build_on_click', 'past_card_dragged',
+    'connection_contested', 'context_suppressed_in_chat', 'context_item_scoped',
     // Current profile
-    'current_profile_updated', 'current_profile_edited', 'current_concept_stance_set',
+    'current_profile_edited',
+    'proposal_shown', 'proposal_accepted', 'proposal_edited', 'proposal_dismissed',
+    'proposal_empty', 'proposal_superseded',
     'section_collapsed',
     // Future directions
-    'future_suggestion_accepted', 'future_suggestion_ignored',
+    'intention_saved', 'intention_dismissed', 'intention_explored',
+    'intention_modified', 'intention_authored', 'intention_removed',
     'future_direction_clicked', 'future_direction_new_chat', 'future_directions_refreshed',
     // Context
     'context_block_added', 'context_block_closed', 'context_block_toggled',
@@ -514,6 +547,8 @@ const ALL_EXPECTED_EVENTS = [
     'baseline_details_shown',
     // Moved chat
     'chat_moved', 'chat_unassigned',
+    // Text-selection labels
+    'text_label_applied', 'text_label_removed', 'text_comment_committed',
 ];
 
 const allCode = appContent + sidebarContent;
@@ -688,9 +723,10 @@ test('current_profile_edited uses positional indices (section, idx)', () => {
     }
 });
 
-test('current_profile_updated does not log topicId in data payload', () => {
-    const ctx = getEventContext(sidebarContent, 'current_profile_updated');
+test('proposal_shown logs topicId and change count in data payload', () => {
+    const ctx = getEventContext(sidebarContent, 'proposal_shown');
     assert.ok(ctx.includes('topicId'), 'Should include topicId');
+    assert.ok(ctx.includes('nChanges'), 'Should include nChanges');
 });
 
 test('future_directions_refreshed does not log direction titles', () => {

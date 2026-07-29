@@ -6,7 +6,6 @@ CHAT_RESPONSE_PROMPT = """You are a helpful AI assistant. Respond naturally and 
 
 After your response, also analyze this conversation:
 1. What topic domain does this conversation belong to? Try to match to an existing topic if possible.
-2. What key concepts were discussed or referenced?
 
 Existing topics the user has:
 {topics_json}
@@ -18,19 +17,14 @@ You MUST return valid JSON in this exact format:
     "name": "Topic Name",
     "matchedExistingId": "existing_topic_id_or_null",
     "confidence": 0.92
-  }},
-  "concepts": [
-    {{ "title": "Concept Title Up To 5 Words", "preview": "10-15 word description of the concept" }}
-  ]
+  }}
 }}
 
 Rules:
 - "response" should be a natural, helpful answer to the user's question
 - "topic.name" should be a broad domain name like "Machine Learning", "Fitness", "Chinese Language"
 - "topic.matchedExistingId": STRONGLY PREFER matching to an existing topic. Only null if truly no existing topic is relevant.
-- "topic.confidence" is 0-1. If matched to an existing topic, should be at least 0.5 unless very tenuous.
-- "concepts" should list 1-4 key concepts discussed, each with a short title and preview
-- Concept titles should be max 5 words, previews max 15 words"""
+- "topic.confidence" is 0-1. If matched to an existing topic, should be at least 0.5 unless very tenuous."""
 
 CHAT_STREAM_SYSTEM_PROMPT = """You are a helpful AI assistant. Respond naturally and helpfully to the user's message. Be clear and conversational."""
 
@@ -80,11 +74,11 @@ A sharp chef's knife and proper cutting technique{{~1}} will save you the most t
 User's relevant past conversations:
 {past_chats_json}
 
-{stance_context}Now respond to the user's message."""
+Now respond to the user's message."""
 
 # ── Metadata Extraction ───────────────────────────────────────────────────────
 
-CHAT_METADATA_PROMPT = """Analyze this conversation and extract topic classification and key concepts.
+CHAT_METADATA_PROMPT = """Analyze this conversation and extract topic classification.
 
 Existing topics the user has:
 {topics_json}
@@ -100,18 +94,14 @@ Return JSON:
     "matchedExistingId": "existing_topic_id_or_null",
     "confidence": 0.92,
     "isOneOff": false
-  }},
-  "concepts": [
-    {{ "title": "Concept Title Up To 5 Words", "preview": "10-15 word description" }}
-  ]
+  }}
 }}
 
 Rules:
 - "topic.name": broad domain like "Machine Learning", "Fitness"
 - "topic.matchedExistingId": MUST be the id of an existing topic if the chat is related to that domain. Only null if truly no existing topic is relevant.
 - "topic.confidence": 0-1. If matched to an existing topic, confidence should be at least 0.5.
-- "isOneOff": true ONLY for trivial one-off requests unlikely to be followed up — formatting an email, quick factual lookups, translations. When in doubt, set false.
-- "concepts": 1-4 key concepts, title max 5 words, preview max 15 words"""
+- "isOneOff": true ONLY for trivial one-off requests unlikely to be followed up — formatting an email, quick factual lookups, translations. When in doubt, set false."""
 
 # ── Current Profile (Status) Update ──────────────────────────────────────────
 
@@ -123,32 +113,26 @@ Current chat messages:
 {current_messages}
 Past chat summaries (newest first):
 {recent_summaries}
+User highlights / labels on assistant responses:
+{annotations}
 
-Update the profile with two sections:
+Update the profile with an **Overview**: 2-4 bullet points summarizing the user's overall profile in this topic. Think big-picture: user's background, context, stated goals, skill level, timeline, and what they've been working through. Incorporate any self-reported information the user has shared.
 
-1. **Overview**: 2-4 bullet points summarizing the user's overall profile in this topic. Think big-picture: user's background, context, stated goals, skill level, timeline. Incorporate any self-reported information the user has shared.
-
-2. **Concepts Traversed**: A flat list of key concepts the user has encountered or discussed across their chats in this topic. Each concept is simply a short title (2-6 words). Do NOT assign mastery levels or infer psychological states — just track what concepts have appeared.
-
-Rules for overview:
+Rules:
 - Mainly ADD or EDIT information, don't remove existing info unless contradicted
 - Keep each point to 1 short-medium line
 - Only include information the user explicitly shared or clearly demonstrated
-
-Rules for concepts:
-- Extract distinct concepts, topics, techniques, or terms the user has actively engaged with
-- Include concepts from both the current chat and past summaries
-- Keep titles concise (2-6 words), deduplicate, merge near-duplicates
-- Max 20 concepts total
-- Include a "stance" field defaulting to "neutral" — do NOT override stances the user has set
+- Preserve any steering notes the user wrote about themselves (e.g. "skip basics of X", "interested in Y", "avoid Z") — treat them as authoritative
+- User highlights are strong, explicit evidence:
+  - ♥ Interested (interested): prioritize adding/updating overview bullets about that span
+  - ✓ Got it (clear): the user already understands that material — don't over-explain it later; you may note familiarity briefly
+  - ? Unsure (unsure): note topics that need clarification in future responses
+  - ✗ Not relevant (not_relevant): do NOT add that content to the overview
+  - Comments: treat as user-stated facts with the same authority as self-reported info
 
 Return JSON:
 {{
-  "overview": ["point 1", "point 2"],
-  "concepts_traversed": [
-    {{"title": "Concept A", "stance": "neutral"}},
-    {{"title": "Concept B", "stance": "neutral"}}
-  ]
+  "overview": ["point 1", "point 2"]
 }}"""
 
 # ── Future Directions ─────────────────────────────────────────────────────────
@@ -158,8 +142,8 @@ SIDEBAR_NEW_DIRECTIONS_PROMPT = """Suggest exactly two focused directions for th
 Topic: {topic_name}
 User's current profile:
 {topic_status}
-Concepts they've already encountered:
-{covered_concepts}
+What's already been covered (overview + past chats):
+{coverage}
 Recent conversation context:
 {current_summary}
 Previously suggested (DO NOT REPEAT):
@@ -167,14 +151,14 @@ Previously suggested (DO NOT REPEAT):
 
 Generate exactly 2 directions, one of each type:
 
-- "breadth": An adjacent topic or concept the user has NOT yet touched, but is directly relevant to their profile and goals. Opens a new area — do NOT go deeper into something they already know.
-- "depth": A more advanced, technical, or nuanced angle on a concept they HAVE already traversed. Extends mastery of something familiar — do NOT introduce new areas.
+- "breadth": An adjacent topic or angle the user has NOT yet touched, but is directly relevant to their profile and goals. Opens a new area — do NOT go deeper into something they already know.
+- "depth": A more advanced, technical, or nuanced angle on something they HAVE already covered (in the overview or a past chat). Extends mastery of something familiar — do NOT introduce new areas.
 
 Rules:
-- Each suggestion must be grounded in a specific concept or profile bullet (reference it as the anchor)
+- Each suggestion must be grounded in a specific overview bullet or past-chat title/summary (reference it as the anchor)
 - Framed as a short, open-ended question the user could naturally ask
 - Do NOT repeat previously suggested directions
-- breadth must reference something NOT in their concepts list; depth must reference something that IS
+- breadth must reference something NOT appearing in the coverage list; depth must reference something that DOES
 
 Return JSON:
 {{
@@ -183,14 +167,14 @@ Return JSON:
       "type": "breadth",
       "title": "Short Title 3-5 Words",
       "question": "A short open-ended question like 'What is X?' or 'How does X connect to Y?'",
-      "anchor": "From current profile: [specific concept or profile bullet this builds on]",
+      "anchor": "From current profile / past chats: [specific overview bullet or past-chat title this builds on]",
       "reason": "One sentence explaining why this adjacent area matters for the user right now"
     }},
     {{
       "type": "depth",
       "title": "Short Title 3-5 Words",
       "question": "A short open-ended question like 'How does X work at a deeper level?' or 'What are the advanced tradeoffs of X?'",
-      "anchor": "From current profile: [specific concept already traversed that this deepens]",
+      "anchor": "From current profile / past chats: [specific overview bullet or past-chat title that this deepens]",
       "reason": "One sentence explaining why going deeper here is valuable right now"
     }}
   ]

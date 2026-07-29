@@ -21,8 +21,11 @@ def isolate_db(tmp_path, monkeypatch):
     monkeypatch.setenv("LOOM_DATA_DIR", str(tmp_path))
 
     import main as _main
-    _main.DB_PATH = db_path
-    _main.DATA_DIR = tmp_path
+    monkeypatch.setattr(_main, "DB_PATH", db_path)
+    monkeypatch.setattr(_main, "DATA_DIR", tmp_path)
+    # Point the seed file into the temp dir so tests never read the real
+    # backend/seed_events.json nor overwrite it via _update_seed_file()
+    monkeypatch.setattr(_main, "SEED_PATH", tmp_path / "seed_events.json")
     _main._init_db()
     yield db_path
 
@@ -1032,12 +1035,13 @@ class TestAuthLogin:
         assert data["isNew"] is True
         assert data["condition"] == "loom"
 
-    def test_first_login_baseline_condition(self, isolate_db):
+    def test_first_login_baseline_prefix_gets_loom(self, isolate_db):
+        """Baseline condition is disabled: every login gets condition 'loom'."""
         resp = _client().post("/api/auth/login", json={
             "userId": "baseline01", "password": "pw",
         })
         data = resp.json()
-        assert data["condition"] == "baseline"
+        assert data["condition"] == "loom"
         assert data["isNew"] is True
 
     def test_second_login_correct_password(self, isolate_db):
@@ -1093,13 +1097,13 @@ class TestAuthLogin:
         resp = _client().post("/api/auth/login", json={"userId": "Loom05", "password": "pw"})
         assert resp.json()["condition"] == "loom"
 
-    def test_condition_baseline_prefix(self, isolate_db):
+    def test_condition_baseline_prefix_gets_loom(self, isolate_db):
         resp = _client().post("/api/auth/login", json={"userId": "baseline05", "password": "pw"})
-        assert resp.json()["condition"] == "baseline"
+        assert resp.json()["condition"] == "loom"
 
-    def test_condition_baseline_mixed_case(self, isolate_db):
+    def test_condition_baseline_mixed_case_gets_loom(self, isolate_db):
         resp = _client().post("/api/auth/login", json={"userId": "Baseline05", "password": "pw"})
-        assert resp.json()["condition"] == "baseline"
+        assert resp.json()["condition"] == "loom"
 
     def test_condition_unknown_prefix_defaults_loom(self, isolate_db):
         resp = _client().post("/api/auth/login", json={"userId": "P01", "password": "pw"})
@@ -1125,7 +1129,7 @@ class TestAuthLogin:
         r1 = client.post("/api/auth/login", json={"userId": "loom01", "password": "pw1"})
         r2 = client.post("/api/auth/login", json={"userId": "baseline01", "password": "pw2"})
         assert r1.json()["condition"] == "loom"
-        assert r2.json()["condition"] == "baseline"
+        assert r2.json()["condition"] == "loom"
 
         # Each has its own password
         assert client.post("/api/auth/login", json={"userId": "loom01", "password": "pw2"}).status_code == 401
@@ -1176,11 +1180,12 @@ class TestHelperFunctions:
         assert _parse_condition("Loom05") == "loom"
         assert _parse_condition("LOOM99") == "loom"
 
-    def test_parse_condition_baseline(self):
+    def test_parse_condition_baseline_prefix_returns_loom(self):
+        """Baseline condition was deliberately disabled; all prefixes map to 'loom'."""
         from main import _parse_condition
-        assert _parse_condition("baseline01") == "baseline"
-        assert _parse_condition("Baseline05") == "baseline"
-        assert _parse_condition("BASELINE99") == "baseline"
+        assert _parse_condition("baseline01") == "loom"
+        assert _parse_condition("Baseline05") == "loom"
+        assert _parse_condition("BASELINE99") == "loom"
 
     def test_parse_condition_unknown_defaults_loom(self):
         from main import _parse_condition

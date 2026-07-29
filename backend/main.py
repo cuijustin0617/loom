@@ -52,6 +52,8 @@ STATIC_VERSION = str(int(time.time()))
 DATA_DIR = Path(os.environ.get("LOOM_DATA_DIR", Path(__file__).parent / "data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "loom_study.db"
+# Seed file lives next to main.py so it ships with Render deploys
+SEED_PATH = Path(__file__).parent / "seed_events.json"
 
 llm = LLMRouter()
 embedder = EmbeddingService()
@@ -98,7 +100,7 @@ def _init_db():
     # Auto-restore from seed file if events table is empty (survives Render deploys)
     count = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
     if count == 0:
-        seed_path = Path(__file__).parent / "seed_events.json"
+        seed_path = SEED_PATH
         if seed_path.exists():
             try:
                 events = json.loads(seed_path.read_text())
@@ -164,6 +166,7 @@ class SidebarRefreshRequest(BaseModel):
     topicStatus: Union[str, dict] = ""
     allChatSummaries: list[dict] = []
     allConcepts: list[dict] = []
+    annotations: list[dict] = []
     model: str | None = None
 
 
@@ -190,12 +193,13 @@ class StatusUpdateRequest(BaseModel):
     currentStatus: Union[str, dict] = ""
     recentSummaries: list[str] = []
     currentMessages: list[MessageItem] = []
+    annotations: list[dict] = []
     model: str | None = None
 
 
 class OverviewAiEditRequest(BaseModel):
     topicName: str
-    overview: list[str] = []
+    overview: list = []  # items may be plain strings or {text, source} dicts
     instruction: str
     model: str | None = None
 
@@ -203,7 +207,7 @@ class OverviewAiEditRequest(BaseModel):
 class TopicRenameCheckRequest(BaseModel):
     oldName: str
     newName: str
-    overview: list[str] = []
+    overview: list = []  # items may be plain strings or {text, source} dicts
     model: str | None = None
 
 
@@ -215,7 +219,8 @@ class TopicDetectRequest(BaseModel):
 class DirectionsRequest(BaseModel):
     topicName: str
     topicStatus: Union[str, dict] = ""
-    allConcepts: list[dict] = []
+    allChatSummaries: list[dict] = []
+    allConcepts: list[dict] = []  # ignored — kept for older clients
     currentSummary: str = ""
     previouslySuggested: list[str] = []
     model: str | None = None
@@ -254,44 +259,69 @@ def _parse_condition(user_id: str) -> str:
 
 
 def _serialize_status_to_str(status) -> str:
-    """Convert structured status (dict with overview + concepts_traversed) to a string for prompts."""
+    """Convert structured status (dict with overview bullets) to a string for prompts."""
     if isinstance(status, str):
         return status
     if not isinstance(status, dict):
         return str(status) if status else ""
     parts = []
     for pt in status.get("overview", []):
-        parts.append(f"- {pt}")
-    concepts = status.get("concepts_traversed", [])
-    if concepts:
-        by_stance: dict[str, list[str]] = {"interested": [], "understood": [], "not_interested": [], "neutral": []}
-        for c in concepts:
-            if isinstance(c, dict):
-                title = c.get("title", "")
-                stance = c.get("stance") or ("understood" if c.get("checked") else "neutral")
-            else:
-                title = str(c)
-                stance = "neutral"
-            if title:
-                by_stance.get(stance, by_stance["neutral"]).append(title)
-        if by_stance["interested"]:
-            parts.append("Interested in (prioritize these): " + ", ".join(by_stance["interested"]))
-        if by_stance["understood"]:
-            parts.append("Understood already (assume base knowledge): " + ", ".join(by_stance["understood"]))
-        if by_stance["not_interested"]:
-            parts.append("Not interested (avoid): " + ", ".join(by_stance["not_interested"]))
-        if by_stance["neutral"]:
-            parts.append("Concepts encountered (neutral): " + ", ".join(by_stance["neutral"]))
-    # Legacy threads/specifics fallback for old stored data
-    for thread in status.get("threads", []):
-        label = thread.get("label", "Thread")
-        steps = thread.get("steps", [])
-        step_strs = [s.get("text", s) if isinstance(s, dict) else str(s) for s in steps]
-        parts.append(f"- Topic area: {label}: {', '.join(step_strs)}")
-    for item in status.get("specifics", []):
-        text = item.get("text", item) if isinstance(item, dict) else str(item)
-        parts.append(f"- {text}")
+        text = pt.get("text", "") if isinstance(pt, dict) else str(pt)
+        if text:
+            parts.append(f"- {text}")
     return "\n".join(parts) if parts else ""
+
+
+def _build_coverage_str(topic_status, chat_summaries) -> str:
+    """Coverage string for directions: overview bullets + past chat titles/summaries."""
+    parts = []
+    overview = []
+    if isinstance(topic_status, dict):
+        overview = topic_status.get("overview", []) or []
+    elif isinstance(topic_status, str) and topic_status.strip():
+        overview = [topic_status]
+    for pt in overview:
+        text = pt.get("text", "") if isinstance(pt, dict) else str(pt)
+        if text:
+            parts.append(f"- Overview: {text}")
+    for c in (chat_summaries or []):
+        title = c.get("title", "") or "Untitled"
+        summary = c.get("summary", "") or ""
+        line = f"- Past chat: {title}"
+        if summary:
+            line += f" — {summary}"
+        parts.append(line)
+    return "\n".join(parts) if parts else "None yet."
+
+
+def _serialize_annotations(annotations) -> str:
+    """Format user text-selection labels for the status-update prompt."""
+    if not annotations:
+        return "(none)"
+    label_names = {
+        "clear": "got it",
+        "unsure": "unsure",
+        "interested": "interested",
+        "not_relevant": "not relevant",
+        "comment": "comment",
+    }
+    lines = []
+    for a in annotations:
+        if not isinstance(a, dict):
+            continue
+        span = (a.get("spanText") or "").strip()
+        label = a.get("label") or ""
+        comment = (a.get("comment") or "").strip()
+        if not span and not comment:
+            continue
+        pretty = label_names.get(label, label or "label")
+        if label == "comment" and comment:
+            lines.append(f'- "{span}" → comment: "{comment}"' if span else f'- comment: "{comment}"')
+        elif comment:
+            lines.append(f'- "{span}" → {pretty}; comment: "{comment}"')
+        else:
+            lines.append(f'- "{span}" → {pretty}')
+    return "\n".join(lines) if lines else "(none)"
 
 
 # ── API Endpoints ────────────────────────────────────────────────────────────
@@ -387,14 +417,8 @@ async def chat_stream_endpoint(req: ChatRequest):
         system_prompt = CHAT_STREAM_SYSTEM_PROMPT
     elif past_chats_for_prompt:
         prompt_mode = "MEMORY prompt (with connections)"
-        # Build stance context block if topic status has non-neutral stances
-        stance_context = ""
-        topic_status_str = _serialize_status_to_str(req.topicStatus) if req.topicStatus else ""
-        if topic_status_str and any(s in topic_status_str for s in ["Interested in", "Understood already", "Not interested"]):
-            stance_context = f"User's current concept stances:\n{topic_status_str}\n\n"
         system_prompt = CHAT_STREAM_MEMORY_PROMPT.format(
             past_chats_json=json.dumps(past_chats_for_prompt, indent=2),
-            stance_context=stance_context,
         )
     else:
         system_prompt = CHAT_STREAM_SYSTEM_PROMPT
@@ -417,7 +441,7 @@ async def chat_stream_endpoint(req: ChatRequest):
 
         full_response = "".join(full_response_parts)
 
-        # Lightweight metadata extraction (topic + concepts)
+        # Lightweight metadata extraction (topic classification only)
         try:
             meta_prompt = CHAT_METADATA_PROMPT.format(topics_json=topics_json)
             # Strip connection markers from the response before metadata extraction
@@ -433,14 +457,14 @@ async def chat_stream_endpoint(req: ChatRequest):
                 messages_for_meta, meta_prompt, json_mode=True, model=req.model,
             )
         except Exception:
-            metadata = {"topic": {"name": "", "matchedExistingId": None, "confidence": 0}, "concepts": []}
+            metadata = {"topic": {"name": "", "matchedExistingId": None, "confidence": 0}}
 
         if isinstance(metadata, list):
             metadata = metadata[0] if metadata else {}
         if not isinstance(metadata, dict):
             metadata = {}
 
-        yield f"data: {json.dumps({'type': 'done', 'response': full_response, 'topic': metadata.get('topic', {}), 'concepts': metadata.get('concepts', []), 'injectedPastChats': past_chats_for_prompt})}\n\n"
+        yield f"data: {json.dumps({'type': 'done', 'response': full_response, 'topic': metadata.get('topic', {}), 'injectedPastChats': past_chats_for_prompt})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -455,15 +479,12 @@ async def sidebar_refresh(req: SidebarRefreshRequest):
 
     # Serialize structured status to string for prompts
     topic_status_str = _serialize_status_to_str(req.topicStatus)
-
-    covered_concepts = "\n".join(
-        [f"- {c.get('title', '')}: {c.get('preview', '')}" for c in req.allConcepts]
-    ) or "None yet."
+    coverage = _build_coverage_str(req.topicStatus, req.allChatSummaries)
 
     directions_prompt = SIDEBAR_NEW_DIRECTIONS_PROMPT.format(
         topic_name=req.topicName,
         topic_status=topic_status_str or "No status yet.",
-        covered_concepts=covered_concepts,
+        coverage=coverage,
         current_summary=current_messages_text[:500],
         previously_suggested="None",
     )
@@ -480,6 +501,7 @@ async def sidebar_refresh(req: SidebarRefreshRequest):
         current_status=topic_status_str or "(empty - create fresh)",
         current_messages=current_messages_text or "(none)",
         recent_summaries=recent_summaries_text,
+        annotations=_serialize_annotations(req.annotations),
     )
 
     directions_task = llm.chat(
@@ -505,8 +527,8 @@ async def sidebar_refresh(req: SidebarRefreshRequest):
 
     status_update = None
     if isinstance(status_result, dict):
-        if "overview" in status_result or "concepts_traversed" in status_result:
-            status_update = status_result
+        if "overview" in status_result:
+            status_update = {"overview": status_result["overview"]}
         elif "status" in status_result:
             status_update = status_result.get("status")
 
@@ -569,6 +591,7 @@ async def update_topic_status(req: StatusUpdateRequest):
         current_status=current or "(empty - create fresh)",
         current_messages=current_messages_text,
         recent_summaries=recent_text,
+        annotations=_serialize_annotations(req.annotations),
     )
     result = await llm.chat(
         [{"role": "user", "content": "Update the status."}],
@@ -576,13 +599,17 @@ async def update_topic_status(req: StatusUpdateRequest):
         json_mode=True,
         model=req.model,
     )
+    if isinstance(result, dict) and "overview" in result:
+        return {"overview": result["overview"]}
     return result
 
 
 @app.post("/api/topic/status/ai-edit")
 async def ai_edit_overview(req: OverviewAiEditRequest):
     """Apply a natural-language edit instruction to the overview bullets."""
-    current_overview = "\n".join(f"- {pt}" for pt in req.overview) if req.overview else "(empty)"
+    current_overview = "\n".join(
+        f"- {pt.get('text', '') if isinstance(pt, dict) else str(pt)}" for pt in req.overview
+    ) if req.overview else "(empty)"
     system_prompt = OVERVIEW_AI_EDIT_PROMPT.format(
         topic_name=req.topicName,
         current_overview=current_overview,
@@ -606,7 +633,9 @@ async def topic_rename_check(req: TopicRenameCheckRequest):
     """Check if overview needs updating after a topic rename."""
     if not req.overview:
         return {"needsUpdate": False, "overview": []}
-    current_overview = "\n".join(f"- {pt}" for pt in req.overview)
+    current_overview = "\n".join(
+        f"- {pt.get('text', '') if isinstance(pt, dict) else str(pt)}" for pt in req.overview
+    )
     system_prompt = TOPIC_RENAME_CHECK_PROMPT.format(
         old_name=req.oldName,
         new_name=req.newName,
@@ -684,9 +713,8 @@ def _get_all_events_json():
 def _update_seed_file():
     """Overwrite seed_events.json so the next Render deploy starts with all events."""
     try:
-        seed_path = Path(__file__).parent / "seed_events.json"
         events = _get_all_events_json()
-        seed_path.write_text(json.dumps(events))
+        SEED_PATH.write_text(json.dumps(events))
     except Exception as exc:
         print(f"[seed] Could not update seed file: {exc}")
 
@@ -740,17 +768,14 @@ async def sync_pull(userId: str = Query(...)):
 async def sidebar_directions(req: DirectionsRequest):
     """Generate only new direction suggestions (for Module 3 shuffle)."""
     topic_status_str = _serialize_status_to_str(req.topicStatus)
-
-    covered_concepts = "\n".join(
-        [f"- {c.get('title', '')}: {c.get('preview', '')}" for c in req.allConcepts]
-    ) or "None yet."
+    coverage = _build_coverage_str(req.topicStatus, req.allChatSummaries)
 
     previously_suggested_str = ", ".join(req.previouslySuggested) if req.previouslySuggested else "None"
 
     directions_prompt = SIDEBAR_NEW_DIRECTIONS_PROMPT.format(
         topic_name=req.topicName,
         topic_status=topic_status_str or "No status yet.",
-        covered_concepts=covered_concepts,
+        coverage=coverage,
         current_summary=req.currentSummary[:500],
         previously_suggested=previously_suggested_str,
     )
@@ -1174,7 +1199,7 @@ _ADMIN_HTML = """<!DOCTYPE html>
           <thead><tr>
             <th>Participant</th><th>Condition</th>
             <th>Sessions</th><th>Messages</th><th>Topics</th>
-            <th>Mod 1</th><th>Mod 2</th><th>Mod 3</th><th>Total</th>
+            <th>Construct</th><th>Apply</th><th>Evolve</th><th>Scrutability</th><th>Total</th>
           </tr></thead>
           <tbody id="summaryBody"></tbody>
         </table>
@@ -1292,9 +1317,14 @@ function renderHeatmap(events) {
     </div>`).join('') || '<div style="color:var(--text-muted);padding:8px 0">No data</div>';
 }
 
-const MOD1 = ['summary_edited','summary_ai_edited','summary_updated','overview_section_toggled','thread_toggled'];
-const MOD2 = ['module2_connection_clicked','connection_marker_clicked','connection_sidebar_card_clicked'];
-const MOD3 = ['module3_direction_clicked','module3_direction_dragged','module3_direction_new_chat','module3_shuffled','welcome_suggestion_clicked'];
+const CONSTRUCT = ['proposal_shown','proposal_accepted','proposal_edited','proposal_dismissed','proposal_superseded',
+  'current_profile_edited','text_label_applied','text_label_removed','text_comment_committed',
+  'topic_suggestion_accepted','topic_suggestion_dismissed','topic_created','topic_renamed','topic_assigned','topic_merge_confirmed'];
+const APPLY = ['past_build_on_click','past_card_dragged','connection_contested','context_suppressed_in_chat',
+  'context_item_scoped','context_block_added'];
+const EVOLVE = ['intention_saved','intention_explored','intention_dismissed','intention_modified','intention_authored',
+  'intention_removed','future_direction_new_chat','future_direction_clicked','future_suggestion_dragged','future_directions_refreshed'];
+const SCRUTABILITY = ['update_undone','version_restored','connection_contested','context_suppressed_in_chat','context_item_scoped'];
 const TOPIC = ['topic_created','topic_renamed','topic_assigned','topic_merge_confirmed','topic_merge_drag'];
 
 function renderSummaryTable(events) {
@@ -1309,14 +1339,15 @@ function renderSummaryTable(events) {
       <td class="num">${get(['session_start'])}</td>
       <td class="num">${get(['query_sent'])}</td>
       <td class="num">${get(TOPIC)}</td>
-      <td class="num">${get(MOD1)}</td>
-      <td class="num">${get(MOD2)}</td>
-      <td class="num">${get(MOD3)}</td>
+      <td class="num">${get(CONSTRUCT)}</td>
+      <td class="num">${get(APPLY)}</td>
+      <td class="num">${get(EVOLVE)}</td>
+      <td class="num">${get(SCRUTABILITY)}</td>
       <td class="num" style="font-weight:600">${ue.length}</td>
     </tr>`;
   }).join('');
   document.getElementById('summaryBody').innerHTML =
-    rows || '<tr class="empty-row"><td colspan="9">No participants yet</td></tr>';
+    rows || '<tr class="empty-row"><td colspan="10">No participants yet</td></tr>';
 }
 
 function applyFilters() {

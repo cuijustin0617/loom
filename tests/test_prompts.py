@@ -9,7 +9,6 @@ from prompts import (
     CHAT_RESPONSE_PROMPT,
     CHAT_STREAM_SYSTEM_PROMPT,
     CHAT_METADATA_PROMPT,
-    SIDEBAR_BRIDGE_QUESTIONS_PROMPT,
     SIDEBAR_NEW_DIRECTIONS_PROMPT,
     STATUS_UPDATE_PROMPT,
     CHAT_SUMMARIZE_PROMPT,
@@ -35,9 +34,9 @@ class TestChatResponsePrompt:
         result = CHAT_RESPONSE_PROMPT.format(topics_json="[]")
         assert '"topic"' in result
 
-    def test_contains_concepts_field(self):
+    def test_no_concepts_field(self):
         result = CHAT_RESPONSE_PROMPT.format(topics_json="[]")
-        assert '"concepts"' in result
+        assert '"concepts"' not in result
 
     def test_contains_confidence_field(self):
         result = CHAT_RESPONSE_PROMPT.format(topics_json="[]")
@@ -59,60 +58,22 @@ class TestChatResponsePrompt:
         assert "C++/C#" in result
 
 
-class TestBridgeQuestionsPrompt:
-    def test_formats_all_fields(self):
-        result = SIDEBAR_BRIDGE_QUESTIONS_PROMPT.format(
-            current_messages="user: How does backprop work?",
-            topic_name="ML",
-            topic_status="Learning basics",
-            ranked_items_json='[{"id":"c1","title":"SVM"}]',
-        )
-        assert "ML" in result
-        assert "backprop" in result
-
-    def test_contains_relatedCards_output(self):
-        result = SIDEBAR_BRIDGE_QUESTIONS_PROMPT.format(
-            current_messages="test", topic_name="T", topic_status="S",
-            ranked_items_json="[]",
-        )
-        assert "relatedCards" in result
-
-    def test_contains_bridgeQuestion_field(self):
-        result = SIDEBAR_BRIDGE_QUESTIONS_PROMPT.format(
-            current_messages="test", topic_name="T", topic_status="S",
-            ranked_items_json="[]",
-        )
-        assert "bridgeQuestion" in result
-
-    def test_contains_sourceType_field(self):
-        result = SIDEBAR_BRIDGE_QUESTIONS_PROMPT.format(
-            current_messages="test", topic_name="T", topic_status="S",
-            ranked_items_json="[]",
-        )
-        assert "sourceType" in result
-
-    def test_empty_status_formats(self):
-        result = SIDEBAR_BRIDGE_QUESTIONS_PROMPT.format(
-            current_messages="test", topic_name="T", topic_status="No status yet.",
-            ranked_items_json="[]",
-        )
-        assert "No status yet." in result
-
-
 class TestNewDirectionsPrompt:
     def test_formats_all_fields(self):
         result = SIDEBAR_NEW_DIRECTIONS_PROMPT.format(
             topic_name="Fitness", topic_status="Working out",
-            covered_concepts="- Cardio", current_summary="Asking about protein",
+            coverage="- Overview: Cardio\n- Past chat: Protein basics",
+            current_summary="Asking about protein",
             previously_suggested="None",
         )
         assert "Fitness" in result
         assert "Cardio" in result
+        assert "Protein basics" in result
 
     def test_contains_newDirections_output(self):
         result = SIDEBAR_NEW_DIRECTIONS_PROMPT.format(
             topic_name="T", topic_status="S",
-            covered_concepts="None", current_summary="test",
+            coverage="None yet.", current_summary="test",
             previously_suggested="None",
         )
         assert "newDirections" in result
@@ -120,19 +81,28 @@ class TestNewDirectionsPrompt:
     def test_contains_title_and_question_fields(self):
         result = SIDEBAR_NEW_DIRECTIONS_PROMPT.format(
             topic_name="T", topic_status="S",
-            covered_concepts="None", current_summary="test",
+            coverage="None yet.", current_summary="test",
             previously_suggested="None",
         )
         assert '"title"' in result
         assert '"question"' in result
 
-    def test_empty_concepts_formats(self):
+    def test_empty_coverage_formats(self):
         result = SIDEBAR_NEW_DIRECTIONS_PROMPT.format(
             topic_name="T", topic_status="S",
-            covered_concepts="None yet.", current_summary="test",
+            coverage="None yet.", current_summary="test",
             previously_suggested="None",
         )
         assert "None yet." in result
+
+    def test_breadth_depth_coverage_rules(self):
+        """Directions use coverage (overview + past chats), not stance grounding."""
+        assert "{coverage}" in SIDEBAR_NEW_DIRECTIONS_PROMPT
+        assert "covered_concepts" not in SIDEBAR_NEW_DIRECTIONS_PROMPT
+        assert "breadth" in SIDEBAR_NEW_DIRECTIONS_PROMPT
+        assert "depth" in SIDEBAR_NEW_DIRECTIONS_PROMPT
+        assert "flagged interest" not in SIDEBAR_NEW_DIRECTIONS_PROMPT
+        assert "dismissed as not relevant" not in SIDEBAR_NEW_DIRECTIONS_PROMPT
 
 
 class TestStatusUpdatePrompt:
@@ -140,14 +110,17 @@ class TestStatusUpdatePrompt:
         result = STATUS_UPDATE_PROMPT.format(
             topic_name="ML", current_status="3rd year CS",
             current_messages="user: test", recent_summaries="- Learned neural nets",
+            annotations='- "neural nets" → interested',
         )
         assert "ML" in result
         assert "3rd year" in result
+        assert "interested" in result
 
     def test_empty_status(self):
         result = STATUS_UPDATE_PROMPT.format(
             topic_name="ML", current_status="(empty - create fresh)",
             current_messages="(none)", recent_summaries="- First chat",
+            annotations="(none)",
         )
         assert "empty" in result
 
@@ -155,17 +128,29 @@ class TestStatusUpdatePrompt:
         result = STATUS_UPDATE_PROMPT.format(
             topic_name="T", current_status="S",
             current_messages="(none)", recent_summaries="test",
+            annotations="(none)",
         )
         assert '"overview"' in result
-        assert '"threads"' in result
-        assert '"level"' in result
+        assert '"concepts_traversed"' not in result
+        assert '"stance"' not in result
 
     def test_mentions_incremental_rules(self):
         result = STATUS_UPDATE_PROMPT.format(
             topic_name="T", current_status="S",
             current_messages="(none)", recent_summaries="test",
+            annotations="(none)",
         )
         assert "ADD" in result
+
+    def test_mentions_annotation_rules(self):
+        result = STATUS_UPDATE_PROMPT.format(
+            topic_name="T", current_status="S",
+            current_messages="(none)", recent_summaries="test",
+            annotations='- "backprop" → unsure',
+        )
+        assert "highlights" in result.lower() or "interested" in result.lower()
+        assert "not_relevant" in result or "Not relevant" in result
+        assert "backprop" in result
 
 
 class TestChatSummarizePrompt:
@@ -217,7 +202,7 @@ class TestTopicAutoDetectPrompt:
 
 class TestAllPrompts:
     ALL_PROMPTS = [
-        CHAT_RESPONSE_PROMPT, SIDEBAR_BRIDGE_QUESTIONS_PROMPT,
+        CHAT_RESPONSE_PROMPT,
         SIDEBAR_NEW_DIRECTIONS_PROMPT, STATUS_UPDATE_PROMPT,
         CHAT_SUMMARIZE_PROMPT, TOPIC_AUTO_DETECT_PROMPT,
     ]
@@ -258,47 +243,39 @@ class TestStreamPrompts:
     def test_metadata_prompt_has_topic_field(self):
         assert '"topic"' in CHAT_METADATA_PROMPT
 
-    def test_metadata_prompt_has_concepts_field(self):
-        assert '"concepts"' in CHAT_METADATA_PROMPT
+    def test_metadata_prompt_has_no_concepts_field(self):
+        assert '"concepts"' not in CHAT_METADATA_PROMPT
 
     def test_metadata_prompt_requests_json(self):
         assert "JSON" in CHAT_METADATA_PROMPT or "json" in CHAT_METADATA_PROMPT
 
 
-class TestStatusUpdatePromptLabels:
-    """Tests for chunk label awareness and conservative understanding inference in STATUS_UPDATE_PROMPT."""
+class TestStatusUpdatePromptOverview:
+    """STATUS_UPDATE_PROMPT returns overview bullets only."""
 
     def _formatted(self):
         return STATUS_UPDATE_PROMPT.format(
             topic_name="ML", current_status="Overview: basics",
             current_messages="user: test", recent_summaries="- chat 1",
+            annotations="(none)",
         )
 
-    def test_mentions_user_labels(self):
+    def test_overview_only_output(self):
         result = self._formatted()
-        assert "USER: understood" in result or "understood this section" in result
+        assert '"overview"' in result
+        assert "Concepts Traversed" not in result
+        assert "concepts_traversed" not in result
 
-    def test_mentions_unsure_label(self):
+    def test_no_mastery_or_stance_fields(self):
         result = self._formatted()
-        assert "USER: unsure" in result or "unsure about this section" in result
+        assert "Do NOT assign mastery levels" not in result
+        assert '"neutral"' not in result
+        assert "do NOT override stances" not in result
+        assert "background" in result.lower() or "skill level" in result
 
-    def test_mentions_conservative_inference(self):
+    def test_preserves_user_steering_notes(self):
         result = self._formatted()
-        assert "Do NOT mark concepts" in result or "not evidence" in result
-
-    def test_mentions_user_actions_focus(self):
-        result = self._formatted()
-        has_focus = ("follow-up" in result or "reactions" in result or
-                     "labels" in result or "user's own actions" in result.lower())
-        assert has_focus, "Prompt should reference user actions as primary evidence"
-
-    def test_label_markers_format_documented(self):
-        result = self._formatted()
-        assert "[USER:" in result
-
-    def test_unlabeled_treated_as_skimmed(self):
-        result = self._formatted()
-        assert "skimmed" in result.lower() or "briefly" in result.lower()
+        assert "steering notes" in result.lower() or "authoritative" in result.lower()
 
 
 class TestOverviewAiEditPrompt:

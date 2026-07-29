@@ -147,7 +147,7 @@
           </div>
           <input type="file" id="fileInput" multiple accept="image/*,.pdf,.txt,.csv,.json" style="display:none;">
         </div>
-        <div class="chat-footer-note" id="modelFooterNote">Externalized personal context probe: past · current · future</div>
+        <div class="chat-footer-note" id="modelFooterNote">Externalized personal context probe: construct · apply · evolve</div>
       </div>
     </main>
     <div class="resize-handle" id="resizeRight">
@@ -158,7 +158,7 @@
       </button>
     </div>
 
-    <!-- Right Sidebar: Unified Personal Context (Past · Current · Future) -->
+    <!-- Right Sidebar: Unified Personal Context (Construct · Apply · Evolve) -->
     <aside class="right-sidebar" id="rightSidebar">
       <div class="knowledge-header">
         <div class="knowledge-title">
@@ -170,11 +170,11 @@
           Personal Context
         </div>
         <div class="temporal-breadcrumb" id="temporalBreadcrumb">
-          <span class="temporal-crumb" data-phase="past">Past</span>
+          <span class="temporal-crumb" data-phase="construct">Construct</span>
           <span class="temporal-crumb-sep">·</span>
-          <span class="temporal-crumb" data-phase="current">Current</span>
+          <span class="temporal-crumb" data-phase="apply">Apply</span>
           <span class="temporal-crumb-sep">·</span>
-          <span class="temporal-crumb" data-phase="future">Future</span>
+          <span class="temporal-crumb" data-phase="evolve">Evolve</span>
         </div>
       </div>
 
@@ -182,36 +182,15 @@
         <!-- Empty state -->
         <div class="sidebar-empty" id="sidebarEmpty">
           <p>Start chatting to see your personal context here.</p>
-          <p class="sidebar-hint">Your past history, current profile, and future directions will appear once a topic is detected.</p>
+          <p class="sidebar-hint">Your context construct, applied context, and future directions will appear once a topic is detected.</p>
         </div>
 
-        <!-- PAST: Historical context and provenance -->
-        <div class="temporal-section section-past" id="sectionPast" style="display:none;">
-          <div class="temporal-section-header" data-section="sectionPast">
-            <div class="temporal-section-label">
-              <span class="temporal-phase-dot dot-past"></span>
-              <span class="temporal-section-title">Past</span>
-              <span class="temporal-section-subtitle" id="pastTopicName"></span>
-            </div>
-            <button class="module-collapse-btn" data-module="sectionPast" title="Collapse">
-              <svg class="module-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="10" height="10">
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </button>
-          </div>
-          <div class="module-body" id="sectionPastBody">
-            <div class="past-chats-list" id="pastChatsList">
-              <p class="temporal-empty-hint">No relevant past chats yet. Keep chatting to build history.</p>
-            </div>
-          </div>
-        </div>
-
-        <!-- CURRENT: Active profile and concepts traversed -->
+        <!-- CONSTRUCT: Active profile and concepts traversed -->
         <div class="temporal-section section-current" id="sectionCurrent" style="display:none;">
           <div class="temporal-section-header" data-section="sectionCurrent">
             <div class="temporal-section-label">
-              <span class="temporal-phase-dot dot-current"></span>
-              <span class="temporal-section-title">Current</span>
+              <span class="temporal-phase-dot dot-construct"></span>
+              <span class="temporal-section-title">Construct</span>
               <span class="temporal-section-subtitle" id="currentTopicName"></span>
             </div>
             <button class="status-update-btn" id="statusUpdateHeaderBtn" title="Update current profile">
@@ -220,12 +199,25 @@
                 <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
               </svg>
             </button>
+            <button class="status-update-btn" id="statusUndoBtn" title="Undo last update">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                <polyline points="1 4 1 10 7 10" />
+                <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+              </svg>
+            </button>
+            <button class="status-update-btn" id="statusHistoryBtn" title="Update history">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
+            </button>
             <button class="module-collapse-btn" data-module="sectionCurrent" title="Collapse">
               <svg class="module-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="10" height="10">
                 <polyline points="6 9 12 15 18 9" />
               </svg>
             </button>
           </div>
+          <div class="temporal-section-subtitle">what the system has built</div>
           <div class="module-body" id="sectionCurrentBody">
             <div class="status-content" id="statusContent">
               <div class="status-structured" id="statusStructured" draggable="true"></div>
@@ -233,12 +225,34 @@
           </div>
         </div>
 
-        <!-- FUTURE: State-grounded proactive directions -->
+        <!-- APPLY: Historical context shaping this response -->
+        <div class="temporal-section section-past" id="sectionPast" style="display:none;">
+          <div class="temporal-section-header" data-section="sectionPast">
+            <div class="temporal-section-label">
+              <span class="temporal-phase-dot dot-apply"></span>
+              <span class="temporal-section-title">Apply</span>
+              <span class="temporal-section-subtitle" id="pastTopicName"></span>
+            </div>
+            <button class="module-collapse-btn" data-module="sectionPast" title="Collapse">
+              <svg class="module-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="10" height="10">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+          </div>
+          <div class="temporal-section-subtitle">shaping this response</div>
+          <div class="module-body" id="sectionPastBody">
+            <div class="past-chats-list" id="pastChatsList">
+              <p class="temporal-empty-hint">No relevant past chats yet. Keep chatting to build history.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- EVOLVE: State-grounded proactive directions -->
         <div class="temporal-section section-future" id="sectionFuture" style="display:none;">
           <div class="temporal-section-header" data-section="sectionFuture">
             <div class="temporal-section-label">
-              <span class="temporal-phase-dot dot-future"></span>
-              <span class="temporal-section-title">Future</span>
+              <span class="temporal-phase-dot dot-evolve"></span>
+              <span class="temporal-section-title">Evolve</span>
             </div>
             <button class="shuffle-btn" id="shuffleDirectionsBtn" title="Refresh suggestions">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
@@ -255,8 +269,14 @@
               </svg>
             </button>
           </div>
+          <div class="temporal-section-subtitle">where it's heading</div>
           <div class="module-body" id="sectionFutureBody">
+            <div class="intentions-list" id="intentionsList"></div>
             <div class="direction-cards" id="directionCards"></div>
+            <div class="add-intention-row">
+              <input type="text" id="addIntentionInput" class="add-intention-input" placeholder="Add an intention…" />
+              <button id="addIntentionBtn" class="add-intention-btn" title="Add intention">+</button>
+            </div>
           </div>
         </div>
 

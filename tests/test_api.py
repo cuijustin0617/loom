@@ -699,7 +699,7 @@ class TestFrontendServing:
     def test_root_returns_html(self):
         resp = _get_client().get("/")
         assert resp.status_code == 200
-        assert "Loom" in resp.text
+        assert "ChatWeave" in resp.text
 
     def test_static_css_served(self):
         resp = _get_client().get("/static/styles.css")
@@ -1671,9 +1671,10 @@ class TestFrontendFileUpload:
         html = _get_client().get("/").text
         assert 'id="fileInput"' in html
 
-    def test_search_toggle_button_exists(self):
+    def test_attach_button_exists(self):
         html = _get_client().get("/").text
-        assert 'id="searchToggleBtn"' in html
+        assert 'id="attachBtn"' in html
+        assert 'id="fileInput"' in html
 
     def test_input_attachments_container(self):
         html = _get_client().get("/").text
@@ -1834,19 +1835,22 @@ class TestChatStreamEndpoint:
             assert done["topic"]["name"] == "ML"
             assert done["topic"]["matchedExistingId"] == "t1"
 
-    def test_stream_done_includes_concepts(self):
+    def test_stream_done_excludes_concepts(self):
+        """SSE done payload has topic + injectedPastChats; concepts were removed."""
         async def fake_stream(*args, **kwargs):
             yield "Answer"
         with patch("main.llm") as m:
             m.chat_stream = MagicMock(return_value=fake_stream())
-            m.chat = AsyncMock(return_value={"topic": {}, "concepts": [{"title": "NN", "preview": "Neural networks"}]})
+            m.chat = AsyncMock(return_value={"topic": {"name": "ML", "matchedExistingId": None, "confidence": 0.8}})
             resp = _get_client().post("/api/chat/stream", json={
                 "chatId": "c1", "messages": [{"role": "user", "content": "hi"}],
             })
             events = self._parse_sse(resp.text)
             done = [e for e in events if e["type"] == "done"][0]
-            assert len(done["concepts"]) == 1
-            assert done["concepts"][0]["title"] == "NN"
+            assert "concepts" not in done
+            assert "topic" in done
+            assert "injectedPastChats" in done
+            assert done["topic"]["name"] == "ML"
 
     def test_stream_passes_model_to_stream(self):
         async def fake_stream(*args, **kwargs):
@@ -1916,7 +1920,8 @@ class TestChatStreamEndpoint:
             events = self._parse_sse(resp.text)
             done = [e for e in events if e["type"] == "done"][0]
             assert done["topic"]["confidence"] == 0
-            assert done["concepts"] == []
+            assert "concepts" not in done
+            assert "injectedPastChats" in done
 
     def test_stream_validation_missing_chatId(self):
         resp = _get_client().post("/api/chat/stream", json={
@@ -2097,9 +2102,9 @@ class TestModule2InlineAnnotations:
 
     def test_module_2_sidebar_section_exists(self):
         html = _get_client().get("/").text
-        assert 'Linked past chats' in html
-        assert 'moduleConnections' in html
-        assert 'connectionSidebarCards' in html
+        assert 'id="sectionPast"' in html
+        assert 'id="pastChatsList"' in html
+        assert '>Apply<' in html
 
     def test_conn_marker_css_exists(self):
         css = _get_client().get("/static/styles.css").text
@@ -2484,12 +2489,11 @@ class TestCacheBusting:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestStructuredStatus:
-    """Tests for the new structured status summary (overview + specifics)."""
+    """Tests for structured status summary (overview bullets only)."""
 
     def test_status_prompt_returns_structured_format(self):
         structured = {
             "overview": ["CS student, comfortable with classical ML"],
-            "specifics": [{"text": "Raft consensus", "level": "solid"}],
         }
         with patch("main.llm") as m:
             m.chat = AsyncMock(return_value=structured)
@@ -2499,7 +2503,8 @@ class TestStructuredStatus:
                 "recentSummaries": ["Discussed Raft protocol"],
             }).json()
             assert "overview" in data
-            assert "specifics" in data
+            assert "specifics" not in data
+            assert "concepts_traversed" not in data
             assert data["overview"][0] == "CS student, comfortable with classical ML"
 
     def test_sidebar_refresh_passes_through_structured_status(self):
@@ -2545,17 +2550,19 @@ class TestStructuredStatus:
 class TestStructuredStatusPrompt:
     """Tests for prompt content and format."""
 
-    def test_prompt_asks_for_overview_and_threads(self):
+    def test_prompt_asks_for_overview_only(self):
         from prompts import STATUS_UPDATE_PROMPT
         assert "overview" in STATUS_UPDATE_PROMPT.lower()
-        assert "threads" in STATUS_UPDATE_PROMPT.lower()
-        assert '"level"' in STATUS_UPDATE_PROMPT
+        assert '"overview"' in STATUS_UPDATE_PROMPT
+        assert "concepts_traversed" not in STATUS_UPDATE_PROMPT
+        assert '"stance"' not in STATUS_UPDATE_PROMPT
 
-    def test_prompt_mentions_understanding_levels(self):
+    def test_prompt_has_no_stance_or_mastery_levels(self):
+        """Status is overview bullets only — no stance tags or mastery levels."""
         from prompts import STATUS_UPDATE_PROMPT
-        assert "solid" in STATUS_UPDATE_PROMPT
-        assert "familiar" in STATUS_UPDATE_PROMPT
-        assert "brief" in STATUS_UPDATE_PROMPT
+        assert "neutral" not in STATUS_UPDATE_PROMPT
+        assert "mastery levels" not in STATUS_UPDATE_PROMPT
+        assert "concepts_traversed" not in STATUS_UPDATE_PROMPT
 
 
 class TestStructuredStatusUI:
@@ -2577,11 +2584,11 @@ class TestStructuredStatusUI:
         assert ".status-item-actions" in css
         assert ".status-level" in css
 
-    def test_css_level_badges(self):
+    def test_css_stance_classes(self):
         css = self._read_file("frontend/styles.css")
-        assert ".level-solid" in css
-        assert ".level-familiar" in css
-        assert ".level-brief" in css
+        assert ".concept-tag.stance-understood" in css
+        assert ".concept-tag.stance-interested" in css
+        assert ".concept-tag.stance-not_interested" in css
 
     def test_hover_reveals_actions(self):
         css = self._read_file("frontend/styles.css")
@@ -2607,28 +2614,25 @@ class TestStructuredStatusUI:
 
     def test_render_status_handles_null(self):
         js = self._read_file("frontend/sidebar.js")
-        assert "No status yet" in js
+        assert "if (!statusData)" in js
+        assert "Chat to build your current profile" in js
 
     def test_delete_btn_in_render(self):
         js = self._read_file("frontend/sidebar.js")
         assert "status-item-del" in js
 
-    def test_thread_rendering_in_sidebar(self):
+    def test_concept_ui_removed_overview_rendering_exists(self):
+        """Concept/stance tag UI was removed; overview bullets are the status UI."""
         js = self._read_file("frontend/sidebar.js")
-        assert "thread-row" in js
-        assert "thread-chain" in js
-        assert "thread-dot" in js
-        assert "_deleteThread" in js
-        assert "_editThreadStep" in js
-
-    def test_thread_css_styles(self):
-        css = self._read_file("frontend/styles.css")
-        assert ".thread-row" in css
-        assert ".thread-dot-solid" in css
-        assert ".thread-dot-familiar" in css
-        assert ".thread-dot-brief" in css
-        assert ".thread-connector" in css
-        assert ".thread-steps" in css
+        assert "concept-tag" not in js
+        assert "conceptTagsContainer" not in js
+        assert "conceptDropZones" not in js
+        assert "_setConceptStance" not in js
+        assert "_mergeStances" not in js
+        assert "_normalizeConcept" not in js
+        assert "status-section-overview" in js
+        assert "status-item" in js
+        assert "_renderStatus" in js
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2776,7 +2780,6 @@ class TestSidebarNullGuards:
         js = self._read_file("frontend/sidebar.js")
         assert "_getStatusContainer" in js
         assert "statusStructured" in js
-        assert "statusText" in js
 
     def test_init_status_drag_has_guard(self):
         js = self._read_file("frontend/sidebar.js")
@@ -2792,9 +2795,10 @@ class TestSidebarNullGuards:
         assert "_getStatusContainer" in render_section
         assert "if (!container) return" in render_section
 
-    def test_render_status_falls_back_for_old_html(self):
+    def test_get_status_container_targets_structured(self):
+        """Old statusText fallback is gone; helper targets #statusStructured directly."""
         js = self._read_file("frontend/sidebar.js")
-        assert "container.id === 'statusText'" in js
+        assert "getElementById('statusStructured')" in js
         assert "_serializeStatus" in js
 
     def test_show_loading_has_guard(self):
@@ -2923,7 +2927,7 @@ class TestBug2ImageFallback:
     def test_missing_data_falls_through_to_filename(self):
         js = _get_client().get("/static/app.js").text
         idx = js.index("_appendMessage(msg) {")
-        block = js[idx:idx+1500]
+        block = js[idx:idx+3000]
         assert "att.data" in block
         assert "att.name || 'file'" in block
 
@@ -2955,13 +2959,13 @@ class TestBug4StatusPromptNotes:
         from prompts import STATUS_UPDATE_PROMPT
         assert "self-reported" in STATUS_UPDATE_PROMPT
 
-    def test_prompt_mentions_user_notes(self):
+    def test_prompt_mentions_background(self):
         from prompts import STATUS_UPDATE_PROMPT
-        assert "notes" in STATUS_UPDATE_PROMPT.lower()
+        assert "background" in STATUS_UPDATE_PROMPT.lower()
 
-    def test_prompt_mentions_stated_expertise(self):
+    def test_prompt_mentions_skill_level(self):
         from prompts import STATUS_UPDATE_PROMPT
-        assert "stated expertise" in STATUS_UPDATE_PROMPT
+        assert "skill level" in STATUS_UPDATE_PROMPT
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

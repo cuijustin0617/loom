@@ -284,7 +284,7 @@ class TestRicherMemoryPrompt:
                 "aiCovered": "Explained learning rate and parameter updates",
             }
         ], indent=2)
-        formatted = CHAT_STREAM_MEMORY_PROMPT.format(past_chats_json=past_chats)
+        formatted = CHAT_STREAM_MEMORY_PROMPT.format(past_chats_json=past_chats, stance_context="")
         assert "gradient descent" in formatted
         assert "learning rate" in formatted
         assert "{past_chats_json}" not in formatted
@@ -294,8 +294,9 @@ class TestRicherMemoryPrompt:
         past_chats = json.dumps([
             {"chatId": "c1", "title": "Chat", "userAsked": "", "aiCovered": ""}
         ], indent=2)
-        formatted = CHAT_STREAM_MEMORY_PROMPT.format(past_chats_json=past_chats)
+        formatted = CHAT_STREAM_MEMORY_PROMPT.format(past_chats_json=past_chats, stance_context="")
         assert "{past_chats_json}" not in formatted
+        assert "{stance_context}" not in formatted
 
     def test_prompt_no_longer_uses_summary_field(self):
         """The prompt should use userAsked/aiCovered, not the generic summary."""
@@ -466,12 +467,12 @@ class TestConnectionCardCSS:
 
     def test_conn_card_fixed_position(self):
         css = self._get_css()
-        card_section = css[css.index('.conn-card'):]
+        card_section = css[css.index('.conn-card {'):]
         assert 'position: fixed' in card_section[:200]
 
     def test_conn_card_z_index(self):
         css = self._get_css()
-        card_section = css[css.index('.conn-card'):]
+        card_section = css[css.index('.conn-card {'):]
         assert 'z-index' in card_section[:200]
 
 
@@ -508,9 +509,9 @@ class TestConnectionCardJS:
         js = self._get_js()
         assert 'You asked' in js
 
-    def test_card_html_has_you_learned(self):
+    def test_card_html_has_you_explored(self):
         js = self._get_js()
-        assert 'You learned' in js
+        assert 'You explored' in js
 
     def test_card_html_has_build_on_this(self):
         js = self._get_js()
@@ -640,7 +641,7 @@ class TestGoToChatActionJS:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestConnectionPersistenceJS:
-    """Assistant messages should store connections and rawContent for re-render."""
+    """Assistant messages persist stripped content; connections resolve live at finalize."""
 
     def _get_js(self):
         return _get_client().get("/static/app.js").text
@@ -651,33 +652,43 @@ class TestConnectionPersistenceJS:
         idx = js.index('_appendMessage(msg)')
         return js[idx:idx + 5000]
 
-    def test_assistant_msg_stores_connections(self):
+    def test_assistant_msg_stores_stripped_content(self):
+        """Connections JSON is not persisted; the stripped main text is saved as content and rawContent."""
         js = self._get_js()
-        assert 'connections: savedConns' in js or 'connections:' in js
+        assert 'content: strippedMain' in js
+        assert 'rawContent: strippedMain' in js
 
     def test_assistant_msg_stores_rawContent(self):
         js = self._get_js()
         assert 'rawContent:' in js
 
-    def test_appendMessage_checks_connections(self):
-        assert 'msg.connections' in self._get_appendMessage_def()
+    def test_appendMessage_reapplies_contested_markers(self):
+        section = self._get_appendMessage_def()
+        assert 'msg.connContested' in section
+        assert 'conn-marker-contested' in section
 
-    def test_appendMessage_checks_rawContent(self):
-        assert 'msg.rawContent' in self._get_appendMessage_def()
+    def test_appendMessage_renders_from_content(self):
+        """_appendMessage renders from msg.content and re-parses {~N} markers in it."""
+        assert 'msg.content' in self._get_appendMessage_def()
 
     def test_appendMessage_calls_parseConnectionMarkers(self):
         assert '_parseConnectionMarkers' in self._get_appendMessage_def()
 
-    def test_appendMessage_calls_resolveConnectionMarkers(self):
-        assert '_resolveConnectionMarkers' in self._get_appendMessage_def()
+    def test_finalize_resolves_markers_and_stamps_msg_id(self):
+        """_finalizeStreamingMessage resolves connection markers live and stamps data-msg-id."""
+        js = self._get_js()
+        idx = js.index('_finalizeStreamingMessage(el, text, msgId)')
+        section = js[idx:idx + 1200]
+        assert '_resolveConnectionMarkers' in section
+        assert 'dataset.msgId = msgId' in section
 
-    def test_finalize_saves_rawContent_and_connections(self):
-        """_finalizeStreamingMessage + done handler should set rawContent and connections on msg."""
+    def test_finalize_saves_stripped_content(self):
+        """The done handler strips the connections block and persists the stripped text."""
         js = self._get_js()
         done_start = js.index("evt.type === 'done'") if "evt.type === 'done'" in js else js.index('type === "done"')
         done_section = js[done_start:done_start + 1200]
+        assert '_stripConnectionBlock' in done_section
         assert 'rawContent' in done_section
-        assert 'connections' in done_section
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1425,7 +1436,7 @@ class TestAllPromptsStructural:
 
     def test_memory_prompt_is_valid_format_string(self):
         from prompts import CHAT_STREAM_MEMORY_PROMPT
-        formatted = CHAT_STREAM_MEMORY_PROMPT.format(past_chats_json="[]")
+        formatted = CHAT_STREAM_MEMORY_PROMPT.format(past_chats_json="[]", stance_context="")
         assert isinstance(formatted, str)
         assert len(formatted) > 50
 
