@@ -691,6 +691,13 @@ body {
   line-height: 1.4;
 }
 
+.welcome-card-example {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
 .welcome-card-intention-badge {
   display: inline-block;
   font-size: 9px;
@@ -2630,6 +2637,23 @@ body {
   border-left: 3px solid var(--accent-green);
 }
 
+.toast-action {
+  display: inline;
+  margin-left: 10px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent-blue);
+  font-size: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.toast-action:hover {
+  opacity: 0.85;
+}
+
 /* Streaming cursor */
 .streaming-cursor {
   display: inline-block;
@@ -3297,17 +3321,6 @@ body {
   margin-left: 6px;
 }
 
-.status-item-scoped {
-  font-size: 9px;
-  color: var(--accent-blue);
-  margin-left: 6px;
-}
-
-.status-item-btn.status-item-scope.scope-active {
-  color: var(--accent-blue);
-  opacity: 1;
-}
-
 .concept-scope-btn {
   background: none;
   border: none;
@@ -3379,51 +3392,49 @@ body {
   color: var(--danger);
 }
 
-/* ── Proposal Card (pending profile update) ───────────────────────────── */
-.proposal-card {
-  border-left-color: var(--accent-green);
-  background: rgba(15, 123, 108, 0.04);
-  cursor: default;
-  margin-bottom: 6px;
+/* ── Inline proposal diffs ────────────────────────────────────────────── */
+.diff-add {
+  background: rgba(15, 123, 108, 0.18);
+  text-decoration: underline;
+  text-decoration-color: rgba(15, 123, 108, 0.5);
+  border-radius: 2px;
 }
 
-.proposal-changes {
-  margin-top: 4px;
+.diff-del {
+  color: var(--text-muted);
+  text-decoration: line-through;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 2px;
+}
+
+.proposal-actions-bar {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
 }
 
-.proposal-change {
+.proposal-actions-meta {
   font-size: 11px;
-  line-height: 1.4;
-  color: var(--text-secondary);
-}
-
-.proposal-change-add {
-  color: var(--accent-green);
-}
-
-.proposal-change-remove {
-  color: var(--danger);
-}
-
-.proposal-change-edit {
   color: var(--text-muted);
+  line-height: 1.3;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.proposal-evidence {
-  color: var(--text-muted);
-  font-weight: 400;
-}
-
-/* Always visible, unlike .temporal-card-actions (hover-revealed) */
 .proposal-actions {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 5px;
-  margin-top: 6px;
+  flex-shrink: 0;
 }
 
 .proposal-accept-btn {
@@ -3432,25 +3443,43 @@ body {
   background: rgba(15, 123, 108, 0.08);
 }
 
-.proposal-edit-row {
-  margin-top: 6px;
+.suggestion-edit-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
 }
 
-.proposal-edit-row-head {
+.suggestion-edit-row .proposal-edit-input {
+  flex: 1;
+}
+
+.status-history-undo-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  margin-bottom: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-secondary, #f7f7f5);
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-primary);
 }
 
-.proposal-edit-kind {
+.status-history-undo-row:hover {
+  border-color: var(--text-muted);
+}
+
+.status-history-kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 10px;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: white;
   color: var(--text-muted);
-}
-
-.proposal-edit-row.proposal-skipped .proposal-edit-input {
-  opacity: 0.4;
-  text-decoration: line-through;
 }
 
 /* ── Direction Card Anchor ────────────────────────────────────────────── */
@@ -4057,18 +4086,25 @@ body.baseline-mode .topic-suggestion {
   border: none;
   cursor: pointer;
   color: var(--text-muted);
-  padding: 3px;
+  padding: 3px 6px;
   border-radius: 4px;
-  transition: color 0.15s, transform 0.2s;
+  transition: color 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
 }
 
 .shuffle-btn:hover {
-  color: var(--accent-purple);
-  transform: rotate(45deg);
+  color: var(--text-primary);
 }
 
 .shuffle-btn.loading {
   pointer-events: none;
+}
+
+.shuffle-btn.loading svg {
   animation: spin 0.8s linear infinite;
 }
 

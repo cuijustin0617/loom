@@ -90,9 +90,37 @@ const Storage = {
     if (!topic || typeof topic !== 'object') return topic;
     if (!Array.isArray(topic.statusHistory)) topic.statusHistory = [];
     if (topic.pendingProposal === undefined) topic.pendingProposal = null;
-    if (!Array.isArray(topic.intentions)) topic.intentions = [];
     if (!Array.isArray(topic.excludedChatIds)) topic.excludedChatIds = [];
-    if (!Array.isArray(topic.dismissedDirections)) topic.dismissedDirections = [];
+
+    // One-time: intentions → goals (drop question); dismissedDirections → dismissedGoals
+    if (!Array.isArray(topic.goals)) {
+      const legacy = Array.isArray(topic.intentions) ? topic.intentions : [];
+      topic.goals = legacy.map(g => {
+        if (!g || typeof g !== 'object') return g;
+        const next = { ...g };
+        delete next.question;
+        return next;
+      });
+    }
+    delete topic.intentions;
+    if (!Array.isArray(topic.dismissedGoals)) {
+      topic.dismissedGoals = Array.isArray(topic.dismissedDirections) ? topic.dismissedDirections : [];
+    }
+    delete topic.dismissedDirections;
+
+    // Normalize sidebarCache direction field names
+    if (topic.sidebarCache && Array.isArray(topic.sidebarCache.newDirections)) {
+      topic.sidebarCache.newDirections = topic.sidebarCache.newDirections.map(d => {
+        if (!d || typeof d !== 'object') return d;
+        if (d.exampleQuestion == null && d.question != null) {
+          const next = { ...d, exampleQuestion: d.question };
+          delete next.question;
+          return next;
+        }
+        return d;
+      });
+    }
+
     const s = topic.statusSummary;
     if (s && typeof s === 'object') {
       if (Array.isArray(s.overview)) {
@@ -296,9 +324,9 @@ const Storage = {
       lastActive: Utils.timestamp(),
       statusHistory: [],
       pendingProposal: null,
-      intentions: [],
+      goals: [],
       excludedChatIds: [],
-      dismissedDirections: [],
+      dismissedGoals: [],
     };
     return this.saveTopic(topic);
   },

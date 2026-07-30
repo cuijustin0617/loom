@@ -128,7 +128,7 @@ Rules:
   - ✓ Got it (clear): the user already understands that material — don't over-explain it later; you may note familiarity briefly
   - ? Unsure (unsure): note topics that need clarification in future responses
   - ✗ Not relevant (not_relevant): do NOT add that content to the overview
-  - Comments: treat as user-stated facts with the same authority as self-reported info
+  - Comments (comment): these are explicit user statements about the quoted span. They should usually produce an overview ADD or EDIT grounded in the comment's content — phrase it as a profile fact about the user, not as a quote of the comment itself.
 
 Return JSON:
 {{
@@ -137,7 +137,7 @@ Return JSON:
 
 # ── Future Directions ─────────────────────────────────────────────────────────
 
-SIDEBAR_NEW_DIRECTIONS_PROMPT = """Suggest exactly two focused directions for the user — one breadth direction and one depth direction.
+SIDEBAR_NEW_DIRECTIONS_PROMPT = """Suggest exactly two focused goal-level directions for the user — one breadth goal and one depth goal.
 
 Topic: {topic_name}
 User's current profile:
@@ -149,14 +149,15 @@ Recent conversation context:
 Previously suggested (DO NOT REPEAT):
 {previously_suggested}
 
-Generate exactly 2 directions, one of each type:
+Generate exactly 2 suggestions, one of each type:
 
 - "breadth": An adjacent topic or angle the user has NOT yet touched, but is directly relevant to their profile and goals. Opens a new area — do NOT go deeper into something they already know.
 - "depth": A more advanced, technical, or nuanced angle on something they HAVE already covered (in the overview or a past chat). Extends mastery of something familiar — do NOT introduce new areas.
 
 Rules:
+- title = the goal phrased as an intention/goal (e.g., "Understand whether X generalizes to Y"), NOT a question
+- exampleQuestion = one concrete first question the user could ask right now to act on that goal
 - Each suggestion must be grounded in a specific overview bullet or past-chat title/summary (reference it as the anchor)
-- Framed as a short, open-ended question the user could naturally ask
 - Do NOT repeat previously suggested directions
 - breadth must reference something NOT appearing in the coverage list; depth must reference something that DOES
 
@@ -165,19 +166,39 @@ Return JSON:
   "newDirections": [
     {{
       "type": "breadth",
-      "title": "Short Title 3-5 Words",
-      "question": "A short open-ended question like 'What is X?' or 'How does X connect to Y?'",
+      "title": "Goal phrased as an intention (not a question)",
+      "exampleQuestion": "A concrete first question the user could ask right now",
       "anchor": "From current profile / past chats: [specific overview bullet or past-chat title this builds on]",
       "reason": "One sentence explaining why this adjacent area matters for the user right now"
     }},
     {{
       "type": "depth",
-      "title": "Short Title 3-5 Words",
-      "question": "A short open-ended question like 'How does X work at a deeper level?' or 'What are the advanced tradeoffs of X?'",
+      "title": "Goal phrased as an intention (not a question)",
+      "exampleQuestion": "A concrete first question the user could ask right now",
       "anchor": "From current profile / past chats: [specific overview bullet or past-chat title that this deepens]",
       "reason": "One sentence explaining why going deeper here is valuable right now"
     }}
   ]
+}}"""
+
+SIDEBAR_GOAL_QUESTION_PROMPT = """Generate one concrete example question the user could ask right now to act on a saved goal.
+
+Topic: {topic_name}
+User's current profile:
+{topic_status}
+What's already been covered (overview + past chats):
+{coverage}
+Goal: {goal_title}
+Do not repeat this prior question (if any): {exclude_question}
+
+Rules:
+- Return exactly one short, open-ended question the user could naturally type into chat
+- Ground it in the goal title and the user's profile/coverage
+- Do not restate the goal as a statement — output a question only
+
+Return JSON:
+{{
+  "question": "A short open-ended question"
 }}"""
 
 # ── Chat Summarization ────────────────────────────────────────────────────────

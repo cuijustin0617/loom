@@ -197,7 +197,7 @@ const Utils = {
     return this.TOPIC_COLORS[idx % this.TOPIC_COLORS.length];
   },
 
-  showToast(message, type = 'info') {
+  showToast(message, type = 'info', action = null) {
     let container = document.getElementById('toastContainer');
     if (!container) {
       container = document.createElement('div');
@@ -207,13 +207,61 @@ const Utils = {
     }
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
-    toast.textContent = message;
+    if (action && action.label && typeof action.onClick === 'function') {
+      const msg = document.createElement('span');
+      msg.textContent = message;
+      toast.appendChild(msg);
+      const link = document.createElement('button');
+      link.type = 'button';
+      link.className = 'toast-action';
+      link.textContent = action.label;
+      link.addEventListener('click', (e) => {
+        e.stopPropagation();
+        action.onClick();
+        toast.classList.remove('toast-visible');
+        toast.addEventListener('transitionend', () => toast.remove());
+      });
+      toast.appendChild(link);
+    } else {
+      toast.textContent = message;
+    }
     container.appendChild(toast);
     requestAnimationFrame(() => toast.classList.add('toast-visible'));
     setTimeout(() => {
       toast.classList.remove('toast-visible');
       toast.addEventListener('transitionend', () => toast.remove());
-    }, 3500);
+    }, action ? 6000 : 3500);
+  },
+
+  /**
+   * Word-level diff via LCS. Returns [{type:'same'|'add'|'del', text}, ...].
+   */
+  wordDiff(oldText, newText) {
+    const tokenize = (s) => (s || '').split(/(\s+)/).filter(t => t.length > 0);
+    const a = tokenize(oldText);
+    const b = tokenize(newText);
+    const n = a.length, m = b.length;
+    const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+    for (let i = n - 1; i >= 0; i--) {
+      for (let j = m - 1; j >= 0; j--) {
+        dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      }
+    }
+    const out = [];
+    let i = 0, j = 0;
+    while (i < n && j < m) {
+      if (a[i] === b[j]) {
+        out.push({ type: 'same', text: a[i] });
+        i++; j++;
+      } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+        out.push({ type: 'del', text: a[i++] });
+      } else {
+        out.push({ type: 'add', text: b[j++] });
+      }
+    }
+    while (i < n) out.push({ type: 'del', text: a[i++] });
+    while (j < m) out.push({ type: 'add', text: b[j++] });
+    return out;
   },
 };
 

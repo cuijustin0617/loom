@@ -324,14 +324,18 @@ test('sidebar.js has _createPastChatCard method', () => {
         'sidebar.js should define _createPastChatCard');
 });
 
-test('past chat card has past-build-on click handler', () => {
-    assert.ok(sidebarContent.includes('past-build-on-btn') || sidebarContent.includes("'past_build_on_click'"),
-        'Past chat card should have build-on interaction');
+test('past chat card has continue + dont-use actions', () => {
+    assert.ok(sidebarContent.includes('past-continue-btn') || sidebarContent.includes('Continue this chat'),
+        'Past chat card should have Continue this chat');
+    assert.ok(sidebarContent.includes("Don't use this") || sidebarContent.includes('past-suppress-btn'),
+        'Past chat card should have Don\'t use this');
 });
 
-test('direction card is draggable', () => {
-    assert.ok(sidebarContent.includes("el.draggable = true"),
-        'Direction card should be draggable');
+test('suggested goal cards are not draggable', () => {
+    assert.ok(sidebarContent.includes('suggested-goal-card') || sidebarContent.includes('_createSuggestedGoalCard'),
+        'Suggested goal cards exist');
+    assert.ok(sidebarContent.includes('el.draggable = false'),
+        'Suggested goal cards should not be draggable');
 });
 
 test('app.js has drag-over drop handler', () => {
@@ -339,11 +343,11 @@ test('app.js has drag-over drop handler', () => {
         'App should handle dragover and drop events');
 });
 
-test('context block stores contextMeta and user message includes it', () => {
-    assert.ok(appContent.includes('contextMeta = {'),
-        'sendMessage should collect contextMeta from context block');
-    assert.ok(appContent.includes('contextMeta: contextMeta'),
-        'user message payload should include contextMeta');
+test('context block feature is removed from composer', () => {
+    assert.ok(!htmlContent.includes('id="contextBlock"'),
+        'contextBlock markup should be removed');
+    assert.ok(!appContent.includes('setContextBlock('),
+        'setContextBlock should be removed');
 });
 
 test('CSS has temporal-card style', () => {
@@ -427,7 +431,7 @@ test('sidebar.js init() calls all necessary init functions', () => {
         sidebarContent.indexOf('init()'),
         sidebarContent.indexOf('},', sidebarContent.indexOf('init()'))
     );
-    assert.ok(initFunc.includes('_initStatusDrag'), 'init should call _initStatusDrag');
+    assert.ok(!initFunc.includes('_initStatusDrag'), 'init should not call _initStatusDrag');
     assert.ok(initFunc.includes('_initStatusUpdate'), 'init should call _initStatusUpdate');
     assert.ok(initFunc.includes('_initMergeDialog'), 'init should call _initMergeDialog');
     assert.ok(initFunc.includes('_initShuffle'), 'init should call _initShuffle');
@@ -490,11 +494,13 @@ test('directions prompt generates exactly breadth + depth directions', () => {
         'Prompt should instruct to generate one breadth and one depth');
 });
 
-test('directions prompt example questions include short open-ended patterns', () => {
-    assert.ok(promptContent.includes("'What is X?'") || promptContent.includes('"What is X?"'),
-        'Prompt examples should include simple "What is X?" pattern');
-    assert.ok(promptContent.includes('open-ended'),
-        'Prompt should ask for open-ended questions');
+test('directions prompt returns goal-level exampleQuestion fields', () => {
+    assert.ok(promptContent.includes('exampleQuestion'),
+        'Prompt should include exampleQuestion field');
+    assert.ok(promptContent.includes('goal') || promptContent.includes('intention'),
+        'Prompt should describe goal-level titles');
+    assert.ok(promptContent.includes('exampleQuestion') || promptContent.includes('open-ended'),
+        'Prompt should ask for an example question');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -668,9 +674,11 @@ test('sidebar.js has showPastChats method for rendering past context', () => {
         'sidebar.js should define showPastChats method');
 });
 
-test('past chat cards render userAsked and aiCovered details', () => {
-    assert.ok(sidebarContent.includes('userAsked') && sidebarContent.includes('aiCovered'),
-        'Past chat cards should render userAsked and aiCovered fields');
+test('past chat cards render userAsked excerpt', () => {
+    assert.ok(sidebarContent.includes('userAsked'),
+        'Past chat cards should render userAsked excerpt');
+    assert.ok(sidebarContent.includes('Related to your current chat'),
+        'Past chat meta should say Related to your current chat');
 });
 
 test('CSS has past-chat-card style', () => {

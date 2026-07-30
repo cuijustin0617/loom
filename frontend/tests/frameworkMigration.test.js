@@ -114,9 +114,11 @@ test('_migrateTopic fills all new fields on a legacy topic', () => {
     Storage._migrateTopic(t);
     assert.deepStrictEqual(plain(t.statusHistory), []);
     assert.strictEqual(t.pendingProposal, null);
-    assert.deepStrictEqual(plain(t.intentions), []);
+    assert.deepStrictEqual(plain(t.goals), []);
     assert.deepStrictEqual(plain(t.excludedChatIds), []);
-    assert.deepStrictEqual(plain(t.dismissedDirections), []);
+    assert.deepStrictEqual(plain(t.dismissedGoals), []);
+    assert.ok(!('intentions' in t), 'legacy intentions removed');
+    assert.ok(!('dismissedDirections' in t), 'legacy dismissedDirections removed');
 });
 
 test('_migrateTopic converts string overview items to {text, source:inferred}', () => {
@@ -152,7 +154,7 @@ test('_getAll migrates legacy topics read from localStorage', () => {
     }));
     const topic = Storage.getTopic('t1');
     assert.deepStrictEqual(plain(topic.statusSummary.overview[0]), { text: 'legacy bullet', source: 'inferred' });
-    assert.deepStrictEqual(plain(topic.intentions), []);
+    assert.deepStrictEqual(plain(topic.goals), []);
     assert.strictEqual(topic.pendingProposal, null);
 });
 
@@ -161,9 +163,9 @@ test('createTopic includes all new schema fields', () => {
     const t = Storage.createTopic('New Topic');
     assert.deepStrictEqual(plain(t.statusHistory), []);
     assert.strictEqual(t.pendingProposal, null);
-    assert.deepStrictEqual(plain(t.intentions), []);
+    assert.deepStrictEqual(plain(t.goals), []);
     assert.deepStrictEqual(plain(t.excludedChatIds), []);
-    assert.deepStrictEqual(plain(t.dismissedDirections), []);
+    assert.deepStrictEqual(plain(t.dismissedGoals), []);
 });
 
 test('_migrateTopic archives concepts_traversed and promotes interested stances', () => {
@@ -275,7 +277,7 @@ test('dot classes exist in styles.css and are used in index.html', () => {
 console.log('\n─── Phase 3: snapshots + undo/history ───');
 
 test('every status mutation snapshots BEFORE mutating', () => {
-    ['_deleteStatusItem', '_editStatusItem', '_submitAiEdit', '_toggleItemScope']
+    ['_deleteStatusItem', '_editStatusItem', '_submitAiEdit']
         .forEach(fn => {
             let start = sidebarSrc.indexOf('\n  ' + fn + '(');
             if (start === -1) start = sidebarSrc.indexOf('\n  async ' + fn + '(');
@@ -286,7 +288,8 @@ test('every status mutation snapshots BEFORE mutating', () => {
 });
 
 test('undo + history controls exist in Construct header', () => {
-    assert.ok(indexHtml.includes('statusUndoBtn'), 'undo button');
+    assert.ok(!indexHtml.includes('statusUndoBtn'), 'undo button removed');
+    assert.ok(indexHtml.includes('statusHistoryBtn'), 'history button kept');
     assert.ok(indexHtml.includes('statusHistoryBtn'), 'history button');
 });
 
@@ -334,7 +337,7 @@ test('_diffStatus detects overview removals', () => {
         { overview: [{ text: 'stays here fine' }, { text: 'goes away entirely' }] },
         { overview: [{ text: 'stays here fine' }] }
     );
-    assert.deepStrictEqual(plain(changes), [{ kind: 'overview_remove', text: 'goes away entirely' }]);
+    assert.deepStrictEqual(plain(changes), [{ kind: 'overview_remove', text: 'goes away entirely', oldText: 'goes away entirely' }]);
 });
 
 test('_diffStatus pairs prefix-matched remove+add as an edit', () => {
@@ -472,8 +475,8 @@ test('proposal edit commits user-modified content with source user', () => {
 console.log('\n─── Phase 5: intentions ───');
 
 test('all intention lifecycle events logged with stage evolve', () => {
-    ['intention_saved', 'intention_explored', 'intention_dismissed',
-     'intention_modified', 'intention_authored', 'intention_removed'].forEach(evt => {
+    ['goal_saved', 'goal_explored', 'goal_dismissed',
+     'goal_modified', 'goal_authored', 'goal_removed'].forEach(evt => {
         const idx = sidebarSrc.indexOf(`'${evt}'`);
         assert.ok(idx > -1, `${evt} logged in sidebar.js`);
         assert.ok(sidebarSrc.slice(idx, idx + 200).includes("'evolve'"), `${evt} tagged stage evolve`);
@@ -485,17 +488,17 @@ test('old probe accept/ignore buttons are gone', () => {
     assert.ok(!sidebarSrc.includes('probe-ignore'), 'probe-ignore removed');
 });
 
-test('dismissed directions are merged into previouslySuggested on shuffle', () => {
+test('dismissed goals are merged into previouslySuggested on shuffle', () => {
     const idx = sidebarSrc.indexOf('shuffleDirections');
     const block = sidebarSrc.slice(idx, idx + 2500);
-    assert.ok(block.includes('dismissedDirections'), 'shuffle excludes dismissed directions');
+    assert.ok(block.includes('dismissedGoals'), 'shuffle excludes dismissed goals');
 });
 
-test('add-intention input exists and welcome cards surface saved intentions', () => {
-    assert.ok(indexHtml.includes('addIntention') || sidebarSrc.includes('_initAddIntention'),
-        'add intention input wired');
-    assert.ok(appContent.includes('intentions') && appContent.includes("'intention_explored'"),
-        'app.js suggestion cards handle intentions');
+test('add-goal input exists and welcome cards surface saved goals', () => {
+    assert.ok(indexHtml.includes('addGoal') || sidebarSrc.includes('_initAddGoal'),
+        'add goal input wired');
+    assert.ok(appContent.includes('goals') && appContent.includes("'goal_explored'"),
+        'app.js suggestion cards handle goals');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -504,32 +507,15 @@ test('add-intention input exists and welcome cards surface saved intentions', ()
 
 console.log('\n─── Phase 6: scrutability ───');
 
-test('_serializeStatus excludes topic-scoped overview items when includeTopicScoped=false', () => {
-    const { Sidebar } = makeEnv();
-    const summary = {
-        overview: [{ text: 'global fact' }, { text: 'topic-only fact', scope: 'topic' }],
-    };
-    const full = Sidebar._serializeStatus(summary);
-    assert.ok(full.includes('topic-only fact') && full.includes('global fact'));
-    const filtered = Sidebar._serializeStatus(summary, { includeTopicScoped: false });
-    assert.ok(!filtered.includes('topic-only fact'), 'scoped overview item excluded');
-    assert.ok(filtered.includes('global fact'), 'unscoped items kept');
+test('_serializeStatus includes all overview items (scope filter removed)', () => {
+  // Scope toggle removed — serialize always includes all items
+  assert.ok(!sidebarSrc.includes('includeTopicScoped'),
+    '_serializeStatus no longer takes includeTopicScoped');
 });
 
-test('_toggleItemScope flips scope and logs context_item_scoped', () => {
-    const { ctx, Storage, Sidebar, loggedEvents } = makeEnv();
-    ctx.localStorage.setItem('loom_data', JSON.stringify({
-        topics: [{ id: 't1', name: 'ML', statusSummary: { overview: [{ text: 'a fact' }] } }],
-        chats: [], messages: {}, concepts: [], currentChatId: null, personalDetails: [],
-    }));
-    Sidebar.currentTopicId = 't1';
-    Sidebar._toggleItemScope('overview', 0);
-    assert.strictEqual(Storage.getTopic('t1').statusSummary.overview[0].scope, 'topic');
-    const evt = loggedEvents.find(e => e.type === 'context_item_scoped');
-    assert.ok(evt, 'context_item_scoped logged');
-    assert.strictEqual(evt.data.scope, 'topic');
-    Sidebar._toggleItemScope('overview', 0);
-    assert.strictEqual(Storage.getTopic('t1').statusSummary.overview[0].scope, undefined, 'toggles back to anywhere');
+test('_toggleItemScope removed with scope toggle', () => {
+    assert.ok(!sidebarSrc.includes('_toggleItemScope('), '_toggleItemScope removed');
+    assert.ok(!sidebarSrc.includes('status-item-scope'), 'scope button removed');
 });
 
 test('concept helpers and Concepts Traversed UI are gone', () => {
@@ -570,7 +556,7 @@ test('old ✓/✗ relevance calibration removed from past chat cards', () => {
 });
 
 test('topic-scoped serialization enforced on cross-topic sends in app.js', () => {
-    assert.ok(appContent.includes('includeTopicScoped'), 'app.js passes includeTopicScoped option');
+    assert.ok(!appContent.includes('includeTopicScoped'), 'app.js no longer passes includeTopicScoped');
 });
 
 test('rename updates the existing #currentTopicName element (regression)', () => {
@@ -633,9 +619,9 @@ test('removed events are gone from the frontend', () => {
 test('kept construct/apply/evolve events carry stage tags', () => {
     const src = appContent + sidebarSrc;
     [['current_profile_edited', 'construct'],
-     ['past_build_on_click', 'apply'],
-     ['context_block_added', 'apply'],
-     ['future_direction_clicked', 'evolve'],
+     ['context_suppressed_in_chat', 'apply'],
+     ['connection_contested', 'apply'],
+     ['goal_question_asked', 'evolve'],
      ['future_directions_refreshed', 'evolve']].forEach(([evt, stage]) => {
         const idx = src.indexOf(`'${evt}'`);
         assert.ok(idx > -1, `${evt} exists`);
@@ -657,9 +643,9 @@ test('admin dashboard groups events by Construct/Apply/Evolve/Scrutability', () 
 test('admin category lists contain the new event names', () => {
     ['proposal_shown', 'proposal_accepted', 'proposal_dismissed'].forEach(e =>
         assert.ok(mainPy.includes(`'${e}'`), `${e} in admin lists`));
-    ['connection_contested', 'context_suppressed_in_chat', 'context_item_scoped'].forEach(e =>
+    ['connection_contested', 'context_suppressed_in_chat'].forEach(e =>
         assert.ok(mainPy.includes(`'${e}'`), `${e} in admin lists`));
-    ['intention_saved', 'intention_explored', 'intention_authored'].forEach(e =>
+    ['goal_saved', 'goal_explored', 'goal_authored'].forEach(e =>
         assert.ok(mainPy.includes(`'${e}'`), `${e} in admin lists`));
     ['update_undone', 'version_restored'].forEach(e =>
         assert.ok(mainPy.includes(`'${e}'`), `${e} in admin lists`));

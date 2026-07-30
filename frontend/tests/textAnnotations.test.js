@@ -71,11 +71,11 @@ test('quick labels set Sidebar._labelsDirty', () => {
   assert.ok(appSrc.includes('_applyAnnotation'), 'via _applyAnnotation');
 });
 
-test('comment commits via /api/topic/status/ai-edit', () => {
-  assert.ok(appSrc.includes('_commitAnnotationComment'), 'comment commit helper');
-  assert.ok(appSrc.includes('/api/topic/status/ai-edit'), 'uses ai-edit endpoint');
-  assert.ok(appSrc.includes("source: 'user'"), 'tags overview as user');
-  assert.ok(appSrc.includes('Added to your context'), 'success toast');
+test('comment goes through proposal pipeline (not immediate ai-edit)', () => {
+  assert.ok(!appSrc.includes('_commitAnnotationComment'), 'comment commit helper removed');
+  assert.ok(appSrc.includes("Noted — it'll show up in your next profile suggestion") || appSrc.includes('Noted'), 'comment toast');
+  assert.ok(appSrc.includes('Sidebar._labelsDirty = true'), 'comments set labels dirty');
+  assert.ok(appSrc.includes("'text_comment_committed'"), 'comment logged');
 });
 
 test('chunk labels are not injected into chat prompts', () => {
@@ -104,11 +104,11 @@ test('_flushDirtyLabels sends annotations array', () => {
   assert.ok(fnBlock.includes('.then('), 'fire-and-forget');
 });
 
-test('_collectPendingAnnotations excludes comments and flushed ids', () => {
+test('_collectPendingAnnotations includes comments and skips flushed ids', () => {
   const fnStart = sidebarSrc.indexOf('_collectPendingAnnotations(topic) {');
   assert.ok(fnStart >= 0, 'find collector');
   const fnBlock = sidebarSrc.substring(fnStart, fnStart + 1200);
-  assert.ok(fnBlock.includes("a.label === 'comment'"), 'skips comments');
+  assert.ok(!fnBlock.includes("if (a.label === 'comment') continue"), 'includes comments');
   assert.ok(fnBlock.includes('_flushedAnnotationIds'), 'tracks flushed ids');
 });
 

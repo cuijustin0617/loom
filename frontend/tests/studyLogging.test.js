@@ -169,24 +169,26 @@ test('past_lookup event exists (replaces module2_connection_shown)', () => {
         'Should log past_lookup event');
 });
 
-test('past_build_on_click event exists (replaces module2_connection_clicked build)', () => {
-    assert.ok(sidebarContent.includes("'past_build_on_click'"),
-        'Should log past_build_on_click event');
+test('past continue uses navigation not build-on event', () => {
+    assert.ok(!sidebarContent.includes("'past_build_on_click'"),
+        'past_build_on_click removed');
+    assert.ok(sidebarContent.includes('past-continue-btn') || sidebarContent.includes('Continue this chat'),
+        'Continue this chat present');
 });
 
-test('future_direction_clicked event exists (replaces module3_direction_clicked)', () => {
-    assert.ok(sidebarContent.includes("'future_direction_clicked'"),
-        'Should log future_direction_clicked event');
+test('future_direction_clicked event removed', () => {
+    assert.ok(!sidebarContent.includes("'future_direction_clicked'"),
+        'future_direction_clicked removed');
 });
 
-test('future_suggestion_dragged event exists (replaces module3_direction_dragged)', () => {
-    assert.ok(sidebarContent.includes("'future_suggestion_dragged'"),
-        'Should log future_suggestion_dragged event');
+test('future_suggestion_dragged event removed', () => {
+    assert.ok(!sidebarContent.includes("'future_suggestion_dragged'"),
+        'future_suggestion_dragged removed');
 });
 
-test('future_direction_new_chat event exists (replaces module3_direction_new_chat)', () => {
-    assert.ok(sidebarContent.includes("'future_direction_new_chat'"),
-        'Should log future_direction_new_chat event');
+test('goal_question_asked event exists (replaces module3_direction_new_chat)', () => {
+    assert.ok(sidebarContent.includes("'goal_question_asked'"),
+        'Should log goal_question_asked event');
 });
 
 test('future_directions_refreshed event exists (replaces module3_shuffled)', () => {
@@ -194,8 +196,8 @@ test('future_directions_refreshed event exists (replaces module3_shuffled)', () 
         'Should log future_directions_refreshed event');
 });
 
-test('context_block_added event exists', () => {
-    assert.ok(appContent.includes("'context_block_added'"), 'Should log context_block_added');
+test('context_block_added event removed', () => {
+    assert.ok(!appContent.includes("'context_block_added'"), 'context_block_added removed');
 });
 
 test('baseline_details_shown event exists', () => {
@@ -353,9 +355,9 @@ test('context_suppressed_in_chat event logged for chat-level suppression', () =>
         'Should log context_suppressed_in_chat event');
 });
 
-test('context_item_scoped event logged for scope toggles', () => {
-    assert.ok(sidebarContent.includes("'context_item_scoped'"),
-        'Should log context_item_scoped event');
+test('context_item_scoped event removed with scope toggle', () => {
+    assert.ok(!sidebarContent.includes("'context_item_scoped'"),
+        'context_item_scoped no longer logged');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -364,34 +366,34 @@ test('context_item_scoped event logged for scope toggles', () => {
 
 console.log('\n─── New Events: Future Directions ───');
 
-test('intention_saved event logged', () => {
-    assert.ok(sidebarContent.includes("'intention_saved'"),
-        'Should log intention_saved');
+test('goal_saved event logged', () => {
+    assert.ok(sidebarContent.includes("'goal_saved'"),
+        'Should log goal_saved');
 });
 
-test('intention_dismissed event logged', () => {
-    assert.ok(sidebarContent.includes("'intention_dismissed'"),
-        'Should log intention_dismissed');
+test('goal_dismissed event logged', () => {
+    assert.ok(sidebarContent.includes("'goal_dismissed'"),
+        'Should log goal_dismissed');
 });
 
-test('intention_explored event logged', () => {
-    assert.ok(sidebarContent.includes("'intention_explored'"),
-        'Should log intention_explored');
+test('goal_explored event logged', () => {
+    assert.ok(sidebarContent.includes("'goal_explored'"),
+        'Should log goal_explored');
 });
 
-test('intention_modified event logged', () => {
-    assert.ok(sidebarContent.includes("'intention_modified'"),
-        'Should log intention_modified');
+test('goal_modified event logged', () => {
+    assert.ok(sidebarContent.includes("'goal_modified'"),
+        'Should log goal_modified');
 });
 
-test('intention_authored event logged', () => {
-    assert.ok(sidebarContent.includes("'intention_authored'"),
-        'Should log intention_authored');
+test('goal_authored event logged', () => {
+    assert.ok(sidebarContent.includes("'goal_authored'"),
+        'Should log goal_authored');
 });
 
-test('intention_removed event logged', () => {
-    assert.ok(sidebarContent.includes("'intention_removed'"),
-        'Should log intention_removed');
+test('goal_removed event logged', () => {
+    assert.ok(sidebarContent.includes("'goal_removed'"),
+        'Should log goal_removed');
 });
 
 test('future_suggestion_clicked event logged', () => {
@@ -421,14 +423,12 @@ test('current_concept_toggled removed with chunk labels', () => {
 
 console.log('\n─── New Events: Context Block ───');
 
-test('context_block_closed event logged', () => {
-    assert.ok(appContent.includes("'context_block_closed'"), 'Should log context_block_closed');
+test('context_block_closed event removed', () => {
+    assert.ok(!appContent.includes("'context_block_closed'"), 'context_block_closed removed');
 });
 
-test('context_block_toggled event logged with expanded field', () => {
-    assert.ok(appContent.includes("'context_block_toggled'"), 'Should log context_block_toggled');
-    const matches = appContent.match(/context_block_toggled.*expanded:\s*(true|false)/g);
-    assert.ok(matches && matches.length >= 2, 'Should log both expanded: true and expanded: false');
+test('context_block_toggled event removed', () => {
+    assert.ok(!appContent.includes("'context_block_toggled'"), 'context_block_toggled removed');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -491,17 +491,16 @@ test('no duplicate event names with different meanings', () => {
         'chat_selected', 'view_switched', 'topic_auto_detect_triggered',
         'topic_picker_opened', 'topic_picker_selected', 'topic_picker_keyboard_select',
         'topic_merge_drag', 'topic_merge_dialog_opened', 'topic_merge_confirmed', 'topic_merge_cancelled',
-        'past_lookup', 'past_build_on_click', 'past_card_dragged',
-        'connection_contested', 'context_suppressed_in_chat', 'context_item_scoped',
+        'past_lookup',
+        'connection_contested', 'context_suppressed_in_chat',
         'current_profile_edited',
         'proposal_shown', 'proposal_accepted', 'proposal_edited', 'proposal_dismissed',
         'proposal_empty', 'proposal_superseded',
-        'intention_saved', 'intention_dismissed', 'intention_explored',
-        'intention_modified', 'intention_authored', 'intention_removed',
+        'goal_saved', 'goal_dismissed', 'goal_explored',
+        'goal_modified', 'goal_authored', 'goal_removed',
         'future_directions_refreshed',
-        'future_direction_clicked', 'future_direction_new_chat',
+        'goal_question_asked',
         'section_collapsed',
-        'context_block_closed', 'context_block_toggled',
         'sidebar_collapsed', 'context_tag_clicked',
     ];
     const unique = new Set(currentEvents);
@@ -528,19 +527,17 @@ const ALL_EXPECTED_EVENTS = [
     'topic_picker_opened', 'topic_picker_selected', 'topic_picker_keyboard_select',
     'topic_merge_drag', 'topic_merge_dialog_opened', 'topic_merge_confirmed', 'topic_merge_cancelled',
     // Past section
-    'past_lookup', 'past_build_on_click', 'past_card_dragged',
-    'connection_contested', 'context_suppressed_in_chat', 'context_item_scoped',
+    'past_lookup',
+    'connection_contested', 'context_suppressed_in_chat',
     // Current profile
     'current_profile_edited',
     'proposal_shown', 'proposal_accepted', 'proposal_edited', 'proposal_dismissed',
     'proposal_empty', 'proposal_superseded',
     'section_collapsed',
-    // Future directions
-    'intention_saved', 'intention_dismissed', 'intention_explored',
-    'intention_modified', 'intention_authored', 'intention_removed',
-    'future_direction_clicked', 'future_direction_new_chat', 'future_directions_refreshed',
-    // Context
-    'context_block_added', 'context_block_closed', 'context_block_toggled',
+    // Future directions / goals
+    'goal_saved', 'goal_dismissed', 'goal_explored',
+    'goal_modified', 'goal_authored', 'goal_removed',
+    'goal_question_asked', 'future_directions_refreshed',
     // UI
     'sidebar_collapsed', 'context_tag_clicked',
     // Baseline
@@ -663,10 +660,10 @@ test('topic_merge_dialog_opened does not log topicName', () => {
     assert.ok(!ctx.includes('topicName'), 'Should NOT include topicName');
 });
 
-test('context_block_added does not log label', () => {
-    const ctx = getEventContext(appContent, 'context_block_added');
-    assert.ok(ctx.includes('sourceType'), 'Should include sourceType');
-    assert.ok(!ctx.includes('label'), 'Should NOT include label');
+test('goal_saved logs stage evolve', () => {
+    const ctx = getEventContext(sidebarContent, 'goal_saved');
+    assert.ok(ctx.includes("stage: 'evolve'") || ctx.includes('stage: "evolve"') || ctx.includes("stage: 'evolve'"),
+        'Should include stage evolve');
 });
 
 test('context_tag_clicked does not log label', () => {
@@ -675,22 +672,16 @@ test('context_tag_clicked does not log label', () => {
     assert.ok(!ctx.includes('label'), 'Should NOT include label');
 });
 
-test('future_direction_new_chat uses directionIdx not directionTitle', () => {
-    const ctx = getEventContext(sidebarContent, 'future_direction_new_chat');
-    assert.ok(ctx.includes('directionIdx'), 'Should include directionIdx');
-    assert.ok(!ctx.includes('directionTitle'), 'Should NOT include directionTitle');
+test('goal_question_asked uses stage evolve', () => {
+    const ctx = getEventContext(sidebarContent, 'goal_question_asked');
+    assert.ok(ctx.includes("stage: 'evolve'") || ctx.includes('evolve'),
+        'Should include stage evolve');
 });
 
-test('future_suggestion_dragged uses directionIdx not directionTitle', () => {
-    const ctx = getEventContext(sidebarContent, 'future_suggestion_dragged');
-    assert.ok(ctx.includes('directionIdx'), 'Should include directionIdx');
-    assert.ok(!ctx.includes('directionTitle'), 'Should NOT include directionTitle');
-});
-
-test('future_direction_clicked uses directionIdx not directionTitle', () => {
-    const ctx = getEventContext(sidebarContent, 'future_direction_clicked');
-    assert.ok(ctx.includes('directionIdx'), 'Should include directionIdx');
-    assert.ok(!ctx.includes('directionTitle'), 'Should NOT include directionTitle');
+test('goal_explored uses stage evolve', () => {
+    const ctx = getEventContext(sidebarContent, 'goal_explored');
+    assert.ok(ctx.includes("stage: 'evolve'") || ctx.includes('evolve'),
+        'Should include stage evolve');
 });
 
 test('current_profile_edited does not log content values', () => {

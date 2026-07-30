@@ -26,6 +26,7 @@ from prompts import (
     CHAT_STREAM_MEMORY_PROMPT,
     CHAT_METADATA_PROMPT,
     SIDEBAR_NEW_DIRECTIONS_PROMPT,
+    SIDEBAR_GOAL_QUESTION_PROMPT,
     STATUS_UPDATE_PROMPT,
     CHAT_SUMMARIZE_PROMPT,
     TOPIC_AUTO_DETECT_PROMPT,
@@ -226,12 +227,36 @@ class DirectionsRequest(BaseModel):
     model: str | None = None
 
 
+class GoalQuestionRequest(BaseModel):
+    topicName: str
+    topicStatus: Union[str, dict] = ""
+    goalTitle: str
+    allChatSummaries: list[dict] = []
+    excludeQuestion: str = ""
+    model: str | None = None
+
+
 class LogEvent(BaseModel):
     userId: str
     condition: str = "loom"
     eventType: str
     data: dict = {}
     timestamp: str = ""
+
+
+def _normalize_directions(dirs):
+    """Ensure each direction has exampleQuestion (accept legacy question field)."""
+    out = []
+    for d in dirs or []:
+        if not isinstance(d, dict):
+            continue
+        item = dict(d)
+        if not item.get("exampleQuestion") and item.get("question"):
+            item["exampleQuestion"] = item.pop("question")
+        elif "question" in item and item.get("exampleQuestion"):
+            item.pop("question", None)
+        out.append(item)
+    return out
 
 
 class SyncRequest(BaseModel):
@@ -533,7 +558,7 @@ async def sidebar_refresh(req: SidebarRefreshRequest):
             status_update = status_result.get("status")
 
     return {
-        "newDirections": new_directions,
+        "newDirections": _normalize_directions(new_directions),
         "statusUpdate": status_update,
     }
 
@@ -789,7 +814,31 @@ async def sidebar_directions(req: DirectionsRequest):
     new_directions = []
     if isinstance(result, dict):
         new_directions = result.get("newDirections", [])
-    return {"newDirections": new_directions}
+    return {"newDirections": _normalize_directions(new_directions)}
+
+
+@app.post("/api/sidebar/goal-question")
+async def sidebar_goal_question(req: GoalQuestionRequest):
+    """Generate one example question for a saved/suggested goal."""
+    topic_status_str = _serialize_status_to_str(req.topicStatus)
+    coverage = _build_coverage_str(req.topicStatus, req.allChatSummaries)
+    prompt = SIDEBAR_GOAL_QUESTION_PROMPT.format(
+        topic_name=req.topicName,
+        topic_status=topic_status_str or "No status yet.",
+        coverage=coverage,
+        goal_title=req.goalTitle,
+        exclude_question=req.excludeQuestion or "None",
+    )
+    result = await llm.chat(
+        [{"role": "user", "content": "Generate an example question for this goal."}],
+        prompt,
+        json_mode=True,
+        model=req.model,
+    )
+    question = ""
+    if isinstance(result, dict):
+        question = (result.get("question") or "").strip()
+    return {"question": question}
 
 
 # ── Baseline Personal Details Extraction ──────────────────────────────────────
@@ -1320,11 +1369,10 @@ function renderHeatmap(events) {
 const CONSTRUCT = ['proposal_shown','proposal_accepted','proposal_edited','proposal_dismissed','proposal_superseded',
   'current_profile_edited','text_label_applied','text_label_removed','text_comment_committed',
   'topic_suggestion_accepted','topic_suggestion_dismissed','topic_created','topic_renamed','topic_assigned','topic_merge_confirmed'];
-const APPLY = ['past_build_on_click','past_card_dragged','connection_contested','context_suppressed_in_chat',
-  'context_item_scoped','context_block_added'];
-const EVOLVE = ['intention_saved','intention_explored','intention_dismissed','intention_modified','intention_authored',
-  'intention_removed','future_direction_new_chat','future_direction_clicked','future_suggestion_dragged','future_directions_refreshed'];
-const SCRUTABILITY = ['update_undone','version_restored','connection_contested','context_suppressed_in_chat','context_item_scoped'];
+const APPLY = ['connection_contested','context_suppressed_in_chat'];
+const EVOLVE = ['goal_saved','goal_explored','goal_dismissed','goal_modified','goal_authored',
+  'goal_removed','goal_question_asked','future_directions_refreshed'];
+const SCRUTABILITY = ['update_undone','version_restored','connection_contested','context_suppressed_in_chat'];
 const TOPIC = ['topic_created','topic_renamed','topic_assigned','topic_merge_confirmed','topic_merge_drag'];
 
 function renderSummaryTable(events) {

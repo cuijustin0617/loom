@@ -653,7 +653,7 @@ const App = {
       });
     });
 
-    // Drag-and-drop on entire middle panel (context + images)
+    // Drag-and-drop files on entire middle panel
     const inputArea = document.getElementById('chatInputArea');
     const mainContent = document.getElementById('mainContent');
     const _handleDragOver = (e) => {
@@ -666,33 +666,13 @@ const App = {
     const _handleDrop = (e) => {
       e.preventDefault();
       inputArea.classList.remove('drag-over');
-      // Handle dropped files (images, documents)
       if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
         this._handleFiles(e.dataTransfer.files);
-        return;
-      }
-      // Handle sidebar drag context
-      const text = e.dataTransfer.getData('text/plain');
-      const label = e.dataTransfer.getData('application/loom-label');
-      const contextType = e.dataTransfer.getData('application/loom-context-type');
-      const cardType = e.dataTransfer.getData('application/loom-direction-type');
-      const question = e.dataTransfer.getData('application/loom-question');
-      if (text) {
-        this.setContextBlock(text, label, {
-          type: contextType || '',
-          cardType: cardType || 'extend',
-          title: label || '',
-          question: question || text,
-        });
       }
     };
     mainContent.addEventListener('dragover', _handleDragOver);
     mainContent.addEventListener('dragleave', _handleDragLeave);
     mainContent.addEventListener('drop', _handleDrop);
-
-    // Context block controls
-    document.getElementById('contextCloseBtn').addEventListener('click', () => this.clearContextBlock());
-    document.getElementById('contextToggleBtn').addEventListener('click', () => this._toggleContextExpand());
 
     // File attachment
     document.getElementById('attachBtn').addEventListener('click', () => {
@@ -955,40 +935,6 @@ const App = {
     const input = document.getElementById('chatInput');
     let content = input.value.trim();
 
-    // Prepend context block if present
-    let contextBlock = null;
-    let contextMeta = null;
-    const ctxEl = document.getElementById('contextBlock');
-    if (ctxEl.style.display !== 'none') {
-      const fullText = document.getElementById('contextFullText').value.trim();
-      if (fullText) {
-        contextBlock = fullText;
-        contextMeta = {
-          type: ctxEl.dataset.contextType || '',
-          cardType: ctxEl.dataset.contextCardType || 'extend',
-          title: ctxEl.dataset.contextTitle || '',
-          question: ctxEl.dataset.contextQuestion || fullText,
-        };
-        const isLinkedChat = fullText.includes('--- Previous conversation ---');
-        const isPastChat = contextMeta?.type === 'past_chat';
-        const isCurrentProfile = contextMeta?.type === 'current_profile';
-        const isFutureDirection = contextMeta?.type === 'future_direction' || contextMeta?.type === 'direction_card';
-        const wrapper = isLinkedChat || isPastChat
-          ? `[The user is building on a previous conversation. Past conversation:\n${fullText}]`
-          : isCurrentProfile
-          ? `[User's current profile context: ${fullText}]`
-          : isFutureDirection
-          ? `[Exploring suggested direction: ${fullText}]`
-          : `[Additional context: ${fullText}]`;
-        content = content
-          ? `${wrapper}\n\n${content}`
-          : (contextMeta?.type === 'direction_card'
-            ? wrapper
-            : `${wrapper}\n\nPlease continue building on this previous conversation.`);
-      }
-      this.clearContextBlock();
-    }
-
     if (!content && this.pendingAttachments.length === 0) return;
     if (!content && this.pendingAttachments.length > 0) {
       content = 'Please describe or analyze the attached file(s).';
@@ -1016,7 +962,7 @@ const App = {
           Storage.saveTopic(topic);
           if (topic.name !== 'Unassigned') {
             if (topic.statusSummary) {
-              const statusStr = Sidebar._serializeStatus(topic.statusSummary, { includeTopicScoped: chat.topicId === topic.id });
+              const statusStr = Sidebar._serializeStatus(topic.statusSummary);
               content = `[My current status in "${topic.name}": ${statusStr}]\n\n${content}`;
             }
             Sidebar.show(this.selectedTopicId);
@@ -1031,8 +977,8 @@ const App = {
       chatId: this.currentChatId,
       role: 'user',
       content: content,
-      contextBlock: contextBlock,
-      contextMeta: contextMeta,
+      contextBlock: null,
+      contextMeta: null,
       attachments: this.pendingAttachments.length > 0
         ? this.pendingAttachments.map(a => ({ name: a.name, mimeType: a.mimeType }))
         : null,
@@ -1054,7 +1000,7 @@ const App = {
     StudyLog.event('query_sent', {
       chatId: this.currentChatId,
       topicId: currentChat?.topicId || this.selectedTopicId || null,
-      hasContext: !!contextBlock,
+      hasContext: false,
     });
 
     // Exit welcome mode and hide topic selector
@@ -1125,7 +1071,7 @@ const App = {
       condition: STUDY_CONDITION,
       personalDetails: STUDY_CONDITION === 'baseline' ? Storage.getPersonalDetails() : [],
       topicStatus: (currentTopic && STUDY_CONDITION === 'loom')
-        ? Sidebar._serializeStatus(currentTopic.statusSummary, { includeTopicScoped: !!chatTopicId && chatTopicId === currentTopic.id })
+        ? Sidebar._serializeStatus(currentTopic.statusSummary)
         : '',
     };
     if (apiAttachments) {
@@ -1167,8 +1113,8 @@ const App = {
               id: assistantMsgId,
               chatId: this.currentChatId,
               role: 'assistant',
-              content: strippedMain,
-              rawContent: strippedMain,
+              content: this._stripConnectionResidue(strippedMain),
+              rawContent: this._stripConnectionResidue(strippedMain),
               injectedPastChats: evt.injectedPastChats || null,
               contextBlock: null,
               timestamp: Utils.timestamp(),
@@ -1518,10 +1464,16 @@ const App = {
       msgId: state.msgId,
     });
 
-    if (label === 'comment') {
-      this._commitAnnotationComment(state.spanText, comment);
-    } else if (typeof Sidebar !== 'undefined') {
+    if (typeof Sidebar !== 'undefined') {
       Sidebar._labelsDirty = true;
+    }
+    if (label === 'comment') {
+      Utils.showToast("Noted — it'll show up in your next profile suggestion.");
+      StudyLog.event('text_comment_committed', {
+        stage: 'construct',
+        initiative: 'user',
+        topicId: typeof Sidebar !== 'undefined' ? Sidebar.currentTopicId : null,
+      });
     }
     this._hideAnnoPopover();
     window.getSelection()?.removeAllRanges();
@@ -1544,58 +1496,6 @@ const App = {
     });
     if (typeof Sidebar !== 'undefined') Sidebar._labelsDirty = true;
     this._hideAnnoPopover();
-  },
-
-  async _commitAnnotationComment(spanText, comment) {
-    if (typeof Sidebar === 'undefined' || !Sidebar.currentTopicId) {
-      Utils.showToast('Open a topic to add this to your context', 'error');
-      return;
-    }
-    const topic = Storage.getTopic(Sidebar.currentTopicId);
-    if (!topic) return;
-    if (!topic.statusSummary || typeof topic.statusSummary !== 'object') {
-      topic.statusSummary = { overview: [] };
-    }
-    const overview = topic.statusSummary.overview || [];
-    const instruction = `Re: "${spanText}" — ${comment}`;
-    try {
-      const resp = await fetch('/api/topic/status/ai-edit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          topicName: topic.name,
-          overview,
-          instruction,
-          model: Storage.getSidebarModel(),
-        }),
-      });
-      const data = await resp.json();
-      if (data.error) throw new Error(data.error);
-      const fresh = Storage.getTopic(Sidebar.currentTopicId);
-      if (!fresh) return;
-      if (!fresh.statusSummary) fresh.statusSummary = { overview: [] };
-      const newOverview = data.overview || overview;
-      Storage.pushStatusSnapshot(fresh, 'ai_edit');
-      fresh.statusSummary.overview = (newOverview || []).map(it => {
-        const text = typeof it === 'string' ? it : (it && it.text) || '';
-        return { text, source: 'user' };
-      });
-      fresh.statusLastUpdated = Utils.timestamp();
-      if (fresh.sidebarCache && fresh.sidebarCache.statusUpdate) {
-        fresh.sidebarCache.statusUpdate.overview = fresh.statusSummary.overview;
-      }
-      Storage.saveTopic(fresh);
-      Sidebar._renderStatus(fresh.statusSummary);
-      StudyLog.event('text_comment_committed', {
-        stage: 'construct',
-        initiative: 'user',
-        topicId: fresh.id,
-      });
-      Utils.showToast('Added to your context', 'success');
-    } catch (err) {
-      console.error('Annotation comment commit failed:', err);
-      Utils.showToast('Could not add comment to context', 'error');
-    }
   },
 
   _applyAnnotationsToDom(msgId, annotations) {
@@ -1696,30 +1596,61 @@ const App = {
     return text.replace(/google:search\{[^}]*\}/g, '').replace(/\n{3,}/g, '\n\n');
   },
 
+  _salvageJsonArray(jsonStr) {
+    const s = (jsonStr || '').trim();
+    if (!s) return null;
+    try {
+      const parsed = JSON.parse(s);
+      return Array.isArray(parsed) ? parsed : null;
+    } catch (_) {}
+    // Best-effort: largest valid JSON array prefix
+    for (let end = s.length; end > 1; end--) {
+      if (s[end - 1] !== ']') continue;
+      try {
+        const parsed = JSON.parse(s.slice(0, end));
+        if (Array.isArray(parsed)) return parsed;
+      } catch (_) {}
+    }
+    return null;
+  },
+
+  _stripConnectionResidue(text) {
+    return (text || '')
+      .replace(/\{~CONNECTIONS~\}[\s\S]*?(?:\{~END~\}|$)/g, '')
+      .replace(/\{~\d+\}/g, '')
+      .replace(/\{~END~\}/g, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trimEnd();
+  },
+
   _stripConnectionBlock(text) {
     const connStart = text.indexOf('{~CONNECTIONS~}');
-    if (connStart === -1) return { mainText: text, connectionsJson: null };
-    const mainText = text.substring(0, connStart).trimEnd();
-    const connEnd = text.indexOf('{~END~}', connStart);
-    if (connEnd === -1) return { mainText, connectionsJson: null };
-    const jsonStr = text.substring(connStart + '{~CONNECTIONS~}'.length, connEnd).trim();
-    try {
-      const connections = JSON.parse(jsonStr);
-      return { mainText, connectionsJson: Array.isArray(connections) ? connections : null };
-    } catch {
-      return { mainText, connectionsJson: null };
+    if (connStart === -1) {
+      return { mainText: this._stripConnectionResidue(text), connectionsJson: null };
     }
+    const mainText = this._stripConnectionResidue(text.substring(0, connStart));
+    const connEnd = text.indexOf('{~END~}', connStart);
+    const jsonStr = connEnd === -1
+      ? text.substring(connStart + '{~CONNECTIONS~}'.length).trim()
+      : text.substring(connStart + '{~CONNECTIONS~}'.length, connEnd).trim();
+    const connections = this._salvageJsonArray(jsonStr);
+    return { mainText, connectionsJson: connections };
   },
 
   _parseConnectionMarkers(html) {
-    return html.replace(/((?:\S+\s+){0,2}\S+)\s*\{~(\d+)\}/g,
+    // Strip any leftover raw marker tokens that escaped markdown rendering
+    const cleaned = (html || '')
+      .replace(/\{~CONNECTIONS~\}[\s\S]*?(?:\{~END~\}|$)/g, '')
+      .replace(/\{~END~\}/g, '');
+    return cleaned.replace(/((?:\S+\s+){0,2}\S+)\s*\{~(\d+)\}/g,
       '<span class="conn-marker loading" data-conn-id="$2">$1<span class="conn-dots"></span></span>');
   },
 
   _resolveConnectionMarkers(contentEl, connectionsJson) {
+    const list = Array.isArray(connectionsJson) ? connectionsJson : [];
     contentEl.querySelectorAll('.conn-marker').forEach(marker => {
       const id = parseInt(marker.dataset.connId, 10);
-      const conn = connectionsJson.find(c => c.id === id);
+      const conn = list.find(c => c.id === id);
       if (conn) {
         marker.classList.remove('loading');
         marker.classList.add('resolved');
@@ -1735,10 +1666,25 @@ const App = {
           dots.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>';
         }
       } else {
-        marker.remove();
+        // Unwrap: keep text, drop marker shell / loading dots
+        const dots = marker.querySelector('.conn-dots, .conn-icon');
+        if (dots) dots.remove();
+        const parent = marker.parentNode;
+        while (marker.firstChild) parent.insertBefore(marker.firstChild, marker);
+        parent.removeChild(marker);
       }
     });
     this._bindConnectionCards(contentEl);
+  },
+
+  _clearUnresolvedConnMarkers(contentEl) {
+    contentEl.querySelectorAll('.conn-marker').forEach(marker => {
+      const dots = marker.querySelector('.conn-dots, .conn-icon');
+      if (dots) dots.remove();
+      const parent = marker.parentNode;
+      while (marker.firstChild) parent.insertBefore(marker.firstChild, marker);
+      parent.removeChild(marker);
+    });
   },
 
   _connCardEl: null,
@@ -1770,7 +1716,6 @@ const App = {
         </div>
         <div class="conn-card-insight"></div>
         <div class="conn-card-actions">
-          <button class="conn-card-build">Build on this</button>
           <a class="conn-card-goto" href="#">Go to chat</a>
           <button class="conn-card-contest" title="This connection is incorrect">⚑</button>
         </div>
@@ -1792,42 +1737,13 @@ const App = {
           }
         }
       });
-      card.querySelector('.conn-card-build').addEventListener('click', () => {
-        const chatId = card.dataset.targetChatId || '';
-        const insight = card.dataset.insight || '';
-        const title = card.dataset.title || '';
-        const parts = [];
-        if (insight) parts.push(`Connection to "${title}": ${insight}`);
-        if (chatId) {
-          const pastMessages = Storage.getMessages(chatId);
-          if (pastMessages.length > 0) {
-            parts.push('\n--- Previous chat history ---');
-            pastMessages.forEach(m => {
-              const role = m.role === 'user' ? 'User' : 'AI';
-              const text = (m.content || '').slice(0, 800);
-              parts.push(`${role}: ${text}${m.content?.length > 800 ? '...' : ''}`);
-            });
-            parts.push('--- End of previous chat ---');
-          }
-        }
-        this._hideConnCard();
-        if (parts.length > 0) {
-          this.setContextBlock(parts.join('\n'), title, {
-            type: 'linked_chat_card',
-            title: title || 'Past chat',
-            insight: insight || '',
-            userAsked: card.dataset.userAsked || '',
-            aiCovered: card.dataset.aiCovered || '',
-          });
-          document.getElementById('chatInput').focus();
-        }
-      });
       card.querySelector('.conn-card-contest').addEventListener('click', () => {
         const chatId = card.dataset.targetChatId || '';
         const marker = this._connCardMarker;
         const curChat = this.currentChatId ? Storage.getChat(this.currentChatId) : null;
         const topic = curChat && curChat.topicId ? Storage.getTopic(curChat.topicId) : null;
         if (topic && chatId) {
+          if (!Array.isArray(topic.excludedChatIds)) topic.excludedChatIds = [];
           if (!topic.excludedChatIds.includes(chatId)) topic.excludedChatIds.push(chatId);
           Storage.saveTopic(topic);
         }
@@ -1844,7 +1760,7 @@ const App = {
         }
         if (marker) marker.classList.add('conn-marker-contested');
         this._hideConnCard();
-        Utils.showToast("Connection contested — won't be used as context in this topic");
+        Utils.showToast("Won't be used in this topic");
         StudyLog.event('connection_contested', {
           stage: 'apply', initiative: 'mixed',
           topicId: topic ? topic.id : null, chatId,
@@ -1940,7 +1856,9 @@ const App = {
   _updateStreamingMessage(el, text) {
     const contentEl = el.querySelector('.message-content');
     const { mainText } = this._stripConnectionBlock(this._stripSearchArtifacts(text));
-    const rendered = Utils.renderMarkdown(mainText);
+    // Mid-stream: hide incomplete trailer / raw markers; show loading markers only for complete {~N}
+    const safe = mainText.replace(/\{~CONNECTIONS~\}[\s\S]*$/g, '').replace(/\{~\d*$/g, '');
+    const rendered = Utils.renderMarkdown(safe);
     contentEl.innerHTML = this._parseConnectionMarkers(rendered) + '<span class="streaming-cursor"></span>';
   },
 
@@ -1948,13 +1866,28 @@ const App = {
     const contentEl = el.querySelector('.message-content');
     const { mainText, connectionsJson } = this._stripConnectionBlock(this._stripSearchArtifacts(text));
     contentEl.innerHTML = this._parseConnectionMarkers(Utils.renderMarkdown(mainText));
+    // Strip any leftover raw marker tokens that weren't turned into spans
+    contentEl.querySelectorAll('*').forEach(() => {});
     if (msgId) contentEl.dataset.msgId = msgId;
     if (connectionsJson && connectionsJson.length > 0) {
       this._resolveConnectionMarkers(contentEl, connectionsJson);
-      // Stamp the message id so a contested connection can be written back to its message
       if (msgId) contentEl.querySelectorAll('.conn-marker').forEach(m => { m.dataset.msgId = msgId; });
     } else {
-      contentEl.querySelectorAll('.conn-marker').forEach(m => m.remove());
+      this._clearUnresolvedConnMarkers(contentEl);
+    }
+    // Final safety: never leave loading markers or raw {~N} text
+    contentEl.querySelectorAll('.conn-marker.loading').forEach(m => {
+      const dots = m.querySelector('.conn-dots, .conn-icon');
+      if (dots) dots.remove();
+      const parent = m.parentNode;
+      while (m.firstChild) parent.insertBefore(m.firstChild, m);
+      parent.removeChild(m);
+    });
+    if (contentEl.innerHTML.includes('{~')) {
+      contentEl.innerHTML = contentEl.innerHTML
+        .replace(/\{~CONNECTIONS~\}[\s\S]*?(?:\{~END~\}|$)/g, '')
+        .replace(/\{~\d+\}/g, '')
+        .replace(/\{~END~\}/g, '');
     }
   },
 
@@ -2299,68 +2232,6 @@ const App = {
     });
   },
 
-  // ── Context Block ─────────────────────────────────────────────────────
-
-  setContextBlock(fullText, label, meta = null) {
-    const block = document.getElementById('contextBlock');
-    const compact = document.getElementById('contextCompact');
-    const fullArea = document.getElementById('contextFullText');
-    const fullDiv = document.getElementById('contextFull');
-    const labelEl = document.getElementById('contextBlockLabel');
-
-    const phaseLabels = {
-      'past_chat': 'Past Context',
-      'current_profile': 'Current Profile',
-      'future_direction': 'Future Direction',
-      'direction_card': 'Future Direction',
-    };
-    const phaseLabel = (meta && phaseLabels[meta.type]) || 'Context';
-    if (labelEl) labelEl.textContent = phaseLabel;
-
-    const displayLabel = Utils.escapeHtml(label || '');
-    const displayExcerpt = Utils.escapeHtml(Utils.truncate(fullText.replace(/\[.*?\]\n\n/s, ''), 80));
-    compact.innerHTML = `<strong>${displayLabel}</strong> — ${displayExcerpt}`;
-
-    fullArea.value = fullText;
-    block.dataset.contextType = meta?.type || '';
-    block.dataset.contextCardType = meta?.cardType || '';
-    block.dataset.contextTitle = meta?.title || label || '';
-    block.dataset.contextQuestion = meta?.question || fullText;
-    fullDiv.style.display = 'none';
-    document.getElementById('contextToggleBtn').textContent = 'Expand';
-    block.style.display = 'block';
-    StudyLog.event('context_block_added', { stage: 'apply', initiative: 'user', chatId: this.currentChatId, sourceType: meta?.type || 'unknown' });
-  },
-
-  clearContextBlock() {
-    if (document.getElementById('contextBlock').style.display !== 'none') {
-      StudyLog.event('context_block_closed', { chatId: this.currentChatId });
-    }
-    document.getElementById('contextBlock').style.display = 'none';
-    document.getElementById('contextFullText').value = '';
-    document.getElementById('contextCompact').innerHTML = '';
-    document.getElementById('contextBlock').dataset.contextType = '';
-    document.getElementById('contextBlock').dataset.contextCardType = '';
-    document.getElementById('contextBlock').dataset.contextTitle = '';
-    document.getElementById('contextBlock').dataset.contextQuestion = '';
-    const labelEl = document.getElementById('contextBlockLabel');
-    if (labelEl) labelEl.textContent = 'Added context';
-  },
-
-  _toggleContextExpand() {
-    const fullDiv = document.getElementById('contextFull');
-    const btn = document.getElementById('contextToggleBtn');
-    if (fullDiv.style.display === 'none') {
-      fullDiv.style.display = 'block';
-      btn.textContent = 'Collapse';
-      StudyLog.event('context_block_toggled', { expanded: true });
-    } else {
-      fullDiv.style.display = 'none';
-      btn.textContent = 'Expand';
-      StudyLog.event('context_block_toggled', { expanded: false });
-    }
-  },
-
   // ── Rendering ─────────────────────────────────────────────────────────
 
   _renderChat(chatId) {
@@ -2415,16 +2286,19 @@ const App = {
     if (suggestions.length > 0 && STUDY_CONDITION === 'loom') {
       const cardsHtml = suggestions.map((s, i) => {
         const tc = Utils.getTopicColor(s.topicColorObj);
+        const mainLine = s.title
+          ? `<div class="welcome-card-question"><strong>${Utils.escapeHtml(s.title)}</strong>${s.question ? `<div class="welcome-card-example">${Utils.escapeHtml(s.question)}</div>` : ''}</div>`
+          : `<div class="welcome-card-question">${Utils.escapeHtml(s.question)}</div>`;
         return `<div class="welcome-suggestion-card" data-suggestion-idx="${i}">
           <div class="welcome-card-topic" style="color:${tc.color};">
             <span class="topic-color-dot" style="background:${tc.color};"></span>
             ${Utils.escapeHtml(s.topicName)}
           </div>
-          ${s.isIntention ? '<div class="welcome-card-intention-badge">Your intention</div>' : ''}
-          <div class="welcome-card-question">${Utils.escapeHtml(s.question)}</div>
+          ${s.isGoal ? '<div class="welcome-card-intention-badge">Your goal</div>' : ''}
+          ${mainLine}
         </div>`;
       }).join('');
-      const shuffleBtnHtml = `<button class="welcome-shuffle-btn" id="welcomeShuffleBtn" title="Shuffle suggestions">
+      const shuffleBtnHtml = `<button class="welcome-shuffle-btn" id="welcomeShuffleBtn" title="Shuffle">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
           <polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/>
           <polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/>
@@ -2449,7 +2323,6 @@ const App = {
         shuffleBtn.addEventListener('click', (e) => {
           e.stopPropagation();
           StudyLog.event('future_directions_refreshed', { stage: 'evolve', initiative: 'user', location: 'welcome', topicId: null });
-          // Re-render welcome with refreshed suggestions (triggers sidebar.shuffleDirections for each topic)
           shuffleBtn.classList.add('loading');
           const promises = suggestions.map(s => Sidebar.shuffleDirections('welcome', s.topicId));
           Promise.all(promises).then(() => {
@@ -2468,25 +2341,25 @@ const App = {
       .slice(0, 3);
 
     const cards = [];
-    // Saved-but-unexplored intentions come first (most recent topics first)
+    // Saved-but-unexplored goals come first
     for (const topic of topics) {
-      const intentions = (topic.intentions || []).filter(i => i.status === 'saved');
-      for (const int of intentions) {
+      const goals = (topic.goals || []).filter(i => i.status === 'saved');
+      for (const g of goals) {
         cards.push({
           topicId: topic.id,
           topicName: topic.name,
           topicColorObj: topic,
           statusSummary: Sidebar._serializeStatus(topic.statusSummary) || '',
-          title: int.title || '',
-          question: int.question || '',
-          isIntention: true,
-          intentionId: int.id,
+          title: g.title || '',
+          question: '',
+          isGoal: true,
+          goalId: g.id,
         });
       }
     }
     for (const topic of topics) {
       if (!topic.sidebarCache) continue;
-      const dirs = topic.sidebarCache.newDirections || [];
+      const dirs = (topic.sidebarCache.newDirections || []).map(d => Sidebar._normalizeDirection(d));
       if (dirs.length === 0) continue;
       cards.push({
         topicId: topic.id,
@@ -2494,7 +2367,7 @@ const App = {
         topicColorObj: topic,
         statusSummary: Sidebar._serializeStatus(topic.statusSummary) || '',
         title: dirs[0].title || '',
-        question: dirs[0].question || '',
+        question: dirs[0].exampleQuestion || '',
       });
     }
     // Ensure at least 2 cards by pulling extra directions from existing topics
@@ -2502,9 +2375,9 @@ const App = {
       for (const topic of topics) {
         if (cards.length >= 2) break;
         if (!topic.sidebarCache) continue;
-        const dirs = topic.sidebarCache.newDirections || [];
+        const dirs = (topic.sidebarCache.newDirections || []).map(d => Sidebar._normalizeDirection(d));
         for (let i = 1; i < dirs.length && cards.length < 2; i++) {
-          const already = cards.some(c => c.topicId === topic.id && c.question === dirs[i].question);
+          const already = cards.some(c => c.topicId === topic.id && c.question === dirs[i].exampleQuestion);
           if (already) continue;
           cards.push({
             topicId: topic.id,
@@ -2512,7 +2385,7 @@ const App = {
             topicColorObj: topic,
             statusSummary: Sidebar._serializeStatus(topic.statusSummary) || '',
             title: dirs[i].title || '',
-            question: dirs[i].question || '',
+            question: dirs[i].exampleQuestion || '',
           });
         }
       }
@@ -2530,28 +2403,28 @@ const App = {
         if (s) {
           StudyLog.event('future_suggestion_clicked', { topicId: s.topicId, suggestionIdx: idx });
           this._startSuggestedChat(s);
-          if (s.isIntention && s.intentionId) this._markWelcomeIntentionExplored(s);
+          if (s.isGoal && s.goalId) this._markWelcomeGoalExplored(s);
         }
       });
     });
   },
 
-  _markWelcomeIntentionExplored(suggestion) {
+  _markWelcomeGoalExplored(suggestion) {
     const topic = Storage.getTopic(suggestion.topicId);
     if (!topic) return;
-    const intention = (topic.intentions || []).find(i => i.id === suggestion.intentionId);
-    if (!intention || intention.status === 'explored') return;
-    intention.status = 'explored';
-    intention.exploredAt = Utils.timestamp();
-    intention.chatId = this.currentChatId || null;
+    const goal = (topic.goals || []).find(i => i.id === suggestion.goalId);
+    if (!goal || goal.status === 'explored') return;
+    goal.status = 'explored';
+    goal.exploredAt = Utils.timestamp();
+    goal.chatId = this.currentChatId || null;
     Storage.saveTopic(topic);
-    StudyLog.event('intention_explored', {
+    StudyLog.event('goal_explored', {
       stage: 'evolve', initiative: 'mixed', topicId: suggestion.topicId,
-      source: intention.source, title: intention.title,
+      source: goal.source, title: goal.title,
     });
   },
 
-  _startSuggestedChat(suggestion) {
+  async _startSuggestedChat(suggestion) {
     const mainContent = document.getElementById('mainContent');
     mainContent.classList.remove('welcome-mode');
     const prev = document.getElementById('welcomeSuggestions');
@@ -2578,12 +2451,32 @@ const App = {
       }
     }
 
-    let content = suggestion.question;
+    let question = suggestion.question;
+    if (suggestion.isGoal && !question && suggestion.title) {
+      try {
+        const resp = await fetch('/api/sidebar/goal-question', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            topicName: suggestion.topicName,
+            topicStatus: suggestion.statusSummary || '',
+            goalTitle: suggestion.title,
+            allChatSummaries: Storage.getAllChatSummariesForTopic(suggestion.topicId),
+            model: Storage.getSidebarModel(),
+          }),
+        });
+        const data = await resp.json();
+        question = (data && data.question) || suggestion.title;
+      } catch (_) {
+        question = suggestion.title;
+      }
+    }
+
+    let content = question || suggestion.title || '';
     if (suggestion.statusSummary) {
       content = `[My current status in "${suggestion.topicName}": ${suggestion.statusSummary}]\n\n${content}`;
     }
 
-    // Set the input and auto-send
     document.getElementById('chatInput').value = content;
     this.sendMessage();
   },
@@ -2765,7 +2658,9 @@ const App = {
 
     let renderedContent;
     if (msg.role === 'assistant') {
-      renderedContent = this._parseConnectionMarkers(Utils.renderMarkdown(msg.content || ''));
+      // Historical messages: never leave loading markers (connections aren't persisted)
+      const cleaned = this._stripConnectionResidue(msg.content || '');
+      renderedContent = Utils.renderMarkdown(cleaned);
     } else {
       renderedContent = Utils.escapeHtml(displayContent);
     }
