@@ -930,35 +930,32 @@ const Sidebar = {
     el.className = `temporal-card direction-card suggested-goal-card${typeClass ? ' ' + typeClass : ''}`;
     el.draggable = false;
 
-    const badgeHtml = d.type === 'breadth'
-      ? `<div class="direction-type-badge badge-breadth"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="10" height="10"><path d="M17 18a5 5 0 0 0-10 0"/><line x1="12" y1="2" x2="12" y2="9"/><line x1="4.22" y1="10.22" x2="5.64" y2="11.64"/><line x1="1" y1="18" x2="3" y2="18"/><line x1="21" y1="18" x2="23" y2="18"/><line x1="18.36" y1="11.64" x2="19.78" y2="10.22"/></svg> Go Broader</div>`
-      : d.type === 'depth'
-        ? `<div class="direction-type-badge badge-depth"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="10" height="10"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg> Go Deeper</div>`
-        : '';
-
     const reasonText = (d.reason || '').trim();
     const anchorText = (d.anchor || '').trim();
-    const detailText = reasonText || anchorText;
-    const reasonHtml = detailText
-      ? `<div class="direction-reason">${Utils.escapeHtml(detailText)}</div>`
-      : '';
+    el.title = reasonText || anchorText || '';
+
+    const typeWord = d.type === 'breadth' ? 'broader' : d.type === 'depth' ? 'deeper' : '';
     const suggestedAt = d.suggestedAt || Utils.timestamp();
-    const provenance = `Suggested ${this._formatGoalDate(suggestedAt)}${d.editedByUser ? ' · edited by you' : ''}`;
+    const provenanceParts = [`Suggested ${this._formatGoalDate(suggestedAt)}`];
+    if (typeWord) provenanceParts.push(typeWord);
+    if (d.editedByUser) provenanceParts.push('edited by you');
+    const provenance = provenanceParts.join(' · ');
 
     el.innerHTML = `
-      ${badgeHtml}
       <div class="temporal-card-header">
         <span class="temporal-card-title">${Utils.escapeHtml(d.title || '')}</span>
       </div>
       <div class="direction-provenance">${Utils.escapeHtml(provenance)}</div>
-      <div class="temporal-card-question goal-example-question">${Utils.escapeHtml(d.exampleQuestion || '')}</div>
-      ${reasonHtml}
+      <div class="goal-try-asking">
+        <span class="goal-try-prefix">Try asking:</span>
+        <span class="temporal-card-question goal-example-question">${Utils.escapeHtml(d.exampleQuestion || '')}</span>
+      </div>
       <div class="temporal-card-actions">
-        <button class="probe-btn direction-save-btn" title="Save goal">Save goal</button>
         <button class="probe-btn card-new-chat-btn" title="Ask this">Ask this</button>
-        <button class="probe-btn direction-dismiss-btn" title="Dismiss">Dismiss</button>
-        <button class="probe-btn direction-modify-btn" title="Modify goal title">Modify</button>
-        <button class="probe-btn goal-regen-btn" title="Another angle">↻</button>
+        <button class="probe-btn direction-save-btn" title="Save goal">Save goal</button>
+        <button class="goal-icon-btn direction-modify-btn" title="Modify goal">✎</button>
+        <button class="goal-icon-btn goal-regen-btn" title="Another angle">↻</button>
+        <button class="goal-icon-btn direction-dismiss-btn" title="Dismiss">×</button>
       </div>
     `;
 
@@ -1125,7 +1122,7 @@ const Sidebar = {
       </div>
       <div class="temporal-card-actions">
         <button class="probe-btn goal-ask-btn" title="Ask a question">Ask a question</button>
-        <button class="probe-btn intention-remove-btn" title="Remove goal">Remove</button>
+        <button class="goal-icon-btn intention-remove-btn" title="Remove goal">×</button>
       </div>
     `;
 

@@ -1541,43 +1541,46 @@ const App = {
     if (start < 0) return false;
     const end = start + target.length;
 
+    // Collect every text node intersecting [start, end) — wrap per node so
+    // multi-paragraph selections stay valid DOM (inline mark cannot wrap blocks).
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
     let pos = 0;
-    let startNode = null, startOffset = 0, endNode = null, endOffset = 0;
+    const segments = [];
     let node;
     while ((node = walker.nextNode())) {
       const len = (node.nodeValue || '').length;
-      if (!startNode && pos + len > start) {
-        startNode = node;
-        startOffset = start - pos;
-      }
-      if (!endNode && pos + len >= end) {
-        endNode = node;
-        endOffset = end - pos;
-        break;
+      const nodeStart = pos;
+      const nodeEnd = pos + len;
+      if (nodeEnd > start && nodeStart < end) {
+        if (!(node.parentElement && node.parentElement.closest('mark.anno'))) {
+          const sliceStart = Math.max(0, start - nodeStart);
+          const sliceEnd = Math.min(len, end - nodeStart);
+          if (sliceStart < sliceEnd) {
+            segments.push({ node, sliceStart, sliceEnd });
+          }
+        }
       }
       pos += len;
+      if (nodeStart >= end) break;
     }
-    if (!startNode || !endNode) return false;
-    if (startNode.parentElement && startNode.parentElement.closest('mark.anno')) return false;
+    if (segments.length === 0) return false;
 
-    const range = document.createRange();
-    range.setStart(startNode, startOffset);
-    range.setEnd(endNode, endOffset);
-    const mark = document.createElement('mark');
-    mark.className = `anno anno-${anno.label}`;
-    mark.dataset.annoId = anno.id;
-    mark.title = (this._LABEL_META[anno.label] || {}).title || anno.label;
-    try {
-      range.surroundContents(mark);
-    } catch (_) {
-      try {
-        const frag = range.extractContents();
-        mark.appendChild(frag);
-        range.insertNode(mark);
-      } catch (__) {
-        return false;
+    // Process last→first so earlier text-node identities stay valid after splits.
+    for (let i = segments.length - 1; i >= 0; i--) {
+      const seg = segments[i];
+      let middle = seg.node;
+      if (seg.sliceEnd < (middle.nodeValue || '').length) {
+        middle.splitText(seg.sliceEnd);
       }
+      if (seg.sliceStart > 0) {
+        middle = middle.splitText(seg.sliceStart);
+      }
+      const mark = document.createElement('mark');
+      mark.className = `anno anno-${anno.label}`;
+      mark.dataset.annoId = anno.id;
+      mark.title = (this._LABEL_META[anno.label] || {}).title || anno.label;
+      middle.parentNode.replaceChild(mark, middle);
+      mark.appendChild(middle);
     }
     return true;
   },
@@ -2286,15 +2289,18 @@ const App = {
     if (suggestions.length > 0 && STUDY_CONDITION === 'loom') {
       const cardsHtml = suggestions.map((s, i) => {
         const tc = Utils.getTopicColor(s.topicColorObj);
-        const mainLine = s.title
-          ? `<div class="welcome-card-question"><strong>${Utils.escapeHtml(s.title)}</strong>${s.question ? `<div class="welcome-card-example">${Utils.escapeHtml(s.question)}</div>` : ''}</div>`
-          : `<div class="welcome-card-question">${Utils.escapeHtml(s.question)}</div>`;
+        const sendText = s.question || s.title || '';
+        const goalTitleLine = (s.title && s.question)
+          ? `<div class="welcome-card-goal-title">${Utils.escapeHtml(s.title)}</div>`
+          : '';
+        const mainLine = `<div class="welcome-card-question">${Utils.escapeHtml(sendText)}</div>`;
         return `<div class="welcome-suggestion-card" data-suggestion-idx="${i}">
           <div class="welcome-card-topic" style="color:${tc.color};">
             <span class="topic-color-dot" style="background:${tc.color};"></span>
             ${Utils.escapeHtml(s.topicName)}
           </div>
           ${s.isGoal ? '<div class="welcome-card-intention-badge">Your goal</div>' : ''}
+          ${goalTitleLine}
           ${mainLine}
         </div>`;
       }).join('');
@@ -2451,28 +2457,7 @@ const App = {
       }
     }
 
-    let question = suggestion.question;
-    if (suggestion.isGoal && !question && suggestion.title) {
-      try {
-        const resp = await fetch('/api/sidebar/goal-question', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            topicName: suggestion.topicName,
-            topicStatus: suggestion.statusSummary || '',
-            goalTitle: suggestion.title,
-            allChatSummaries: Storage.getAllChatSummariesForTopic(suggestion.topicId),
-            model: Storage.getSidebarModel(),
-          }),
-        });
-        const data = await resp.json();
-        question = (data && data.question) || suggestion.title;
-      } catch (_) {
-        question = suggestion.title;
-      }
-    }
-
-    let content = question || suggestion.title || '';
+    let content = suggestion.question || suggestion.title || '';
     if (suggestion.statusSummary) {
       content = `[My current status in "${suggestion.topicName}": ${suggestion.statusSummary}]\n\n${content}`;
     }

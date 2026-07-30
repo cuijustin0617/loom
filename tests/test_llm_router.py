@@ -306,6 +306,7 @@ class TestOpenRouter:
             await router.chat([{"role": "user", "content": "hi"}], "sys", model="gemini-3-flash-preview")
             kwargs = mock_create.call_args.kwargs or mock_create.call_args[1]
             assert kwargs["model"] == "google/gemini-3-flash-preview"
+            assert kwargs["max_tokens"] == 65536
 
     @pytest.mark.asyncio
     async def test_openrouter_use_search_adds_tool(self):

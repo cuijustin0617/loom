@@ -116,19 +116,39 @@ Past chat summaries (newest first):
 User highlights / labels on assistant responses:
 {annotations}
 
-Update the profile with an **Overview**: 2-4 bullet points summarizing the user's overall profile in this topic. Think big-picture: user's background, context, stated goals, skill level, timeline, and what they've been working through. Incorporate any self-reported information the user has shared.
+You are writing a profile of the USER — what they have told you about themselves,
+what they are doing, and how they react to the assistant's responses.
+
+Evidence, in order of authority:
+1. Comments the user wrote (comment annotations) — explicit statements; almost
+   always produce an ADD or EDIT. Phrase as a fact about the user, never as a
+   quote of the comment.
+2. Labels on specific spans (♥ interested / ✓ clear / ? unsure / ✗ not relevant)
+   — direct reactions; update the profile to reflect them.
+3. The user's own messages — what they explicitly stated or asked.
+
+The ASSISTANT's messages are NOT evidence of what the user wants, needs, or is
+learning. Never turn assistant suggestions, recommendations, or explanations
+into profile bullets about the user — the user discussing a topic is not the
+user adopting it.
+
+- ♥ Interested (interested): prioritize adding/updating overview bullets about that span
+- ✓ Got it (clear): the user already understands that material — don't over-explain it later; you may note familiarity briefly
+- ? Unsure (unsure): note topics that need clarification in future responses
+- ✗ Not relevant (not_relevant): do NOT add that content to the overview
+- Comments (comment): these are explicit user statements about the quoted span. They should usually produce an overview ADD or EDIT grounded in the comment's content — phrase it as a profile fact about the user, not as a quote of the comment itself.
 
 Rules:
-- Mainly ADD or EDIT information, don't remove existing info unless contradicted
-- Keep each point to 1 short-medium line
-- Only include information the user explicitly shared or clearly demonstrated
-- Preserve any steering notes the user wrote about themselves (e.g. "skip basics of X", "interested in Y", "avoid Z") — treat them as authoritative
-- User highlights are strong, explicit evidence:
-  - ♥ Interested (interested): prioritize adding/updating overview bullets about that span
-  - ✓ Got it (clear): the user already understands that material — don't over-explain it later; you may note familiarity briefly
-  - ? Unsure (unsure): note topics that need clarification in future responses
-  - ✗ Not relevant (not_relevant): do NOT add that content to the overview
-  - Comments (comment): these are explicit user statements about the quoted span. They should usually produce an overview ADD or EDIT grounded in the comment's content — phrase it as a profile fact about the user, not as a quote of the comment itself.
+- Only propose a change when there is concrete NEW evidence (new user message,
+  label, or comment since the current profile was written). If nothing new is
+  known about the user, return the current overview unchanged.
+- Describe the user, don't prescribe: write "User is comparing X and Y for
+  their thesis", never "User wants to learn X" / "User needs Y" / "User should
+  explore Z" — unless the user said so themselves.
+- Mainly ADD or EDIT; don't remove unless directly contradicted by the user.
+- Keep each point to 1 short line.
+- Preserve any steering notes the user wrote about themselves (e.g. "skip
+  basics of X", "avoid Z") — treat them as authoritative.
 
 Return JSON:
 {{
@@ -157,6 +177,7 @@ Generate exactly 2 suggestions, one of each type:
 Rules:
 - title = the goal phrased as an intention/goal (e.g., "Understand whether X generalizes to Y"), NOT a question
 - exampleQuestion = one concrete first question the user could ask right now to act on that goal
+- exampleQuestion must be ≤ 12 words, a single direct question, plain language — no compound or multi-part questions.
 - Each suggestion must be grounded in a specific overview bullet or past-chat title/summary (reference it as the anchor)
 - Do NOT repeat previously suggested directions
 - breadth must reference something NOT appearing in the coverage list; depth must reference something that DOES
@@ -193,6 +214,7 @@ Do not repeat this prior question (if any): {exclude_question}
 
 Rules:
 - Return exactly one short, open-ended question the user could naturally type into chat
+- the question must be ≤ 12 words, a single direct question, plain language — no compound or multi-part questions.
 - Ground it in the goal title and the user's profile/coverage
 - Do not restate the goal as a statement — output a question only
 

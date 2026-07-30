@@ -39,6 +39,9 @@ def _fallback_response(raw: str) -> dict:
 
 DEFAULT_MODEL = "gemini-3-flash-preview"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+# OpenRouter pre-authorizes against max_tokens; Gemini defaults to 65536 which
+# can fail with 402 when credits are low. Cap output to a practical chat size.
+DEFAULT_OPENROUTER_MAX_TOKENS = 65536
 
 
 def _map_openrouter_model(model: str) -> str:
@@ -50,6 +53,14 @@ def _map_openrouter_model(model: str) -> str:
     if model.startswith("gpt-"):
         return f"openai/{model}"
     return model
+
+
+def _openrouter_max_tokens() -> int:
+    raw = os.getenv("OPENROUTER_MAX_TOKENS", str(DEFAULT_OPENROUTER_MAX_TOKENS))
+    try:
+        return max(1, int(raw))
+    except (TypeError, ValueError):
+        return DEFAULT_OPENROUTER_MAX_TOKENS
 
 
 def _openrouter_client():
@@ -199,7 +210,12 @@ class LLMRouter:
         full_messages = _build_openai_messages(messages, system_prompt, attachments)
         or_model = _map_openrouter_model(model)
 
-        kwargs = {"model": or_model, "messages": full_messages, "temperature": 0.7}
+        kwargs = {
+            "model": or_model,
+            "messages": full_messages,
+            "temperature": 0.7,
+            "max_tokens": _openrouter_max_tokens(),
+        }
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
         if use_search:
@@ -302,6 +318,7 @@ class LLMRouter:
             "model": or_model,
             "messages": full_messages,
             "temperature": 0.7,
+            "max_tokens": _openrouter_max_tokens(),
             "stream": True,
         }
         if use_search:

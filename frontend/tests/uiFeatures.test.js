@@ -1190,8 +1190,8 @@ test('STATUS_UPDATE_PROMPT returns overview only (no concepts_traversed)', () =>
 test('STATUS_UPDATE_PROMPT includes overview section', () => {
     assert.ok(promptContent.includes('overview'),
         'STATUS_UPDATE_PROMPT should include overview field');
-    assert.ok(promptContent.includes('Overview'),
-        'STATUS_UPDATE_PROMPT should describe the Overview section');
+    assert.ok(promptContent.includes('profile of the USER') || promptContent.includes('Evidence, in order of authority'),
+        'STATUS_UPDATE_PROMPT should describe a user-centered profile');
 });
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -1650,19 +1650,23 @@ test('direction prompt returns type field in each direction', () => {
         'Prompt return JSON should include "anchor" field');
 });
 
-test('sidebar.js _createDirectionCard renders type badge', () => {
-    assert.ok(sidebarContent.includes('direction-type-badge'),
-        'sidebar.js should render direction-type-badge');
-    assert.ok(sidebarContent.includes('Go Broader') || sidebarContent.includes('type-breadth'),
-        'sidebar.js should render breadth badge label or class');
-    assert.ok(sidebarContent.includes('Go Deeper') || sidebarContent.includes('type-depth'),
-        'sidebar.js should render depth badge label or class');
+test('sidebar.js _createSuggestedGoalCard merges type into provenance', () => {
+    assert.ok(!sidebarContent.includes('direction-type-badge'),
+        'sidebar.js should not render direction-type-badge');
+    assert.ok(sidebarContent.includes("'broader'") || sidebarContent.includes('"broader"'),
+        'sidebar.js should include broader type word in provenance');
+    assert.ok(sidebarContent.includes("'deeper'") || sidebarContent.includes('"deeper"'),
+        'sidebar.js should include deeper type word in provenance');
+    assert.ok(sidebarContent.includes('type-breadth') || sidebarContent.includes('type-depth'),
+        'sidebar.js should keep type class on suggested cards');
 });
 
-test('CSS has .badge-breadth and .badge-depth (or .type-breadth/.type-depth)', () => {
-    assert.ok(cssContent.includes('badge-breadth') || cssContent.includes('type-breadth'),
+test('CSS has .type-breadth/.type-depth (no badge pills)', () => {
+    assert.ok(!cssContent.includes('badge-breadth'),
+        'CSS should not style badge-breadth pills');
+    assert.ok(cssContent.includes('type-breadth'),
         'CSS should style breadth directions');
-    assert.ok(cssContent.includes('badge-depth') || cssContent.includes('type-depth'),
+    assert.ok(cssContent.includes('type-depth'),
         'CSS should style depth directions');
 });
 
