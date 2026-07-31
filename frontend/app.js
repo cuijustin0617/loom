@@ -728,8 +728,6 @@ const App = {
     this._initCollapseToggle('collapseRightBtn', 'rightSidebar', 'right');
 
     // Model selector
-    this._initModelSelect();
-
     // Topic selector in input bar (hidden, synced by custom picker)
     const topicSel = document.getElementById('topicSelect');
     topicSel.addEventListener('change', () => {
@@ -747,28 +745,6 @@ const App = {
       const text = document.getElementById('chatInput').value;
       TopicSuggester.onInputChange(text);
     });
-  },
-
-  _initModelSelect() {
-    const select = document.getElementById('modelSelect');
-    const footer = document.getElementById('modelFooterNote');
-    if (!select) return;
-
-    const current = Storage.getChatModel();
-    select.innerHTML = Storage.MODEL_OPTIONS.map(
-      (m) => `<option value="${m.id}">${m.label}</option>`,
-    ).join('');
-    select.value = Storage.MODEL_OPTIONS.some((m) => m.id === current)
-      ? current
-      : Storage.MODEL_OPTIONS[0].id;
-
-    const syncModel = (modelId) => {
-      Storage.setChatModel(modelId);
-      Storage.setSidebarModel(modelId);
-    };
-
-    syncModel(select.value);
-    select.addEventListener('change', () => syncModel(select.value));
   },
 
   _initResize(handleId, sidebarId, side) {

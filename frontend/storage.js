@@ -542,44 +542,21 @@ const Storage = {
     console.log('[reEmbed] Migration complete');
   },
 
-  // ── Model Preferences ───────────────────────────────────────────────────
+  // ── Model Preferences (fixed — no UI picker) ────────────────────────────
 
-  MODEL_OPTIONS: [
-    { id: 'google/gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
-    { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash' },
-    { id: 'openai/gpt-4o-mini', label: 'GPT-4o Mini' },
-  ],
-
-  getModelLabel(modelId) {
-    const match = this.MODEL_OPTIONS.find((m) => m.id === modelId);
-    return match ? match.label : modelId;
-  },
+  DEFAULT_MODEL: 'google/gemini-3.5-flash',
 
   getChatModel() {
-    const raw = localStorage.getItem('loom_chatModel') || 'google/gemini-3.5-flash';
-    return this._normalizeModelId(raw);
-  },
-
-  setChatModel(model) {
-    localStorage.setItem('loom_chatModel', this._normalizeModelId(model));
+    return this.DEFAULT_MODEL;
   },
 
   getSidebarModel() {
-    const raw = localStorage.getItem('loom_sidebarModel') || 'google/gemini-3.5-flash';
-    return this._normalizeModelId(raw);
+    return this.DEFAULT_MODEL;
   },
 
-  /** Map bare gemini-* ids to OpenRouter slugs so we never hit the native Gemini SDK by accident. */
-  _normalizeModelId(model) {
-    const id = (model || '').trim();
-    if (!id) return 'google/gemini-3.5-flash';
-    if (id.startsWith('gemini-')) return `google/${id}`;
-    return id;
-  },
+  setChatModel(_model) { /* fixed model — no-op */ },
 
-  setSidebarModel(model) {
-    localStorage.setItem('loom_sidebarModel', model);
-  },
+  setSidebarModel(_model) { /* fixed model — no-op */ },
 
   clear() {
     localStorage.removeItem(this._KEY);
