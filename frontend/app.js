@@ -1278,16 +1278,6 @@ const App = {
       if (e.target.closest('mark.anno')) return;
       setTimeout(() => this._maybeShowAnnoPopoverFromSelection(), 10);
     });
-    document.addEventListener('selectionchange', () => {
-      clearTimeout(this._annoSelTimer);
-      this._annoSelTimer = setTimeout(() => {
-        const sel = window.getSelection();
-        if (!sel || sel.isCollapsed) return;
-        if (this._annoPopover && this._annoPopover.classList.contains('visible') && this._annoState && !this._annoState.existingId) {
-          this._maybeShowAnnoPopoverFromSelection();
-        }
-      }, 120);
-    });
     document.addEventListener('mousedown', (e) => {
       const t = e.target.nodeType === 3 ? e.target.parentElement : e.target;
       if (this._annoPopover && t && t.closest && !t.closest('#labelPopover') && !t.closest('mark.anno')) {
@@ -1309,22 +1299,79 @@ const App = {
   _findAssistantContentFromNode(node) {
     const el = node.nodeType === 3 ? node.parentElement : node;
     if (!el || !el.closest) return null;
-    return el.closest('.message.assistant .message-content');
+    return el.closest('#chatMessages .message.assistant .message-content');
+  },
+
+  _normalizeAnnoSpan(s) {
+    return (s || '').replace(/\s+/g, ' ').trim();
+  },
+
+  /** Collapse whitespace runs to a single space; map each normalized index → raw offset. */
+  _buildNormalizedOffsetMap(raw) {
+    const normalizedChars = [];
+    const normToRaw = [];
+    let i = 0;
+    const s = raw || '';
+    while (i < s.length) {
+      if (/\s/.test(s[i])) {
+        const runStart = i;
+        while (i < s.length && /\s/.test(s[i])) i++;
+        if (normalizedChars.length > 0 && i < s.length) {
+          normalizedChars.push(' ');
+          normToRaw.push(runStart);
+        }
+      } else {
+        normalizedChars.push(s[i]);
+        normToRaw.push(i);
+        i++;
+      }
+    }
+    return { normalized: normalizedChars.join(''), normToRaw };
+  },
+
+  _rawOffsetIn(contentEl, node, offset) {
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      // offset is a child index — resolve to a text position
+      let pos = 0;
+      for (let i = 0; i < offset && i < node.childNodes.length; i++) {
+        pos += (node.childNodes[i].textContent || '').length;
+      }
+      if (node !== contentEl) {
+        const walker = document.createTreeWalker(contentEl, NodeFilter.SHOW_ALL, null);
+        let n;
+        let before = 0;
+        while ((n = walker.nextNode())) {
+          if (n === node) return before + pos;
+          if (n.nodeType === Node.TEXT_NODE) before += (n.nodeValue || '').length;
+        }
+      }
+      return pos;
+    }
+    const walker = document.createTreeWalker(contentEl, NodeFilter.SHOW_TEXT, null);
+    let pos = 0;
+    let n;
+    while ((n = walker.nextNode())) {
+      if (n === node) return pos + offset;
+      pos += (n.nodeValue || '').length;
+    }
+    return pos;
   },
 
   _selectionOccurrence(contentEl, spanText, range) {
-    const full = contentEl.textContent || '';
-    const before = document.createRange();
-    before.selectNodeContents(contentEl);
-    before.setEnd(range.startContainer, range.startOffset);
-    const prefix = before.toString();
+    const raw = contentEl.textContent || '';
+    const { normalized, normToRaw } = this._buildNormalizedOffsetMap(raw);
+    const target = this._normalizeAnnoSpan(spanText);
+    if (!target || !normalized) return 0;
+    const rawStart = this._rawOffsetIn(contentEl, range.startContainer, range.startOffset);
+    let normStart = 0;
+    while (normStart < normToRaw.length && normToRaw[normStart] < rawStart) normStart++;
     let occ = 0;
     let idx = 0;
     while (true) {
-      const found = full.indexOf(spanText, idx);
-      if (found === -1 || found >= prefix.length) break;
+      const found = normalized.indexOf(target, idx);
+      if (found === -1 || found >= normStart) break;
       occ += 1;
-      idx = found + Math.max(spanText.length, 1);
+      idx = found + Math.max(target.length, 1);
     }
     return occ;
   },
@@ -1338,8 +1385,8 @@ const App = {
     if (STUDY_CONDITION === 'baseline') return;
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
-    const text = sel.toString();
-    if (text.trim().length <= 2) return;
+    const text = this._normalizeAnnoSpan(sel.toString());
+    if (text.length <= 2) return;
     const range = sel.getRangeAt(0);
     const startContent = this._findAssistantContentFromNode(range.startContainer);
     const endContent = this._findAssistantContentFromNode(range.endContainer);
@@ -1417,31 +1464,44 @@ const App = {
     if (!msg) return;
     if (!Array.isArray(msg.annotations)) msg.annotations = [];
 
+    const spanText = this._normalizeAnnoSpan(state.spanText);
+    if (!spanText) return;
+    state.spanText = spanText;
     const occ = state.occurrence || 0;
     // Prefer updating an existing annotation on the same span (by id, or same text+occurrence)
     let existing = state.existingId
       ? msg.annotations.find(a => a.id === state.existingId)
-      : msg.annotations.find(a => a.spanText === state.spanText && (a.occurrence || 0) === occ);
+      : msg.annotations.find(a => this._normalizeAnnoSpan(a.spanText) === spanText && (a.occurrence || 0) === occ);
+
+    // Toggle-off: re-clicking an already-active quick label removes the annotation
+    // (comment uses Save with new text — don't treat that as cancel)
+    if (existing && existing.label === label && label !== 'comment') {
+      state.existingId = existing.id;
+      this._removeAnnotation();
+      return;
+    }
 
     if (existing) {
       existing.label = label;
+      existing.spanText = spanText;
       existing.ts = Date.now();
       if (label === 'comment') existing.comment = comment;
       else delete existing.comment;
     } else {
       msg.annotations.push({
         id: 'anno_' + Utils.generateId(),
-        spanText: state.spanText,
+        spanText,
         occurrence: occ,
         label,
         ...(label === 'comment' ? { comment } : {}),
         ts: Date.now(),
       });
     }
-    // Drop older duplicates of the same span+occurrence
+    // Drop older duplicates of the same normalized span+occurrence
     const seen = new Map();
     msg.annotations = msg.annotations.filter(a => {
       if (!a || !a.spanText) return false;
+      a.spanText = this._normalizeAnnoSpan(a.spanText);
       const key = `${a.spanText}::${a.occurrence || 0}`;
       const prev = seen.get(key);
       if (!prev) { seen.set(key, a); return true; }
@@ -1451,7 +1511,7 @@ const App = {
       }
       return false;
     }).filter(a => {
-      const key = `${a.spanText}::${a.occurrence || 0}`;
+      const key = `${this._normalizeAnnoSpan(a.spanText)}::${a.occurrence || 0}`;
       return seen.get(key) === a;
     });
     Storage.saveMessages(chatId, msgs);
@@ -1512,7 +1572,7 @@ const App = {
     const byKey = new Map();
     for (const anno of list) {
       if (!anno || !anno.spanText) continue;
-      const key = `${anno.spanText}::${anno.occurrence || 0}`;
+      const key = `${this._normalizeAnnoSpan(anno.spanText)}::${anno.occurrence || 0}`;
       const prev = byKey.get(key);
       if (!prev || (anno.ts || 0) >= (prev.ts || 0)) byKey.set(key, anno);
     }
@@ -1521,25 +1581,33 @@ const App = {
     for (const anno of deduped) {
       this._wrapAnnotationOccurrence(content, anno);
     }
+    // Drop empty / whitespace-only marks (stray underline dots between paragraphs)
+    content.querySelectorAll('mark.anno').forEach(mark => {
+      mark.normalize();
+      if (!(mark.textContent || '').trim()) mark.remove();
+    });
   },
 
   _wrapAnnotationOccurrence(root, anno) {
-    const target = anno.spanText;
+    const target = this._normalizeAnnoSpan(anno.spanText);
     if (!target) return false;
     const occurrence = anno.occurrence || 0;
-    const full = root.textContent || '';
-    let start = -1;
+    const raw = root.textContent || '';
+    const { normalized, normToRaw } = this._buildNormalizedOffsetMap(raw);
+    let normStart = -1;
     let from = 0;
     let seen = 0;
-    while (from <= full.length) {
-      const idx = full.indexOf(target, from);
+    while (from <= normalized.length) {
+      const idx = normalized.indexOf(target, from);
       if (idx === -1) break;
-      if (seen === occurrence) { start = idx; break; }
+      if (seen === occurrence) { normStart = idx; break; }
       seen += 1;
       from = idx + Math.max(target.length, 1);
     }
-    if (start < 0) return false;
-    const end = start + target.length;
+    if (normStart < 0 || !normToRaw.length) return false;
+    const normEnd = normStart + target.length;
+    const start = normToRaw[normStart];
+    const end = normToRaw[normEnd - 1] + 1;
 
     // Collect every text node intersecting [start, end) — wrap per node so
     // multi-paragraph selections stay valid DOM (inline mark cannot wrap blocks).
@@ -1556,7 +1624,10 @@ const App = {
           const sliceStart = Math.max(0, start - nodeStart);
           const sliceEnd = Math.min(len, end - nodeStart);
           if (sliceStart < sliceEnd) {
-            segments.push({ node, sliceStart, sliceEnd });
+            const slice = (node.nodeValue || '').slice(sliceStart, sliceEnd);
+            if (!/^\s*$/.test(slice)) {
+              segments.push({ node, sliceStart, sliceEnd });
+            }
           }
         }
       }

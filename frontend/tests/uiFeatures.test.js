@@ -84,6 +84,14 @@ test('HTML has section-future with directionCards', () => {
         'index.html should have sectionFuture');
     assert.ok(htmlContent.includes('id="directionCards"'),
         'index.html should have directionCards');
+    assert.ok(htmlContent.includes('evolve-subheader') && htmlContent.includes('Suggested'),
+        'index.html should have Suggested subheader above direction cards');
+    const goalsIdx = htmlContent.indexOf('id="goalsList"');
+    const addIdx = htmlContent.indexOf('addGoalInput');
+    const suggestedIdx = htmlContent.indexOf('evolve-subheader-suggested');
+    const dirsIdx = htmlContent.indexOf('id="directionCards"');
+    assert.ok(goalsIdx < addIdx && addIdx < suggestedIdx && suggestedIdx < dirsIdx,
+        'Evolve order: goalsList → add-goal → Suggested → directionCards');
 });
 
 test('HTML has temporal breadcrumb with Construct/Apply/Evolve crumbs', () => {

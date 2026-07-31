@@ -310,12 +310,38 @@ const Sidebar = {
     if (proposal) this._bindProposalActions(editMode);
   },
 
+  /** Normalize overview items: strings / untyped objects → {type:'bullet'| 'header', text, source?} */
+  _normalizeOverviewItem(it) {
+    if (typeof it === 'string') {
+      const text = it.trim();
+      return text ? { type: 'bullet', text } : null;
+    }
+    if (!it || typeof it !== 'object') return null;
+    const text = (it.text || '').trim();
+    if (!text) return null;
+    if (it.type === 'header') return { type: 'header', text };
+    return { type: 'bullet', text, source: it.source };
+  },
+
+  _overviewItemKey(type, text) {
+    const t = (type === 'header') ? 'h' : 'b';
+    return `${t}:${(text || '').trim().toLowerCase()}`;
+  },
+
   _renderNormalOverviewItem(pt, i) {
-    const src = pt && typeof pt === 'object' ? pt.source : null;
+    const item = this._normalizeOverviewItem(pt) || { type: 'bullet', text: '' };
+    if (item.type === 'header') {
+      return `<div class="status-item status-header" data-section="overview" data-idx="${i}" data-item-type="header">
+        <span class="status-item-text">${Utils.escapeHtml(item.text)}</span>
+        <span class="status-item-actions">
+          <button class="status-item-btn status-item-del" title="Remove">×</button>
+        </span></div>`;
+    }
+    const src = item.source || null;
     const srcBadge = src === 'label-derived' ? '<span class="status-item-source">from your labels</span>'
       : src === 'user' ? '<span class="status-item-source">you wrote this</span>' : '';
-    return `<div class="status-item" data-section="overview" data-idx="${i}">
-      <span class="status-item-text">${Utils.escapeHtml(this._statusItemText(pt))}${srcBadge}</span>
+    return `<div class="status-item status-bullet" data-section="overview" data-idx="${i}" data-item-type="bullet">
+      <span class="status-item-text">${Utils.escapeHtml(item.text)}${srcBadge}</span>
       <span class="status-item-actions">
         <button class="status-item-btn status-item-del" title="Remove">×</button>
       </span></div>`;
@@ -330,44 +356,49 @@ const Sidebar = {
     }).join('');
   },
 
+  _suggestionRowClass(itemType) {
+    return itemType === 'header' ? 'status-item status-header' : 'status-item status-bullet';
+  },
+
   _renderSuggestionOverview(overview, proposal, editMode) {
     const changes = proposal.changes || [];
-    const norm = s => (s || '').trim().toLowerCase();
+    const keyOf = (c, field) => this._overviewItemKey(c.itemType || 'bullet', c[field] || c.text || c.oldText || '');
     const removeSet = new Set(
-      changes.filter(c => c.kind === 'overview_remove').map(c => norm(c.text || c.oldText))
+      changes.filter(c => c.kind === 'overview_remove').map(c => keyOf(c, 'text'))
     );
     const editMap = new Map();
-    changes.filter(c => c.kind === 'overview_edit').forEach(c => editMap.set(norm(c.oldText), c));
+    changes.filter(c => c.kind === 'overview_edit').forEach(c => editMap.set(keyOf(c, 'oldText'), c));
     const addChanges = changes
       .map((c, i) => ({ c, i }))
       .filter(({ c }) => c.kind === 'overview_add');
 
     let html = '';
     overview.forEach((pt, i) => {
-      const text = this._statusItemText(pt);
-      const key = norm(text);
+      const item = this._normalizeOverviewItem(pt) || { type: 'bullet', text: this._statusItemText(pt) };
+      const key = this._overviewItemKey(item.type, item.text);
       const edit = editMap.get(key);
+      const rowCls = this._suggestionRowClass(item.type);
       if (removeSet.has(key)) {
-        const chIdx = changes.findIndex(c => c.kind === 'overview_remove' && norm(c.text || c.oldText) === key);
+        const chIdx = changes.findIndex(c => c.kind === 'overview_remove' && keyOf(c, 'text') === key);
         if (editMode) {
-          html += `<div class="status-item suggestion-edit-row" data-change-idx="${chIdx}">
-            <textarea class="status-inline-edit proposal-edit-input" rows="1" disabled>${Utils.escapeHtml(text)}</textarea>
+          html += `<div class="${rowCls} suggestion-edit-row" data-change-idx="${chIdx}">
+            <textarea class="status-inline-edit proposal-edit-input" rows="1" disabled>${Utils.escapeHtml(item.text)}</textarea>
             <button class="status-item-btn proposal-drop-change" data-change-idx="${chIdx}" title="Remove this change">×</button>
           </div>`;
         } else {
-          html += `<div class="status-item suggestion-item" data-change-idx="${chIdx}">
-            <span class="status-item-text"><span class="diff-del">${Utils.escapeHtml(text)}</span></span>
+          html += `<div class="${rowCls} suggestion-item" data-change-idx="${chIdx}">
+            <span class="status-item-text"><span class="diff-del">${Utils.escapeHtml(item.text)}</span></span>
           </div>`;
         }
       } else if (edit) {
-        const chIdx = changes.findIndex(c => c.kind === 'overview_edit' && norm(c.oldText) === key);
+        const chIdx = changes.findIndex(c => c.kind === 'overview_edit' && keyOf(c, 'oldText') === key);
         if (editMode) {
-          html += `<div class="status-item suggestion-edit-row" data-change-idx="${chIdx}">
+          html += `<div class="${rowCls} suggestion-edit-row" data-change-idx="${chIdx}">
             <textarea class="status-inline-edit proposal-edit-input" rows="1">${Utils.escapeHtml(edit.text || '')}</textarea>
             <button class="status-item-btn proposal-drop-change" data-change-idx="${chIdx}" title="Remove this change">×</button>
           </div>`;
         } else {
-          html += `<div class="status-item suggestion-item" data-change-idx="${chIdx}">
+          html += `<div class="${rowCls} suggestion-item" data-change-idx="${chIdx}">
             <span class="status-item-text">${this._renderWordDiffHtml(edit.oldText, edit.text)}</span>
           </div>`;
         }
@@ -377,13 +408,14 @@ const Sidebar = {
     });
 
     addChanges.forEach(({ c, i }) => {
+      const rowCls = this._suggestionRowClass(c.itemType || 'bullet');
       if (editMode) {
-        html += `<div class="status-item suggestion-edit-row" data-change-idx="${i}">
+        html += `<div class="${rowCls} suggestion-edit-row" data-change-idx="${i}">
           <textarea class="status-inline-edit proposal-edit-input" rows="1">${Utils.escapeHtml(c.text || '')}</textarea>
           <button class="status-item-btn proposal-drop-change" data-change-idx="${i}" title="Remove this change">×</button>
         </div>`;
       } else {
-        html += `<div class="status-item suggestion-item" data-change-idx="${i}">
+        html += `<div class="${rowCls} suggestion-item" data-change-idx="${i}">
           <span class="status-item-text"><span class="diff-add">${Utils.escapeHtml(c.text || '')}</span></span>
         </div>`;
       }
@@ -454,30 +486,38 @@ const Sidebar = {
     const cur = (currentSummary && typeof currentSummary === 'object') ? currentSummary : {};
     const prop = (proposedSummary && typeof proposedSummary === 'object') ? proposedSummary : {};
     const norm = s => (s || '').trim().toLowerCase();
-    const curTexts = (cur.overview || []).map(it => this._statusItemText(it).trim()).filter(Boolean);
-    const propTexts = (prop.overview || []).map(it => this._statusItemText(it).trim()).filter(Boolean);
+    const curItems = (cur.overview || []).map(it => this._normalizeOverviewItem(it)).filter(Boolean);
+    const propItems = (prop.overview || []).map(it => this._normalizeOverviewItem(it)).filter(Boolean);
 
     const usedOld = new Set();
     const usedNew = new Set();
     const pairs = [];
 
-    // Exact matches first
-    curTexts.forEach((oldText, oi) => {
-      const ni = propTexts.findIndex((t, j) => !usedNew.has(j) && norm(t) === norm(oldText));
+    // Exact matches first (same type + text)
+    curItems.forEach((oldItem, oi) => {
+      const ni = propItems.findIndex((t, j) =>
+        !usedNew.has(j) && t.type === oldItem.type && norm(t.text) === norm(oldItem.text));
       if (ni >= 0) {
         usedOld.add(oi);
         usedNew.add(ni);
       }
     });
 
-    // Similarity pairs for remaining
+    // Similarity pairs for remaining (headers↔headers, bullets↔bullets only)
     const candidates = [];
-    curTexts.forEach((oldText, oi) => {
+    curItems.forEach((oldItem, oi) => {
       if (usedOld.has(oi)) return;
-      propTexts.forEach((newText, ni) => {
-        if (usedNew.has(ni)) return;
-        const sim = this._textSimilarity(oldText, newText);
-        if (sim >= 0.5) candidates.push({ oi, ni, sim, oldText, newText });
+      propItems.forEach((newItem, ni) => {
+        if (usedNew.has(ni) || newItem.type !== oldItem.type) return;
+        const sim = this._textSimilarity(oldItem.text, newItem.text);
+        if (sim >= 0.5) {
+          candidates.push({
+            oi, ni, sim,
+            itemType: oldItem.type,
+            oldText: oldItem.text,
+            newText: newItem.text,
+          });
+        }
       });
     });
     candidates.sort((a, b) => b.sim - a.sim);
@@ -485,15 +525,29 @@ const Sidebar = {
       if (usedOld.has(c.oi) || usedNew.has(c.ni)) return;
       usedOld.add(c.oi);
       usedNew.add(c.ni);
-      pairs.push({ kind: 'overview_edit', oldText: c.oldText, text: c.newText });
+      pairs.push({
+        kind: 'overview_edit',
+        itemType: c.itemType,
+        oldText: c.oldText,
+        text: c.newText,
+      });
     });
 
     const changes = [...pairs];
-    curTexts.forEach((oldText, oi) => {
-      if (!usedOld.has(oi)) changes.push({ kind: 'overview_remove', text: oldText, oldText });
+    curItems.forEach((oldItem, oi) => {
+      if (!usedOld.has(oi)) {
+        changes.push({
+          kind: 'overview_remove',
+          itemType: oldItem.type,
+          text: oldItem.text,
+          oldText: oldItem.text,
+        });
+      }
     });
-    propTexts.forEach((text, ni) => {
-      if (!usedNew.has(ni)) changes.push({ kind: 'overview_add', text });
+    propItems.forEach((newItem, ni) => {
+      if (!usedNew.has(ni)) {
+        changes.push({ kind: 'overview_add', itemType: newItem.type, text: newItem.text });
+      }
     });
     return changes;
   },
@@ -511,10 +565,12 @@ const Sidebar = {
     const defaultSource = hasComment ? 'user'
       : (trigger === 'labels' ? 'label-derived' : 'inferred');
     const effective = {
-      overview: (statusUpdate.overview || []).map(it => ({
-        text: this._statusItemText(it),
-        source: defaultSource,
-      })),
+      overview: (statusUpdate.overview || []).map(it => {
+        const n = this._normalizeOverviewItem(it);
+        if (!n) return null;
+        if (n.type === 'header') return { type: 'header', text: n.text };
+        return { type: 'bullet', text: n.text, source: defaultSource };
+      }).filter(Boolean),
     };
     const changes = this._diffStatus(
       { overview: (topic.statusSummary && topic.statusSummary.overview) || [] },
@@ -595,29 +651,47 @@ const Sidebar = {
     }
     const summary = topic.statusSummary;
     if (!Array.isArray(summary.overview)) summary.overview = [];
-    const norm = s => (s || '').trim().toLowerCase();
-    const findOverviewIdx = text =>
-      summary.overview.findIndex(it => norm(this._statusItemText(it)) === norm(text));
+    const findOverviewIdx = (text, itemType) => {
+      const key = this._overviewItemKey(itemType || 'bullet', text);
+      return summary.overview.findIndex(it => {
+        const n = this._normalizeOverviewItem(it);
+        return n && this._overviewItemKey(n.type, n.text) === key;
+      });
+    };
     const source = this._sourceForProposalChange(p);
 
     (p.changes || []).forEach(ch => {
+      const itemType = ch.itemType || 'bullet';
       if (ch.kind === 'overview_remove') {
-        const i = findOverviewIdx(ch.text || ch.oldText);
+        const i = findOverviewIdx(ch.text || ch.oldText, itemType);
         if (i >= 0) summary.overview.splice(i, 1);
       } else if (ch.kind === 'overview_edit') {
-        const i = findOverviewIdx(ch.oldText);
+        const i = findOverviewIdx(ch.oldText, itemType);
         if (i >= 0) {
-          if (typeof summary.overview[i] === 'object') {
+          if (itemType === 'header') {
+            summary.overview[i] = { type: 'header', text: ch.text };
+          } else if (typeof summary.overview[i] === 'object') {
+            summary.overview[i].type = 'bullet';
             summary.overview[i].text = ch.text;
             summary.overview[i].source = source;
           } else {
-            summary.overview[i] = { text: ch.text, source };
+            summary.overview[i] = { type: 'bullet', text: ch.text, source };
           }
         } else if (ch.text) {
-          summary.overview.push({ text: ch.text, source });
+          summary.overview.push(
+            itemType === 'header'
+              ? { type: 'header', text: ch.text }
+              : { type: 'bullet', text: ch.text, source }
+          );
         }
       } else if (ch.kind === 'overview_add') {
-        if (ch.text) summary.overview.push({ text: ch.text, source });
+        if (ch.text) {
+          summary.overview.push(
+            itemType === 'header'
+              ? { type: 'header', text: ch.text }
+              : { type: 'bullet', text: ch.text, source }
+          );
+        }
       }
     });
 
@@ -676,36 +750,50 @@ const Sidebar = {
     }
     const summary = topic.statusSummary;
     if (!Array.isArray(summary.overview)) summary.overview = [];
-    const norm = s => (s || '').trim().toLowerCase();
-    const findOverviewIdx = text =>
-      summary.overview.findIndex(it => norm(this._statusItemText(it)) === norm(text));
+    const findOverviewIdx = (text, itemType) => {
+      const key = this._overviewItemKey(itemType || 'bullet', text);
+      return summary.overview.findIndex(it => {
+        const n = this._normalizeOverviewItem(it);
+        return n && this._overviewItemKey(n.type, n.text) === key;
+      });
+    };
 
     container.querySelectorAll('.suggestion-edit-row').forEach(row => {
       const ch = p.changes[parseInt(row.dataset.changeIdx, 10)];
       if (!ch) return;
+      const itemType = ch.itemType || 'bullet';
       const input = row.querySelector('.proposal-edit-input');
       const text = input ? input.value.trim() : '';
       if (ch.kind === 'overview_remove') {
-        const i = findOverviewIdx(ch.oldText || ch.text);
+        const i = findOverviewIdx(ch.oldText || ch.text, itemType);
         if (i >= 0) summary.overview.splice(i, 1);
       } else if (ch.kind === 'overview_edit') {
-        const i = findOverviewIdx(ch.oldText);
+        const i = findOverviewIdx(ch.oldText, itemType);
         if (text) {
           if (i >= 0) {
-            if (typeof summary.overview[i] === 'object') {
+            if (itemType === 'header') {
+              summary.overview[i] = { type: 'header', text };
+            } else if (typeof summary.overview[i] === 'object') {
+              summary.overview[i].type = 'bullet';
               summary.overview[i].text = text;
               summary.overview[i].source = 'user';
             } else {
-              summary.overview[i] = { text, source: 'user' };
+              summary.overview[i] = { type: 'bullet', text, source: 'user' };
             }
           } else {
-            summary.overview.push({ text, source: 'user' });
+            summary.overview.push(
+              itemType === 'header' ? { type: 'header', text } : { type: 'bullet', text, source: 'user' }
+            );
           }
         } else if (i >= 0) {
           summary.overview.splice(i, 1);
         }
       } else if (ch.kind === 'overview_add') {
-        if (text) summary.overview.push({ text, source: 'user' });
+        if (text) {
+          summary.overview.push(
+            itemType === 'header' ? { type: 'header', text } : { type: 'bullet', text, source: 'user' }
+          );
+        }
       }
     });
 
@@ -756,7 +844,15 @@ const Sidebar = {
   _startInlineEdit(item, section, idx) {
     const textEl = item.querySelector('.status-item-text');
     if (!textEl) return;
-    const original = textEl.textContent;
+    // Prefer stored text so source badges aren't pulled into the editor
+    const topic = this.currentTopicId ? Storage.getTopic(this.currentTopicId) : null;
+    const stored = topic && topic.statusSummary && Array.isArray(topic.statusSummary[section])
+      ? topic.statusSummary[section][idx] : null;
+    const original = stored != null
+      ? this._statusItemText(stored)
+      : (textEl.childNodes[0] && textEl.childNodes[0].nodeType === 3
+        ? textEl.childNodes[0].textContent
+        : textEl.textContent);
     const input = document.createElement('textarea');
     input.className = 'status-inline-edit';
     input.value = original;
@@ -807,11 +903,15 @@ const Sidebar = {
     const arr = topic.statusSummary[section];
     if (!arr || idx < 0 || idx >= arr.length) return;
     Storage.pushStatusSnapshot(topic, 'inline_edit');
-    if (arr[idx] && typeof arr[idx] === 'object') {
+    const prev = this._normalizeOverviewItem(arr[idx]);
+    if (prev && prev.type === 'header') {
+      arr[idx] = { type: 'header', text: newText };
+    } else if (arr[idx] && typeof arr[idx] === 'object') {
+      arr[idx].type = 'bullet';
       arr[idx].text = newText;
       arr[idx].source = 'user';
     } else {
-      arr[idx] = { text: newText, source: 'user' };
+      arr[idx] = { type: 'bullet', text: newText, source: 'user' };
     }
     topic.statusLastUpdated = Utils.timestamp();
     Storage.saveTopic(topic);
@@ -877,7 +977,16 @@ const Sidebar = {
         }),
       });
       const data = await resp.json();
-      const newOverview = data.overview || overview;
+      const newOverview = (data.overview || overview).map(it => {
+        const n = this._normalizeOverviewItem(it);
+        if (!n) return null;
+        if (n.type === 'header') return { type: 'header', text: n.text };
+        return {
+          type: 'bullet',
+          text: n.text,
+          source: (it && typeof it === 'object' && it.source) || 'user',
+        };
+      }).filter(Boolean);
       Storage.pushStatusSnapshot(topic, 'ai_edit');
       topic.statusSummary.overview = newOverview;
       topic.statusLastUpdated = Utils.timestamp();
@@ -900,13 +1009,12 @@ const Sidebar = {
   _serializeStatus(statusSummary) {
     if (!statusSummary) return '';
     if (typeof statusSummary === 'string') return statusSummary;
+    if (!statusSummary.overview || statusSummary.overview.length === 0) return '';
     const parts = [];
-    if (statusSummary.overview && statusSummary.overview.length > 0) {
-      const items = statusSummary.overview
-        .map(it => (typeof it === 'string' ? it : (it && it.text) || ''));
-      if (items.length > 0) {
-        parts.push('Overview: ' + items.join('; '));
-      }
+    for (const it of statusSummary.overview) {
+      const n = this._normalizeOverviewItem(it);
+      if (!n) continue;
+      parts.push(n.type === 'header' ? `## ${n.text}` : `- ${n.text}`);
     }
     return parts.join('\n');
   },
@@ -1036,7 +1144,7 @@ const Sidebar = {
     container.innerHTML = '';
     if (goals.length === 0) return;
     const label = document.createElement('div');
-    label.className = 'intentions-label';
+    label.className = 'evolve-subheader intentions-label';
     label.textContent = 'Your goals';
     container.appendChild(label);
     goals.forEach(goal => container.appendChild(this._createGoalCard(goal)));

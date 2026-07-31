@@ -1890,7 +1890,7 @@ body {
 }
 
 .status-section-overview .status-section-items {
-  max-height: 140px;
+  max-height: 220px;
   overflow-y: auto;
   padding-right: 6px;
 }
@@ -2020,6 +2020,29 @@ body {
 
 .overview-ai-send:disabled {
   opacity: 0.4;
+}
+
+.status-item.status-header {
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--text-primary);
+  margin-top: 2px;
+  margin-bottom: 0;
+  padding: 0;
+  line-height: 1.2;
+  border-left-color: transparent;
+}
+
+.status-item.status-header:first-child {
+  margin-top: 0;
+}
+
+.status-item.status-bullet {
+  margin-left: 10px;
+  margin-top: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  line-height: 1.3;
 }
 
 .status-item {
@@ -3130,17 +3153,25 @@ body {
   margin-bottom: 2px;
 }
 
+.evolve-subheader,
 .intentions-label {
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-muted);
-  margin: 2px 0 2px 12px;
+  margin: 14px 0 6px;
 }
 
-.temporal-card.intention-card {
-  border-left-color: var(--accent-purple);
+.evolve-subheader-suggested {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.temporal-card.intention-card,
+.temporal-card.goal-card {
+  border-left-color: var(--accent-blue);
   cursor: default;
 }
 

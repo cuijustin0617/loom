@@ -138,21 +138,35 @@ user adopting it.
 - ✗ Not relevant (not_relevant): do NOT add that content to the overview
 - Comments (comment): these are explicit user statements about the quoted span. They should usually produce an overview ADD or EDIT grounded in the comment's content — phrase it as a profile fact about the user, not as a quote of the comment itself.
 
+Organize the overview as an ordered mix of short subtitle headers and bullets.
+Use 2–4 short subtitles when they help (e.g. "Background", "Experience",
+"Goals", "Interests"). Bullets under a subtitle may be short fragments, not
+full sentences. One level only — never nest headers under headers.
+
 Rules:
 - Only propose a change when there is concrete NEW evidence (new user message,
   label, or comment since the current profile was written). If nothing new is
   known about the user, return the current overview unchanged.
+- Propose only changes that are clearly necessary — a new point that is clearly
+  missing, an old point that is clearly wrong or outdated, an edit with an
+  obvious reason. Do NOT reword, shuffle, merge, split, or tweak bullets or
+  headers without a clear reason; small stylistic rewrites are not a valid
+  change. If in doubt, leave the item untouched.
 - Describe the user, don't prescribe: write "User is comparing X and Y for
   their thesis", never "User wants to learn X" / "User needs Y" / "User should
   explore Z" — unless the user said so themselves.
 - Mainly ADD or EDIT; don't remove unless directly contradicted by the user.
-- Keep each point to 1 short line.
+- Keep each bullet to 1 short line.
 - Preserve any steering notes the user wrote about themselves (e.g. "skip
   basics of X", "avoid Z") — treat them as authoritative.
 
 Return JSON:
 {{
-  "overview": ["point 1", "point 2"]
+  "overview": [
+    {{"type": "header", "text": "Background"}},
+    {{"type": "bullet", "text": "point under that subtitle"}},
+    {{"type": "bullet", "text": "another point"}}
+  ]
 }}"""
 
 # ── Future Directions ─────────────────────────────────────────────────────────
@@ -175,7 +189,8 @@ Generate exactly 2 suggestions, one of each type:
 - "depth": A more advanced, technical, or nuanced angle on something they HAVE already covered (in the overview or a past chat). Extends mastery of something familiar — do NOT introduce new areas.
 
 Rules:
-- title = the goal phrased as an intention/goal (e.g., "Understand whether X generalizes to Y"), NOT a question
+- title = a general goal in 4–6 words (e.g. "Explore evaluation methods", "Deepen model intuition") — NOT a question, NOT a niche/specific scenario
+- Prefer broad, reusable intentions over narrow one-off topics; leave specifics for exampleQuestion
 - exampleQuestion = one concrete first question the user could ask right now to act on that goal
 - exampleQuestion must be ≤ 12 words, a single direct question, plain language — no compound or multi-part questions.
 - Each suggestion must be grounded in a specific overview bullet or past-chat title/summary (reference it as the anchor)
@@ -187,14 +202,14 @@ Return JSON:
   "newDirections": [
     {{
       "type": "breadth",
-      "title": "Goal phrased as an intention (not a question)",
+      "title": "4-6 word general goal",
       "exampleQuestion": "A concrete first question the user could ask right now",
       "anchor": "From current profile / past chats: [specific overview bullet or past-chat title this builds on]",
       "reason": "One sentence explaining why this adjacent area matters for the user right now"
     }},
     {{
       "type": "depth",
-      "title": "Goal phrased as an intention (not a question)",
+      "title": "4-6 word general goal",
       "exampleQuestion": "A concrete first question the user could ask right now",
       "anchor": "From current profile / past chats: [specific overview bullet or past-chat title that this deepens]",
       "reason": "One sentence explaining why going deeper here is valuable right now"
@@ -288,26 +303,31 @@ Return JSON:
 OVERVIEW_AI_EDIT_PROMPT = """You edit a user's current profile overview based on their natural-language instruction.
 
 Topic: {topic_name}
-Current overview bullet points:
+Current overview (markdown: ## headers, - bullets):
 {current_overview}
 
 User's instruction: {instruction}
 
-Apply the user's instruction to the overview. You may:
-- Add new bullet points if the user provides new information about themselves
-- Edit existing bullet points to reflect updated goals, focus, or context
-- Remove bullet points the user says are no longer relevant
-- Rephrase or merge bullet points for clarity
+The overview is an ordered mix of subtitle headers and bullets (one level only).
+Apply the user's instruction. You may:
+- Add, rename, or remove subtitle headers
+- Add new bullets if the user provides new information about themselves
+- Edit existing bullets to reflect updated goals, focus, or context
+- Remove bullets the user says are no longer relevant
+- Rephrase, merge, or regroup bullets under headers for clarity
 
 Rules:
-- Preserve existing bullets that are NOT affected by the instruction
-- Keep each bullet to 1 short-medium line
-- Return 1-6 bullet points total
+- Preserve items that are NOT affected by the instruction
+- Keep each bullet to 1 short-medium line; headers are short labels (1-3 words)
+- One level only — never nest headers
 - Do NOT invent information the user didn't provide
 
 Return JSON:
 {{
-  "overview": ["updated point 1", "updated point 2"]
+  "overview": [
+    {{"type": "header", "text": "Background"}},
+    {{"type": "bullet", "text": "updated point"}}
+  ]
 }}"""
 
 # ── Baseline Condition ────────────────────────────────────────────────────────

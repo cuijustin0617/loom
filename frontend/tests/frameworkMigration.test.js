@@ -231,8 +231,10 @@ test('pushStatusSnapshot caps history at 10, FIFO', () => {
 });
 
 test('backend _serialize_status_to_str accepts dict overview items', () => {
-    assert.ok(mainPy.includes('pt.get("text", "") if isinstance(pt, dict) else str(pt)'),
+    assert.ok(mainPy.includes('def _overview_item_text') || mainPy.includes('pt.get("text"'),
         'main.py should read .text from dict overview items with string fallback');
+    assert.ok(mainPy.includes('## ') || mainPy.includes('## {text}') || mainPy.includes('f"## '),
+        'main.py serializer should emit markdown headers');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -328,7 +330,7 @@ test('_diffStatus detects overview additions', () => {
         { overview: [{ text: 'a' }] },
         { overview: [{ text: 'a' }, { text: 'b' }] }
     );
-    assert.deepStrictEqual(plain(changes), [{ kind: 'overview_add', text: 'b' }]);
+    assert.deepStrictEqual(plain(changes), [{ kind: 'overview_add', itemType: 'bullet', text: 'b' }]);
 });
 
 test('_diffStatus detects overview removals', () => {
@@ -337,7 +339,7 @@ test('_diffStatus detects overview removals', () => {
         { overview: [{ text: 'stays here fine' }, { text: 'goes away entirely' }] },
         { overview: [{ text: 'stays here fine' }] }
     );
-    assert.deepStrictEqual(plain(changes), [{ kind: 'overview_remove', text: 'goes away entirely', oldText: 'goes away entirely' }]);
+    assert.deepStrictEqual(plain(changes), [{ kind: 'overview_remove', itemType: 'bullet', text: 'goes away entirely', oldText: 'goes away entirely' }]);
 });
 
 test('_diffStatus pairs prefix-matched remove+add as an edit', () => {
@@ -598,7 +600,8 @@ test('directions prompt is re-grounded on coverage (overview + past chats)', () 
 
 test('STATUS_UPDATE and metadata prompts drop concepts', () => {
     assert.ok(!promptsPy.includes('concepts_traversed'), 'no concepts_traversed in prompts');
-    assert.ok(promptsPy.includes('"overview": ["point 1", "point 2"]'), 'status returns overview only');
+    assert.ok(promptsPy.includes('"overview"') && promptsPy.includes('"type": "header"'),
+        'status returns typed overview with headers');
     const meta = promptsPy.split('CHAT_METADATA_PROMPT')[1].split('STATUS_UPDATE')[0];
     assert.ok(!meta.includes('"concepts"'), 'metadata has no concepts array');
 });

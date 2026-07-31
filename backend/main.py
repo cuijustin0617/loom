@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
-from typing import Union
+from typing import Optional, Union
 from pydantic import BaseModel
 
 from llm_router import LLMRouter
@@ -150,7 +150,7 @@ class ChatRequest(BaseModel):
     messages: list[MessageItem]
     existingTopics: list[TopicItem] = []
     existingConcepts: list[ConceptItem] = []
-    model: str | None = None
+    model: Optional[str] = None
     attachments: list[AttachmentItem] = []
     useSearch: bool = False
     allChatSummaries: list[dict] = []
@@ -168,12 +168,12 @@ class SidebarRefreshRequest(BaseModel):
     allChatSummaries: list[dict] = []
     allConcepts: list[dict] = []
     annotations: list[dict] = []
-    model: str | None = None
+    model: Optional[str] = None
 
 
 class SummarizeRequest(BaseModel):
     messages: list[MessageItem]
-    model: str | None = None
+    model: Optional[str] = None
 
 
 class EmbedRequest(BaseModel):
@@ -195,21 +195,21 @@ class StatusUpdateRequest(BaseModel):
     recentSummaries: list[str] = []
     currentMessages: list[MessageItem] = []
     annotations: list[dict] = []
-    model: str | None = None
+    model: Optional[str] = None
 
 
 class OverviewAiEditRequest(BaseModel):
     topicName: str
     overview: list = []  # items may be plain strings or {text, source} dicts
     instruction: str
-    model: str | None = None
+    model: Optional[str] = None
 
 
 class TopicRenameCheckRequest(BaseModel):
     oldName: str
     newName: str
     overview: list = []  # items may be plain strings or {text, source} dicts
-    model: str | None = None
+    model: Optional[str] = None
 
 
 class TopicDetectRequest(BaseModel):
@@ -224,7 +224,7 @@ class DirectionsRequest(BaseModel):
     allConcepts: list[dict] = []  # ignored — kept for older clients
     currentSummary: str = ""
     previouslySuggested: list[str] = []
-    model: str | None = None
+    model: Optional[str] = None
 
 
 class GoalQuestionRequest(BaseModel):
@@ -233,7 +233,7 @@ class GoalQuestionRequest(BaseModel):
     goalTitle: str
     allChatSummaries: list[dict] = []
     excludeQuestion: str = ""
-    model: str | None = None
+    model: Optional[str] = None
 
 
 class LogEvent(BaseModel):
@@ -267,7 +267,7 @@ class SyncRequest(BaseModel):
 class BaselineExtractRequest(BaseModel):
     messages: list[MessageItem]
     existingDetails: list[str] = []
-    model: str | None = None
+    model: Optional[str] = None
 
 
 class AuthRequest(BaseModel):
@@ -283,32 +283,46 @@ def _parse_condition(user_id: str) -> str:
     return "loom"
 
 
+def _overview_item_text(pt) -> str:
+    if isinstance(pt, dict):
+        return (pt.get("text") or "").strip()
+    return str(pt).strip() if pt else ""
+
+
+def _overview_item_type(pt) -> str:
+    if isinstance(pt, dict) and pt.get("type") == "header":
+        return "header"
+    return "bullet"
+
+
 def _serialize_status_to_str(status) -> str:
-    """Convert structured status (dict with overview bullets) to a string for prompts."""
+    """Convert structured status to markdown (## headers, - bullets) for prompts."""
     if isinstance(status, str):
         return status
     if not isinstance(status, dict):
         return str(status) if status else ""
     parts = []
     for pt in status.get("overview", []):
-        text = pt.get("text", "") if isinstance(pt, dict) else str(pt)
-        if text:
+        text = _overview_item_text(pt)
+        if not text:
+            continue
+        if _overview_item_type(pt) == "header":
+            parts.append(f"## {text}")
+        else:
             parts.append(f"- {text}")
     return "\n".join(parts) if parts else ""
 
 
 def _build_coverage_str(topic_status, chat_summaries) -> str:
-    """Coverage string for directions: overview bullets + past chat titles/summaries."""
+    """Coverage string for directions: overview markdown + past chat titles/summaries."""
     parts = []
-    overview = []
+    overview_md = ""
     if isinstance(topic_status, dict):
-        overview = topic_status.get("overview", []) or []
+        overview_md = _serialize_status_to_str(topic_status)
     elif isinstance(topic_status, str) and topic_status.strip():
-        overview = [topic_status]
-    for pt in overview:
-        text = pt.get("text", "") if isinstance(pt, dict) else str(pt)
-        if text:
-            parts.append(f"- Overview: {text}")
+        overview_md = topic_status.strip()
+    if overview_md:
+        parts.append(overview_md)
     for c in (chat_summaries or []):
         title = c.get("title", "") or "Untitled"
         summary = c.get("summary", "") or ""
@@ -631,10 +645,8 @@ async def update_topic_status(req: StatusUpdateRequest):
 
 @app.post("/api/topic/status/ai-edit")
 async def ai_edit_overview(req: OverviewAiEditRequest):
-    """Apply a natural-language edit instruction to the overview bullets."""
-    current_overview = "\n".join(
-        f"- {pt.get('text', '') if isinstance(pt, dict) else str(pt)}" for pt in req.overview
-    ) if req.overview else "(empty)"
+    """Apply a natural-language edit instruction to the overview (headers + bullets)."""
+    current_overview = _serialize_status_to_str({"overview": req.overview}) or "(empty)"
     system_prompt = OVERVIEW_AI_EDIT_PROMPT.format(
         topic_name=req.topicName,
         current_overview=current_overview,
