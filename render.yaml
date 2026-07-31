@@ -6,14 +6,16 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: GEMINI_API_KEY
+      - key: OPENROUTER_API_KEY
         sync: false
       - key: LLM_PROVIDER
-        value: gemini
+        value: openrouter
       - key: EMBEDDING_PROVIDER
-        value: gemini
+        value: openrouter
+      - key: OPENROUTER_APP_NAME
+        value: ChatWeave
+      - key: OPENROUTER_MAX_TOKENS
+        value: "65536"
       - key: LOOM_DATA_DIR
         value: /var/data/loom
     disk:

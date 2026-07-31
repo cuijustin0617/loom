@@ -37,7 +37,7 @@ def _fallback_response(raw: str) -> dict:
     return {**_FALLBACK, "response": text}
 
 
-DEFAULT_MODEL = "gemini-3-flash-preview"
+DEFAULT_MODEL = "google/gemini-3.5-flash"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 # OpenRouter pre-authorizes against max_tokens; Gemini defaults to 65536 which
 # can fail with 402 when credits are low. Cap output to a practical chat size.
@@ -140,7 +140,7 @@ def _build_openai_messages(messages, system_prompt, attachments=None):
 
 class LLMRouter:
     def __init__(self, provider: Optional[str] = None):
-        self.provider = provider or os.getenv("LLM_PROVIDER", "gemini")
+        self.provider = provider or os.getenv("LLM_PROVIDER", "openrouter")
 
     def _resolve_provider(self, model: str) -> str:
         if self.provider == "openrouter":

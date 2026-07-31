@@ -545,8 +545,9 @@ const Storage = {
   // ── Model Preferences ───────────────────────────────────────────────────
 
   MODEL_OPTIONS: [
+    { id: 'google/gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
     { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash' },
-    { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
+    { id: 'openai/gpt-4o-mini', label: 'GPT-4o Mini' },
   ],
 
   getModelLabel(modelId) {
@@ -555,7 +556,7 @@ const Storage = {
   },
 
   getChatModel() {
-    return localStorage.getItem('loom_chatModel') || 'gemini-3-flash-preview';
+    return localStorage.getItem('loom_chatModel') || 'google/gemini-3.5-flash';
   },
 
   setChatModel(model) {
@@ -563,7 +564,7 @@ const Storage = {
   },
 
   getSidebarModel() {
-    return localStorage.getItem('loom_sidebarModel') || 'gemini-3-flash-preview';
+    return localStorage.getItem('loom_sidebarModel') || 'google/gemini-3.5-flash';
   },
 
   setSidebarModel(model) {

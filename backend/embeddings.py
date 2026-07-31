@@ -5,7 +5,7 @@ import numpy as np
 from typing import Optional
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-OPENROUTER_EMBED_MODEL = os.getenv("OPENROUTER_EMBED_MODEL", "google/gemini-embedding-2")
+OPENROUTER_EMBED_MODEL = os.getenv("OPENROUTER_EMBED_MODEL", "openai/text-embedding-3-small")
 
 
 def _openrouter_client():
@@ -23,7 +23,7 @@ def _openrouter_client():
 
 class EmbeddingService:
     def __init__(self, provider: Optional[str] = None):
-        self.provider = provider or os.getenv("EMBEDDING_PROVIDER", "openai")
+        self.provider = provider or os.getenv("EMBEDDING_PROVIDER", "openrouter")
 
     async def embed_text(self, text: str) -> list[float]:
         if self.provider == "openai":
