@@ -3169,14 +3169,26 @@ body {
   border-top: 1px solid var(--border);
 }
 
+/* Saved goals: filled row, no left accent (suggested cards keep the type stripe) */
 .temporal-card.intention-card,
 .temporal-card.goal-card {
-  border-left-color: var(--accent-blue);
+  border-left: none;
+  border-radius: 6px;
+  background: rgba(55, 53, 47, 0.04);
+  margin: 2px 4px;
+  padding: 8px 10px;
   cursor: default;
 }
 
+.temporal-card.intention-card:hover,
+.temporal-card.goal-card:hover {
+  background: rgba(55, 53, 47, 0.07);
+  border-left: none;
+}
+
 .temporal-card.intention-explored {
-  opacity: 0.55;
+  opacity: 0.7;
+  background: transparent;
 }
 
 .intention-badge {
