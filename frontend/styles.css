@@ -3169,26 +3169,132 @@ body {
   border-top: 1px solid var(--border);
 }
 
-/* Saved goals: filled row, no left accent (suggested cards keep the type stripe) */
-.temporal-card.intention-card,
-.temporal-card.goal-card {
-  border-left: none;
-  border-radius: 6px;
+/* Saved goals: compact collapsible list (main Evolve surface is direction cards) */
+.saved-goals-fold {
+  margin: 4px 8px 2px;
+}
+
+.saved-goals-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 2px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.saved-goals-toggle:hover {
+  color: var(--text-secondary);
+}
+
+.saved-goals-chevron {
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.saved-goals-fold.is-collapsed .saved-goals-chevron {
+  transform: rotate(-90deg);
+}
+
+.saved-goals-count {
+  margin-left: auto;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: rgba(55, 53, 47, 0.06);
+  border-radius: 8px;
+  padding: 1px 6px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.saved-goals-body {
+  padding: 2px 0 4px;
+}
+
+.saved-goals-fold.is-collapsed .saved-goals-body {
+  display: none;
+}
+
+.saved-goal-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+
+.saved-goal-row:hover {
   background: rgba(55, 53, 47, 0.04);
-  margin: 2px 4px;
-  padding: 8px 10px;
-  cursor: default;
 }
 
-.temporal-card.intention-card:hover,
-.temporal-card.goal-card:hover {
-  background: rgba(55, 53, 47, 0.07);
-  border-left: none;
+.saved-goal-row-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.temporal-card.intention-explored {
-  opacity: 0.7;
-  background: transparent;
+.goal-status-tag {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 8px;
+  line-height: 1.3;
+}
+
+.goal-status-tag.tag-saved {
+  background: var(--accent-blue-light);
+  color: var(--accent-blue);
+}
+
+.goal-status-tag.tag-suggested {
+  background: rgba(55, 53, 47, 0.06);
+  color: var(--text-muted);
+}
+
+.temporal-card.suggested-goal-card .temporal-card-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.temporal-card.suggested-goal-card .temporal-card-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.saved-goal-row .goal-ask-btn {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+.saved-goal-row .intention-remove-btn {
+  margin-left: 0;
+  flex-shrink: 0;
+}
+
+.goals-list:empty {
+  display: none;
 }
 
 .intention-badge {

@@ -1031,11 +1031,11 @@ const Sidebar = {
     const d = this._normalizeDirection(dir);
     const topic = this.currentTopicId ? Storage.getTopic(this.currentTopicId) : null;
     const matchedGoal = topic ? this._findGoal(topic, d.title) : null;
-    if (matchedGoal) return document.createDocumentFragment(); // already saved — shown under Your goals
+    const isSaved = !!matchedGoal;
 
     const el = document.createElement('div');
     const typeClass = d.type === 'breadth' ? 'type-breadth' : d.type === 'depth' ? 'type-depth' : '';
-    el.className = `temporal-card direction-card suggested-goal-card${typeClass ? ' ' + typeClass : ''}`;
+    el.className = `temporal-card direction-card suggested-goal-card${typeClass ? ' ' + typeClass : ''}${isSaved ? ' is-saved' : ''}`;
     el.draggable = false;
 
     const reasonText = (d.reason || '').trim();
@@ -1044,74 +1044,119 @@ const Sidebar = {
 
     const typeWord = d.type === 'breadth' ? 'broader' : d.type === 'depth' ? 'deeper' : '';
     const suggestedAt = d.suggestedAt || Utils.timestamp();
-    const provenanceParts = [`Suggested ${this._formatGoalDate(suggestedAt)}`];
+    const provenanceParts = [this._formatGoalDate(suggestedAt)].filter(Boolean);
     if (typeWord) provenanceParts.push(typeWord);
     if (d.editedByUser) provenanceParts.push('edited by you');
     const provenance = provenanceParts.join(' · ');
 
+    const tagHtml = isSaved
+      ? `<span class="goal-status-tag tag-saved">Saved</span>`
+      : `<span class="goal-status-tag tag-suggested">Suggested</span>`;
+
     el.innerHTML = `
       <div class="temporal-card-header">
+        ${tagHtml}
         <span class="temporal-card-title">${Utils.escapeHtml(d.title || '')}</span>
       </div>
-      <div class="direction-provenance">${Utils.escapeHtml(provenance)}</div>
+      ${provenance ? `<div class="direction-provenance">${Utils.escapeHtml(provenance)}</div>` : ''}
       <div class="goal-try-asking">
         <span class="goal-try-prefix">Try asking:</span>
         <span class="temporal-card-question goal-example-question">${Utils.escapeHtml(d.exampleQuestion || '')}</span>
       </div>
       <div class="temporal-card-actions">
         <button class="probe-btn card-new-chat-btn" title="Ask this">Ask this</button>
-        <button class="probe-btn direction-save-btn" title="Save goal">Save goal</button>
-        <button class="goal-icon-btn direction-modify-btn" title="Modify goal">✎</button>
-        <button class="goal-icon-btn goal-regen-btn" title="Another angle">↻</button>
-        <button class="goal-icon-btn direction-dismiss-btn" title="Dismiss">×</button>
+        ${isSaved ? '' : `<button class="probe-btn direction-save-btn" title="Save goal">Save goal</button>`}
+        ${isSaved
+          ? `<button class="goal-icon-btn intention-remove-btn" title="Remove goal">×</button>`
+          : `<button class="goal-icon-btn direction-modify-btn" title="Modify goal">✎</button>
+             <button class="goal-icon-btn goal-regen-btn" title="Another angle">↻</button>
+             <button class="goal-icon-btn direction-dismiss-btn" title="Dismiss">×</button>`}
       </div>
     `;
 
-    el.querySelector('.direction-save-btn').addEventListener('click', (e) => {
-      e.stopPropagation();
-      this._saveSuggestedGoal(d);
-    });
-    el.querySelector('.direction-modify-btn').addEventListener('click', (e) => {
-      e.stopPropagation();
-      this._startSuggestedGoalEdit(el, d);
-    });
-    el.querySelector('.direction-dismiss-btn').addEventListener('click', (e) => {
-      e.stopPropagation();
-      this._dismissSuggestedGoal(d, el);
-    });
-    el.querySelector('.card-new-chat-btn').addEventListener('click', (e) => {
-      e.stopPropagation();
-      const q = el.querySelector('.goal-example-question')?.textContent || d.exampleQuestion || '';
-      StudyLog.event('goal_question_asked', { stage: 'evolve', initiative: 'user', topicId: this.currentTopicId, directionIdx });
-      const chatId = this._startGoalInNewChat({ title: d.title, question: q });
-      // Asking a suggested goal also saves+explores it
-      this._saveSuggestedGoal(d, { silent: true });
-      this._markGoalExplored(d.title, chatId);
-    });
-    el.querySelector('.goal-regen-btn').addEventListener('click', async (e) => {
+    const saveBtn = el.querySelector('.direction-save-btn');
+    if (saveBtn) {
+      saveBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._saveSuggestedGoal(d);
+      });
+    }
+    const modifyBtn = el.querySelector('.direction-modify-btn');
+    if (modifyBtn) {
+      modifyBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._startSuggestedGoalEdit(el, d);
+      });
+    }
+    const dismissBtn = el.querySelector('.direction-dismiss-btn');
+    if (dismissBtn) {
+      dismissBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._dismissSuggestedGoal(d, el);
+      });
+    }
+    const removeBtn = el.querySelector('.intention-remove-btn');
+    if (removeBtn && matchedGoal) {
+      removeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._removeGoal(matchedGoal.id);
+      });
+    }
+    el.querySelector('.card-new-chat-btn').addEventListener('click', async (e) => {
       e.stopPropagation();
       const btn = e.currentTarget;
       btn.disabled = true;
-      const qEl = el.querySelector('.goal-example-question');
-      const currentQ = qEl ? qEl.textContent : (d.exampleQuestion || '');
       try {
-        const question = await this._fetchGoalQuestion(d.title, currentQ);
-        if (question) {
-          d.exampleQuestion = question;
-          if (qEl) qEl.textContent = question;
-          const topic = Storage.getTopic(this.currentTopicId);
-          if (topic && topic.sidebarCache) {
-            const entry = (topic.sidebarCache.newDirections || []).find(x => x.title === d.title);
-            if (entry) { entry.exampleQuestion = question; delete entry.question; }
-            Storage.saveTopic(topic);
+        let q = (el.querySelector('.goal-example-question')?.textContent || d.exampleQuestion || '').trim();
+        if (!q) {
+          q = await this._fetchGoalQuestion(d.title);
+          if (q) {
+            d.exampleQuestion = q;
+            const qEl = el.querySelector('.goal-example-question');
+            if (qEl) qEl.textContent = q;
+            this._persistGoalExampleQuestion(d.title, q);
           }
         }
-      } catch (err) {
-        console.error('Regenerate goal question failed:', err);
-        Utils.showToast('Could not regenerate question', 'error');
+        if (!q) {
+          Utils.showToast('Could not generate a question', 'error');
+          return;
+        }
+        StudyLog.event('goal_question_asked', { stage: 'evolve', initiative: 'user', topicId: this.currentTopicId, directionIdx });
+        this._startGoalInNewChat({ title: d.title, question: q });
+        // Asking a suggested goal also saves it (stays active until deleted)
+        if (!isSaved) this._saveSuggestedGoal(d, { silent: true });
+      } finally {
+        btn.disabled = false;
       }
-      btn.disabled = false;
     });
+    const regenBtn = el.querySelector('.goal-regen-btn');
+    if (regenBtn) {
+      regenBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        const qEl = el.querySelector('.goal-example-question');
+        const currentQ = qEl ? qEl.textContent : (d.exampleQuestion || '');
+        try {
+          const question = await this._fetchGoalQuestion(d.title, currentQ);
+          if (question) {
+            d.exampleQuestion = question;
+            if (qEl) qEl.textContent = question;
+            const topic = Storage.getTopic(this.currentTopicId);
+            if (topic && topic.sidebarCache) {
+              const entry = (topic.sidebarCache.newDirections || []).find(x => x.title === d.title);
+              if (entry) { entry.exampleQuestion = question; delete entry.question; }
+              Storage.saveTopic(topic);
+            }
+            this._persistGoalExampleQuestion(d.title, question);
+          }
+        } catch (err) {
+          console.error('Regenerate goal question failed:', err);
+          Utils.showToast('Could not regenerate question', 'error');
+        }
+        btn.disabled = false;
+      });
+    }
 
     return el;
   },
@@ -1122,6 +1167,15 @@ const Sidebar = {
     if (!topic || !Array.isArray(topic.goals) || !title) return null;
     const norm = (title || '').trim().toLowerCase();
     return topic.goals.find(i => (i.title || '').trim().toLowerCase() === norm) || null;
+  },
+
+  _persistGoalExampleQuestion(title, question) {
+    if (!title || !question || !this.currentTopicId) return;
+    const topic = Storage.getTopic(this.currentTopicId);
+    const goal = this._findGoal(topic, title);
+    if (!goal) return;
+    goal.exampleQuestion = question;
+    Storage.saveTopic(topic);
   },
 
   _formatGoalDate(ts) {
@@ -1143,11 +1197,30 @@ const Sidebar = {
     const goals = (topic && Array.isArray(topic.goals)) ? topic.goals : [];
     container.innerHTML = '';
     if (goals.length === 0) return;
-    const label = document.createElement('div');
-    label.className = 'evolve-subheader intentions-label';
-    label.textContent = 'Your goals';
-    container.appendChild(label);
-    goals.forEach(goal => container.appendChild(this._createGoalCard(goal)));
+
+    const collapsed = localStorage.getItem('loom_savedGoalsCollapsed') !== 'false';
+    const wrap = document.createElement('div');
+    wrap.className = `saved-goals-fold${collapsed ? ' is-collapsed' : ''}`;
+    wrap.innerHTML = `
+      <button type="button" class="saved-goals-toggle" aria-expanded="${collapsed ? 'false' : 'true'}">
+        <svg class="saved-goals-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="10" height="10">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+        <span class="saved-goals-toggle-label">Saved goals</span>
+        <span class="saved-goals-count">${goals.length}</span>
+      </button>
+      <div class="saved-goals-body"></div>
+    `;
+    const body = wrap.querySelector('.saved-goals-body');
+    goals.forEach(goal => body.appendChild(this._createGoalCard(goal)));
+    wrap.querySelector('.saved-goals-toggle').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const nowCollapsed = !wrap.classList.contains('is-collapsed');
+      wrap.classList.toggle('is-collapsed', nowCollapsed);
+      e.currentTarget.setAttribute('aria-expanded', nowCollapsed ? 'false' : 'true');
+      localStorage.setItem('loom_savedGoalsCollapsed', nowCollapsed ? 'true' : 'false');
+    });
+    container.appendChild(wrap);
   },
 
   _renderSuggestedGoals(dirs, emptyHint = 'Keep chatting to generate future directions.') {
@@ -1155,21 +1228,45 @@ const Sidebar = {
     if (!dirContainer) return;
     const topic = this.currentTopicId ? Storage.getTopic(this.currentTopicId) : null;
     const dismissed = new Set(((topic && topic.dismissedGoals) || []).map(t => (t || '').toLowerCase()));
-    const savedTitles = new Set(((topic && topic.goals) || []).map(g => (g.title || '').toLowerCase()));
-    dirContainer.innerHTML = '';
-    const sorted = [...(dirs || [])]
+    const normalized = [...(dirs || [])]
       .map(d => this._normalizeDirection(d))
-      .filter(d => !dismissed.has((d.title || '').toLowerCase()))
-      .filter(d => !savedTitles.has((d.title || '').toLowerCase()))
-      .sort((a, b) => {
-        const order = { breadth: 0, depth: 1 };
-        return (order[a.type] ?? 2) - (order[b.type] ?? 2);
-      });
-    if (sorted.length === 0) {
+      .filter(d => !dismissed.has((d.title || '').toLowerCase()));
+    const byTitle = new Map();
+    normalized.forEach(d => {
+      const key = (d.title || '').trim().toLowerCase();
+      if (key && !byTitle.has(key)) byTitle.set(key, d);
+    });
+
+    // Prioritize saved goals as cards; enrich from matching suggestions when available.
+    const cards = [];
+    const goals = (topic && Array.isArray(topic.goals)) ? topic.goals : [];
+    goals.forEach(goal => {
+      const key = (goal.title || '').trim().toLowerCase();
+      const match = key ? byTitle.get(key) : null;
+      cards.push(this._normalizeDirection({
+        title: goal.title || '',
+        type: (match && match.type) || goal.type || null,
+        reason: (match && match.reason) || goal.reason || null,
+        anchor: match ? match.anchor : null,
+        exampleQuestion: (match && match.exampleQuestion) || goal.exampleQuestion || '',
+        suggestedAt: (match && match.suggestedAt) || goal.suggestedAt || goal.savedAt || null,
+        editedByUser: !!(goal.editedByUser || (match && match.editedByUser)),
+      }));
+    });
+
+    // Also include at most one unsaved suggestion (breadth before depth).
+    const order = { breadth: 0, depth: 1 };
+    const unsaved = normalized
+      .filter(d => !this._findGoal(topic, d.title))
+      .sort((a, b) => (order[a.type] ?? 2) - (order[b.type] ?? 2));
+    if (unsaved[0]) cards.push(unsaved[0]);
+
+    dirContainer.innerHTML = '';
+    if (cards.length === 0) {
       dirContainer.innerHTML = `<p class="temporal-empty-hint">${emptyHint}</p>`;
       return;
     }
-    sorted.forEach((dir, idx) => {
+    cards.forEach((dir, idx) => {
       const card = this._createSuggestedGoalCard(dir, idx);
       if (card && card.nodeType) dirContainer.appendChild(card);
     });
@@ -1182,56 +1279,11 @@ const Sidebar = {
 
   _createGoalCard(goal) {
     const el = document.createElement('div');
-    const explored = goal.status === 'explored';
-    el.className = `temporal-card intention-card goal-card${explored ? ' intention-explored' : ''}`;
-
-    const provenance = goal.source === 'user'
-      ? `Added by you ${this._formatGoalDate(goal.savedAt)}`.trim()
-      : `Suggested ${this._formatGoalDate(goal.suggestedAt)} · saved by you`;
-
-    if (explored) {
-      el.innerHTML = `
-        <div class="temporal-card-header">
-          <span class="temporal-card-title">${Utils.escapeHtml(goal.title || '')}</span>
-        </div>
-        <div class="intention-card-meta">
-          <span class="intention-badge">Explored</span>
-          ${goal.chatId ? '<a class="intention-view-chat" href="#">view chat</a>' : ''}
-        </div>
-      `;
-      const link = el.querySelector('.intention-view-chat');
-      if (link) {
-        link.addEventListener('click', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          try {
-            this._flushDirtyLabels();
-            App._summarizeCurrentChat();
-            App._renderChat(goal.chatId);
-            App._renderChatList();
-          } catch (err) {
-            console.warn('Failed to open goal chat:', err);
-          }
-        });
-      }
-      return el;
-    }
-
+    el.className = 'saved-goal-row';
     el.innerHTML = `
-      <div class="temporal-card-header">
-        <span class="temporal-card-title">${Utils.escapeHtml(goal.title || '')}</span>
-      </div>
-      <div class="intention-card-meta">
-        <span class="direction-provenance">${Utils.escapeHtml(provenance)}</span>
-      </div>
-      <div class="goal-inline-question" style="display:none;">
-        <div class="temporal-card-question goal-example-question"></div>
-        <button class="probe-btn goal-ask-this-btn" title="Ask this">Ask this</button>
-      </div>
-      <div class="temporal-card-actions">
-        <button class="probe-btn goal-ask-btn" title="Ask a question">Ask a question</button>
-        <button class="goal-icon-btn intention-remove-btn" title="Remove goal">×</button>
-      </div>
+      <span class="saved-goal-row-title">${Utils.escapeHtml(goal.title || '')}</span>
+      <button class="probe-btn goal-ask-btn" title="Ask a question">Ask</button>
+      <button class="goal-icon-btn intention-remove-btn" title="Remove goal">×</button>
     `;
 
     el.querySelector('.goal-ask-btn').addEventListener('click', async (e) => {
@@ -1240,27 +1292,15 @@ const Sidebar = {
       btn.disabled = true;
       try {
         const question = await this._fetchGoalQuestion(goal.title);
-        const slot = el.querySelector('.goal-inline-question');
-        const qEl = el.querySelector('.goal-example-question');
-        if (slot && qEl && question) {
-          qEl.textContent = question;
-          slot.style.display = '';
-          slot.dataset.question = question;
+        if (question) {
+          StudyLog.event('goal_question_asked', { stage: 'evolve', initiative: 'user', topicId: this.currentTopicId, goalId: goal.id });
+          this._startGoalInNewChat({ title: goal.title, question });
         }
       } catch (err) {
         console.error('Goal question failed:', err);
         Utils.showToast('Could not generate a question', 'error');
       }
       btn.disabled = false;
-    });
-    el.querySelector('.goal-ask-this-btn').addEventListener('click', (e) => {
-      e.stopPropagation();
-      const slot = el.querySelector('.goal-inline-question');
-      const question = (slot && slot.dataset.question) || '';
-      if (!question) return;
-      StudyLog.event('goal_question_asked', { stage: 'evolve', initiative: 'user', topicId: this.currentTopicId, goalId: goal.id });
-      const chatId = this._startGoalInNewChat({ title: goal.title, question });
-      this._markGoalExplored(goal.title, chatId);
     });
     el.querySelector('.intention-remove-btn').addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1302,6 +1342,7 @@ const Sidebar = {
       title: dir.title || '',
       type: dir.type || null,
       reason: dir.reason || null,
+      exampleQuestion: dir.exampleQuestion || '',
       source: 'system',
       status: 'saved',
       suggestedAt: dir.suggestedAt || now,
@@ -1318,29 +1359,20 @@ const Sidebar = {
   _dismissSuggestedGoal(dir, el) {
     const topic = this.currentTopicId ? Storage.getTopic(this.currentTopicId) : null;
     if (!topic) return;
-    el.remove();
     if (!Array.isArray(topic.dismissedGoals)) topic.dismissedGoals = [];
     if (!topic.dismissedGoals.includes(dir.title)) {
       topic.dismissedGoals.push(dir.title);
     }
     Storage.saveTopic(topic);
     StudyLog.event('goal_dismissed', { stage: 'evolve', initiative: 'user', topicId: topic.id, title: dir.title });
+    // Re-render so another unsaved suggestion can fill the single suggestion slot.
+    this._renderEvolveSection(topic);
   },
 
   _markGoalExplored(title, chatId) {
-    const topic = this.currentTopicId ? Storage.getTopic(this.currentTopicId) : null;
-    if (!topic) return;
-    const goal = this._findGoal(topic, title);
-    if (!goal || goal.status === 'explored') return;
-    goal.status = 'explored';
-    goal.exploredAt = Utils.timestamp();
-    goal.chatId = chatId || null;
-    Storage.saveTopic(topic);
-    this._renderEvolveSection(topic);
-    StudyLog.event('goal_explored', {
-      stage: 'evolve', initiative: 'mixed', topicId: topic.id,
-      source: goal.source, title: goal.title,
-    });
+    // Goals stay active until the user deletes them — asking no longer retires a goal.
+    // Kept as a no-op stub so older call sites / logs remain harmless.
+    return;
   },
 
   _removeGoal(goalId) {

@@ -2394,9 +2394,9 @@ const App = {
       .slice(0, 3);
 
     const cards = [];
-    // Saved-but-unexplored goals come first
+    // Saved goals come first on the welcome screen
     for (const topic of topics) {
-      const goals = (topic.goals || []).filter(i => i.status === 'saved');
+      const goals = topic.goals || [];
       for (const g of goals) {
         cards.push({
           topicId: topic.id,
@@ -2456,25 +2456,13 @@ const App = {
         if (s) {
           StudyLog.event('future_suggestion_clicked', { topicId: s.topicId, suggestionIdx: idx });
           this._startSuggestedChat(s);
-          if (s.isGoal && s.goalId) this._markWelcomeGoalExplored(s);
         }
       });
     });
   },
 
-  _markWelcomeGoalExplored(suggestion) {
-    const topic = Storage.getTopic(suggestion.topicId);
-    if (!topic) return;
-    const goal = (topic.goals || []).find(i => i.id === suggestion.goalId);
-    if (!goal || goal.status === 'explored') return;
-    goal.status = 'explored';
-    goal.exploredAt = Utils.timestamp();
-    goal.chatId = this.currentChatId || null;
-    Storage.saveTopic(topic);
-    StudyLog.event('goal_explored', {
-      stage: 'evolve', initiative: 'mixed', topicId: suggestion.topicId,
-      source: goal.source, title: goal.title,
-    });
+  _markWelcomeGoalExplored(_suggestion) {
+    // Goals stay active until deleted — no-op.
   },
 
   async _startSuggestedChat(suggestion) {

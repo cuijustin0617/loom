@@ -376,9 +376,9 @@ test('goal_dismissed event logged', () => {
         'Should log goal_dismissed');
 });
 
-test('goal_explored event logged', () => {
-    assert.ok(sidebarContent.includes("'goal_explored'"),
-        'Should log goal_explored');
+test('goal_explored is no longer logged (goals stay until deleted)', () => {
+    assert.ok(!sidebarContent.includes("'goal_explored'"),
+        'Asking a goal should not log goal_explored');
 });
 
 test('goal_modified event logged', () => {
@@ -496,7 +496,7 @@ test('no duplicate event names with different meanings', () => {
         'current_profile_edited',
         'proposal_shown', 'proposal_accepted', 'proposal_edited', 'proposal_dismissed',
         'proposal_empty', 'proposal_superseded',
-        'goal_saved', 'goal_dismissed', 'goal_explored',
+        'goal_saved', 'goal_dismissed',
         'goal_modified', 'goal_authored', 'goal_removed',
         'future_directions_refreshed',
         'goal_question_asked',
@@ -535,7 +535,7 @@ const ALL_EXPECTED_EVENTS = [
     'proposal_empty', 'proposal_superseded',
     'section_collapsed',
     // Future directions / goals
-    'goal_saved', 'goal_dismissed', 'goal_explored',
+    'goal_saved', 'goal_dismissed',
     'goal_modified', 'goal_authored', 'goal_removed',
     'goal_question_asked', 'future_directions_refreshed',
     // UI
@@ -674,12 +674,6 @@ test('context_tag_clicked does not log label', () => {
 
 test('goal_question_asked uses stage evolve', () => {
     const ctx = getEventContext(sidebarContent, 'goal_question_asked');
-    assert.ok(ctx.includes("stage: 'evolve'") || ctx.includes('evolve'),
-        'Should include stage evolve');
-});
-
-test('goal_explored uses stage evolve', () => {
-    const ctx = getEventContext(sidebarContent, 'goal_explored');
     assert.ok(ctx.includes("stage: 'evolve'") || ctx.includes('evolve'),
         'Should include stage evolve');
 });

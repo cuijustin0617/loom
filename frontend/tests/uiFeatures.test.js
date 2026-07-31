@@ -84,14 +84,13 @@ test('HTML has section-future with directionCards', () => {
         'index.html should have sectionFuture');
     assert.ok(htmlContent.includes('id="directionCards"'),
         'index.html should have directionCards');
-    assert.ok(htmlContent.includes('evolve-subheader') && htmlContent.includes('Suggested'),
-        'index.html should have Suggested subheader above direction cards');
+    assert.ok(!htmlContent.includes('evolve-subheader-suggested'),
+        'index.html should not hardcode a Suggested subheader (tags live on cards)');
     const goalsIdx = htmlContent.indexOf('id="goalsList"');
     const addIdx = htmlContent.indexOf('addGoalInput');
-    const suggestedIdx = htmlContent.indexOf('evolve-subheader-suggested');
     const dirsIdx = htmlContent.indexOf('id="directionCards"');
-    assert.ok(goalsIdx < addIdx && addIdx < suggestedIdx && suggestedIdx < dirsIdx,
-        'Evolve order: goalsList → add-goal → Suggested → directionCards');
+    assert.ok(goalsIdx < addIdx && addIdx < dirsIdx,
+        'Evolve order: goalsList → add-goal → directionCards');
 });
 
 test('HTML has temporal breadcrumb with Construct/Apply/Evolve crumbs', () => {
@@ -344,6 +343,17 @@ test('suggested goal cards are not draggable', () => {
         'Suggested goal cards exist');
     assert.ok(sidebarContent.includes('el.draggable = false'),
         'Suggested goal cards should not be draggable');
+});
+
+test('evolve cards tag saved vs suggested; saved goals fold compactly', () => {
+    assert.ok(sidebarContent.includes('goal-status-tag') && sidebarContent.includes('tag-saved'),
+        'Cards should show a Saved tag when already saved');
+    assert.ok(sidebarContent.includes('tag-suggested'),
+        'Cards should show a Suggested tag when not saved');
+    assert.ok(sidebarContent.includes('saved-goals-fold') && sidebarContent.includes('loom_savedGoalsCollapsed'),
+        'Saved goals should live in a collapsible fold');
+    assert.ok(sidebarContent.includes('saved-goal-row'),
+        'Saved goals fold should use compact rows');
 });
 
 test('app.js has drag-over drop handler', () => {
@@ -1678,9 +1688,11 @@ test('CSS has .type-breadth/.type-depth (no badge pills)', () => {
         'CSS should style depth directions');
 });
 
-test('sidebar.js sorts directions so breadth appears first', () => {
-    assert.ok(sidebarContent.includes("breadth: 0") || sidebarContent.includes('a.type === b.type') || sidebarContent.includes("order[a.type]"),
-        'sidebar.js should sort breadth before depth');
+test('sidebar.js prioritizes saved goal cards and includes one suggestion', () => {
+    assert.ok(sidebarContent.includes('at most one unsaved') || sidebarContent.includes('unsaved[0]'),
+        'Evolve cards should include at most one unsaved suggestion');
+    assert.ok(sidebarContent.includes("breadth: 0") || sidebarContent.includes("order[a.type]"),
+        'Unsaved suggestion slot should prefer breadth before depth');
 });
 
 test('backend main.py serializes status for directions prompt', () => {

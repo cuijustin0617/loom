@@ -477,12 +477,14 @@ test('proposal edit commits user-modified content with source user', () => {
 console.log('\n─── Phase 5: intentions ───');
 
 test('all intention lifecycle events logged with stage evolve', () => {
-    ['goal_saved', 'goal_explored', 'goal_dismissed',
+    ['goal_saved', 'goal_dismissed',
      'goal_modified', 'goal_authored', 'goal_removed'].forEach(evt => {
         const idx = sidebarSrc.indexOf(`'${evt}'`);
         assert.ok(idx > -1, `${evt} logged in sidebar.js`);
         assert.ok(sidebarSrc.slice(idx, idx + 200).includes("'evolve'"), `${evt} tagged stage evolve`);
     });
+    assert.ok(!sidebarSrc.includes("'goal_explored'"),
+        'goal_explored retired — goals stay until deleted');
 });
 
 test('old probe accept/ignore buttons are gone', () => {
@@ -499,7 +501,7 @@ test('dismissed goals are merged into previouslySuggested on shuffle', () => {
 test('add-goal input exists and welcome cards surface saved goals', () => {
     assert.ok(indexHtml.includes('addGoal') || sidebarSrc.includes('_initAddGoal'),
         'add goal input wired');
-    assert.ok(appContent.includes('goals') && appContent.includes("'goal_explored'"),
+    assert.ok(appContent.includes('goals') && appContent.includes('isGoal'),
         'app.js suggestion cards handle goals');
 });
 
