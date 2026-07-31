@@ -143,7 +143,9 @@ class LLMRouter:
         self.provider = provider or os.getenv("LLM_PROVIDER", "openrouter")
 
     def _resolve_provider(self, model: str) -> str:
-        if self.provider == "openrouter":
+        # OpenRouter-style slugs (provider/model) always go through OpenRouter —
+        # never the native Gemini SDK — so google/gemini-* uses OR credits/routing.
+        if "/" in (model or "") or self.provider == "openrouter":
             return "openrouter"
         if model.startswith("gpt-"):
             return "openai"

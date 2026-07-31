@@ -556,15 +556,25 @@ const Storage = {
   },
 
   getChatModel() {
-    return localStorage.getItem('loom_chatModel') || 'google/gemini-3.5-flash';
+    const raw = localStorage.getItem('loom_chatModel') || 'google/gemini-3.5-flash';
+    return this._normalizeModelId(raw);
   },
 
   setChatModel(model) {
-    localStorage.setItem('loom_chatModel', model);
+    localStorage.setItem('loom_chatModel', this._normalizeModelId(model));
   },
 
   getSidebarModel() {
-    return localStorage.getItem('loom_sidebarModel') || 'google/gemini-3.5-flash';
+    const raw = localStorage.getItem('loom_sidebarModel') || 'google/gemini-3.5-flash';
+    return this._normalizeModelId(raw);
+  },
+
+  /** Map bare gemini-* ids to OpenRouter slugs so we never hit the native Gemini SDK by accident. */
+  _normalizeModelId(model) {
+    const id = (model || '').trim();
+    if (!id) return 'google/gemini-3.5-flash';
+    if (id.startsWith('gemini-')) return `google/${id}`;
+    return id;
   },
 
   setSidebarModel(model) {
