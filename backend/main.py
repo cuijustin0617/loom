@@ -484,7 +484,8 @@ async def chat_stream_endpoint(req: ChatRequest):
             prompt_mode = "MEMORY prompt (with connections)"
             system_prompt = CHAT_STREAM_MEMORY_PROMPT.format(
                 past_chats_json=json.dumps(past_chats_for_prompt, indent=2),
-            ) + profile_block
+                profile_block=profile_block,
+            )
         else:
             prompt_mode = "SYSTEM prompt"
             system_prompt = CHAT_STREAM_SYSTEM_PROMPT + profile_block

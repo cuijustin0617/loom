@@ -1819,7 +1819,7 @@ const App = {
         this._hideConnCard();
         Utils.showToast("Won't be used in this topic");
         StudyLog.event('connection_contested', {
-          stage: 'apply', initiative: 'mixed',
+          initiative: 'mixed', surface: 'chat',
           topicId: topic ? topic.id : null, chatId,
         });
       });
@@ -1950,7 +1950,7 @@ const App = {
 
   // ── Injected Past Context Panel ────────────────────────────────────────
 
-  _renderInjectedPastPanel(assistantEl, injectedPastChats) {
+  _renderInjectedPastPanel(assistantEl, injectedPastChats, opts = {}) {
     if (!injectedPastChats || injectedPastChats.length === 0) return;
     const existing = assistantEl.querySelector('.past-context-panel');
     if (existing) existing.remove();
@@ -2016,11 +2016,13 @@ const App = {
     });
 
     assistantEl.insertBefore(panel, assistantEl.firstChild);
-    StudyLog.event('context_card_shown', {
-      topicId: topic ? topic.id : null,
-      count: injectedPastChats.length,
-      surface: 'chat',
-    });
+    if (!opts.replay) {
+      StudyLog.event('context_card_shown', {
+        topicId: topic ? topic.id : null,
+        count: injectedPastChats.length,
+        surface: 'chat',
+      });
+    }
   },
 
   _isUnassignedTopic(topicId) {
@@ -2782,7 +2784,7 @@ const App = {
 
     // Render injected past context panel if present
     if (msg.role === 'assistant' && msg.injectedPastChats && msg.injectedPastChats.length > 0) {
-      this._renderInjectedPastPanel(el, msg.injectedPastChats);
+      this._renderInjectedPastPanel(el, msg.injectedPastChats, { replay: true });
     }
 
     if (msg.role === 'assistant' && msg.id && Array.isArray(msg.annotations) && msg.annotations.length > 0) {

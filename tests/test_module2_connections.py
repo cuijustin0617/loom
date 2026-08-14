@@ -284,7 +284,7 @@ class TestRicherMemoryPrompt:
                 "aiCovered": "Explained learning rate and parameter updates",
             }
         ], indent=2)
-        formatted = CHAT_STREAM_MEMORY_PROMPT.format(past_chats_json=past_chats, stance_context="")
+        formatted = CHAT_STREAM_MEMORY_PROMPT.format(past_chats_json=past_chats, stance_context="", profile_block="")
         assert "gradient descent" in formatted
         assert "learning rate" in formatted
         assert "{past_chats_json}" not in formatted
@@ -294,7 +294,7 @@ class TestRicherMemoryPrompt:
         past_chats = json.dumps([
             {"chatId": "c1", "title": "Chat", "userAsked": "", "aiCovered": ""}
         ], indent=2)
-        formatted = CHAT_STREAM_MEMORY_PROMPT.format(past_chats_json=past_chats, stance_context="")
+        formatted = CHAT_STREAM_MEMORY_PROMPT.format(past_chats_json=past_chats, stance_context="", profile_block="")
         assert "{past_chats_json}" not in formatted
         assert "{stance_context}" not in formatted
 
@@ -1436,7 +1436,7 @@ class TestAllPromptsStructural:
 
     def test_memory_prompt_is_valid_format_string(self):
         from prompts import CHAT_STREAM_MEMORY_PROMPT
-        formatted = CHAT_STREAM_MEMORY_PROMPT.format(past_chats_json="[]", stance_context="")
+        formatted = CHAT_STREAM_MEMORY_PROMPT.format(past_chats_json="[]", stance_context="", profile_block="")
         assert isinstance(formatted, str)
         assert len(formatted) > 50
 

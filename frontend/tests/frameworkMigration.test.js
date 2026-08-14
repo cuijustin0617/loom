@@ -171,9 +171,29 @@ test('_migrateTopic seeds statusSummary.goals from legacy topic.goals', () => {
     assert.strictEqual(t.statusSummary.goals.length, 1);
     assert.strictEqual(t.statusSummary.goals[0].id, 'goal_abc');
     assert.strictEqual(t.statusSummary.goals[0].text, 'Compare X and Y');
-    assert.strictEqual(t.statusSummary.goals[0].source, 'user');
+    assert.strictEqual(t.statusSummary.goals[0].source, 'inferred');
     Storage._migrateTopic(t);
     assert.strictEqual(t.statusSummary.goals.length, 1, 'idempotent');
+});
+
+test('_migrateTopic retags Evolve-saved user goals as inferred', () => {
+    const { Storage } = makeEnv();
+    const t = {
+        id: 't1',
+        statusSummary: {
+            overview: [],
+            goals: [
+                { id: 'g1', text: 'Explore generative AI system design', source: 'user', suggestionTitle: 'Explore generative AI system design' },
+                { id: 'g2', text: 'I want to pass MLSD interviews', source: 'user' },
+                { id: 'g3', text: 'Machine Learning System Design', source: 'user' },
+            ],
+        },
+        goals: [{ id: 'g3', title: 'Machine Learning System Design' }],
+    };
+    Storage._migrateTopic(t);
+    assert.strictEqual(t.statusSummary.goals[0].source, 'inferred', 'unedited suggestion');
+    assert.strictEqual(t.statusSummary.goals[1].source, 'user', 'typed goal kept');
+    assert.strictEqual(t.statusSummary.goals[2].source, 'inferred', 'legacy Evolve title');
 });
 
 test('createTopic includes all new schema fields', () => {
@@ -540,6 +560,26 @@ test('add-goal input exists and welcome cards surface saved goals', () => {
         'app.js suggestion cards handle goals');
 });
 
+test('saving an unedited Evolve suggestion is inferred, not user-authored', () => {
+    const start = sidebarSrc.indexOf('_saveSuggestedGoal(dir, opts');
+    const block = sidebarSrc.slice(start, start + 800);
+    assert.ok(block.includes("dir.editedByUser ? 'user' : 'inferred'"),
+        'unedited suggestion is inferred; edited text is user');
+});
+
+test('Ask this on a suggested goal does not save it as a Construct goal', () => {
+    const start = sidebarSrc.indexOf("el.querySelector('.card-new-chat-btn')");
+    const block = sidebarSrc.slice(start, sidebarSrc.indexOf('const regenBtn', start));
+    assert.ok(block.includes('_startGoalInNewChat'), 'Ask this starts a chat');
+    assert.ok(!block.includes('_saveSuggestedGoal'), 'asking does not adopt the goal');
+});
+
+test('add-goal input does not silently truncate to 8 words', () => {
+    const start = sidebarSrc.indexOf('_initAddGoal(');
+    const block = sidebarSrc.slice(start, sidebarSrc.indexOf('_startGoalInNewChat(', start));
+    assert.ok(!block.includes('slice(0, 8)'), 'typed goal text is kept in full');
+});
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Phase 6 — Scrutability
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -580,6 +620,13 @@ test('contested marker strike-through is re-applied on reload', () => {
     assert.ok(appContent.includes('msg.connContested') &&
         appContent.includes("classList.add('conn-marker-contested')"),
         '_appendMessage re-applies conn-marker-contested from stored message');
+});
+
+test('context_card_shown logs only on the live stream path, not history replay', () => {
+    assert.ok(appContent.includes("{ replay: true }"), 'history re-render marks replay');
+    const fnStart = appContent.indexOf('_renderInjectedPastPanel(assistantEl, injectedPastChats');
+    const fnBlock = appContent.slice(fnStart, appContent.indexOf('_isUnassignedTopic', fnStart));
+    assert.ok(fnBlock.includes('if (!opts.replay)'), 'replay path skips context_card_shown');
 });
 
 test('sendMessage filters excluded chats from injected context', () => {
@@ -646,6 +693,18 @@ test('directions prompt is re-grounded on coverage (overview + past chats)', () 
     assert.ok(!promptsPy.includes('flagged interest'), 'stance grounding gone');
 });
 
+test('memory prompt places the D7 profile block before the respond cue', () => {
+    const mem = promptsPy.slice(
+        promptsPy.indexOf('CHAT_STREAM_MEMORY_PROMPT'),
+        promptsPy.indexOf('CHAT_METADATA_PROMPT')
+    );
+    assert.ok(mem.includes('{profile_block}'), 'profile placeholder in memory prompt');
+    assert.ok(mem.indexOf('{profile_block}') < mem.indexOf("Now respond to the user's message."),
+        'profile comes before Now respond');
+    assert.ok(mainPy.includes('profile_block=profile_block'),
+        'memory path formats profile into the prompt, not appended after');
+});
+
 test('STATUS_UPDATE and metadata prompts drop concepts', () => {
     assert.ok(!promptsPy.includes('concepts_traversed'), 'no concepts_traversed in prompts');
     assert.ok(promptsPy.includes('"overview"') && promptsPy.includes('"type": "header"'),
@@ -671,7 +730,7 @@ test('kept construct/apply/evolve events carry stage tags', () => {
     const src = appContent + sidebarSrc;
     [['current_profile_edited', 'construct'],
      ['context_excluded_for_topic', 'user'],
-     ['connection_contested', 'apply'],
+     ['connection_contested', 'chat'],
      ['goal_question_asked', 'evolve'],
      ['future_directions_refreshed', 'evolve']].forEach(([evt, stage]) => {
         const idx = src.indexOf(`'${evt}'`);

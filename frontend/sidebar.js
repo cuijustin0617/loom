@@ -1312,8 +1312,6 @@ const Sidebar = {
           suggestionId: d.title || null,
         });
         this._startGoalInNewChat({ title: d.title, question: q });
-        // Asking a suggested goal also saves it (stays active until deleted)
-        if (!isSaved) this._saveSuggestedGoal(d, { silent: true });
       } finally {
         btn.disabled = false;
       }
@@ -1506,7 +1504,7 @@ const Sidebar = {
     topic.statusSummary.goals.push({
       id: 'goal_' + Utils.generateId(),
       text: dir.title || '',
-      source: 'user',
+      source: dir.editedByUser ? 'user' : 'inferred',
       suggestionTitle: dir.title || '',
       suggestionType: dir.type || null,
     });
@@ -1626,10 +1624,9 @@ const Sidebar = {
       const topic = Storage.getTopic(this.currentTopicId);
       if (!topic) return;
       this._ensureStatusShape(topic);
-      const words = text.split(/\s+/);
       topic.statusSummary.goals.push({
         id: 'goal_' + Utils.generateId(),
-        text: words.slice(0, 8).join(' '),
+        text,
         source: 'user',
       });
       Storage.saveTopic(topic);

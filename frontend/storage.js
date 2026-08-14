@@ -159,12 +159,32 @@ const Storage = {
         s.goals = legacy.map(g => {
           if (!g || typeof g !== 'object') {
             const text = String(g || '').trim();
-            return text ? { id: 'goal_' + Utils.generateId(), text, source: 'user' } : null;
+            return text ? { id: 'goal_' + Utils.generateId(), text, source: 'inferred' } : null;
           }
           const text = (g.text || g.title || '').trim();
           if (!text) return null;
-          return { id: g.id || ('goal_' + Utils.generateId()), text, source: 'user' };
+          return { id: g.id || ('goal_' + Utils.generateId()), text, source: 'inferred' };
         }).filter(Boolean);
+      } else {
+        // Earlier builds tagged Evolve-saved / migrated goals as "user".
+        // "you wrote this" is only for text the user typed or edited.
+        const legacyTitles = new Set(
+          (Array.isArray(topic.goals) ? topic.goals : []).map(g => {
+            if (g == null) return '';
+            if (typeof g === 'string') return g.trim().toLowerCase();
+            return String(g.text || g.title || '').trim().toLowerCase();
+          }).filter(Boolean)
+        );
+        s.goals = s.goals.map(g => {
+          if (!g || typeof g !== 'object' || g.source !== 'user') return g;
+          const text = String(g.text || g.title || '').trim().toLowerCase();
+          if (!text) return g;
+          const sug = String(g.suggestionTitle || '').trim().toLowerCase();
+          if ((sug && sug === text) || legacyTitles.has(text)) {
+            return { ...g, source: 'inferred' };
+          }
+          return g;
+        });
       }
     }
     if (topic.statusHistory.length > 10) {

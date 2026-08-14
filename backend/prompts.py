@@ -78,7 +78,7 @@ A sharp chef's knife and proper cutting technique{{~1}} will save you the most t
 
 User's relevant past conversations:
 {past_chats_json}
-
+{profile_block}
 Now respond to the user's message."""
 
 # ── Metadata Extraction ───────────────────────────────────────────────────────
@@ -172,8 +172,8 @@ Rules (apply to both overview and goals):
 - Preserve any steering notes the user wrote about themselves (e.g. "skip
   basics of X", "avoid Z") — treat them as authoritative.
 - Seed candidates: saved/confirmed goals already in the current profile MUST
-  be preserved unless directly contradicted. They are user-authored — treat
-  them as authoritative, like steering notes.
+  be preserved unless directly contradicted. Treat them as authoritative,
+  like steering notes.
 
 Return JSON:
 {{
