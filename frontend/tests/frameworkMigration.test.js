@@ -115,6 +115,7 @@ test('_migrateTopic fills all new fields on a legacy topic', () => {
     assert.deepStrictEqual(plain(t.statusHistory), []);
     assert.strictEqual(t.pendingProposal, null);
     assert.deepStrictEqual(plain(t.goals), []);
+    assert.deepStrictEqual(plain(t.statusSummary.goals), []);
     assert.deepStrictEqual(plain(t.excludedChatIds), []);
     assert.deepStrictEqual(plain(t.dismissedGoals), []);
     assert.ok(!('intentions' in t), 'legacy intentions removed');
@@ -155,7 +156,24 @@ test('_getAll migrates legacy topics read from localStorage', () => {
     const topic = Storage.getTopic('t1');
     assert.deepStrictEqual(plain(topic.statusSummary.overview[0]), { text: 'legacy bullet', source: 'inferred' });
     assert.deepStrictEqual(plain(topic.goals), []);
+    assert.deepStrictEqual(plain(topic.statusSummary.goals), []);
     assert.strictEqual(topic.pendingProposal, null);
+});
+
+test('_migrateTopic seeds statusSummary.goals from legacy topic.goals', () => {
+    const { Storage } = makeEnv();
+    const t = {
+        id: 't1',
+        statusSummary: { overview: [{ text: 'knows Python', source: 'inferred' }] },
+        goals: [{ id: 'goal_abc', title: 'Compare X and Y' }],
+    };
+    Storage._migrateTopic(t);
+    assert.strictEqual(t.statusSummary.goals.length, 1);
+    assert.strictEqual(t.statusSummary.goals[0].id, 'goal_abc');
+    assert.strictEqual(t.statusSummary.goals[0].text, 'Compare X and Y');
+    assert.strictEqual(t.statusSummary.goals[0].source, 'user');
+    Storage._migrateTopic(t);
+    assert.strictEqual(t.statusSummary.goals.length, 1, 'idempotent');
 });
 
 test('createTopic includes all new schema fields', () => {
@@ -164,6 +182,7 @@ test('createTopic includes all new schema fields', () => {
     assert.deepStrictEqual(plain(t.statusHistory), []);
     assert.strictEqual(t.pendingProposal, null);
     assert.deepStrictEqual(plain(t.goals), []);
+    assert.deepStrictEqual(plain(t.statusSummary), { overview: [], goals: [] });
     assert.deepStrictEqual(plain(t.excludedChatIds), []);
     assert.deepStrictEqual(plain(t.dismissedGoals), []);
 });
@@ -243,30 +262,30 @@ test('backend _serialize_status_to_str accepts dict overview items', () => {
 
 console.log('\n─── Phase 2: Construct / Apply / Evolve sections ───');
 
-test('sections ordered Construct (sectionCurrent) → Apply (sectionPast) → Evolve (sectionFuture)', () => {
+test('sections ordered Construct (sectionCurrent) → Evolve (sectionFuture)', () => {
     const iConstruct = indexHtml.indexOf('id="sectionCurrent"');
-    const iApply = indexHtml.indexOf('id="sectionPast"');
     const iEvolve = indexHtml.indexOf('id="sectionFuture"');
-    assert.ok(iConstruct > -1 && iApply > -1 && iEvolve > -1, 'all three section ids exist');
-    assert.ok(iConstruct < iApply && iApply < iEvolve, 'DOM order is Construct, Apply, Evolve');
+    assert.ok(iConstruct > -1 && iEvolve > -1, 'Construct and Evolve section ids exist');
+    assert.ok(iConstruct < iEvolve, 'DOM order is Construct, Evolve');
+    assert.ok(!indexHtml.includes('id="sectionPast"'), 'Apply sectionPast removed');
 });
 
-test('section titles renamed to Construct / Apply / Evolve', () => {
+test('section titles renamed to Construct / Evolve', () => {
     assert.ok(indexHtml.includes('Construct'), 'Construct title');
-    assert.ok(indexHtml.includes('Apply'), 'Apply title');
     assert.ok(indexHtml.includes('Evolve'), 'Evolve title');
+    assert.ok(!indexHtml.includes('data-phase="apply"'), 'Apply crumb removed');
 });
 
-test('breadcrumb uses data-phase construct|apply|evolve', () => {
+test('breadcrumb uses data-phase construct|evolve', () => {
     assert.ok(indexHtml.includes('data-phase="construct"'));
-    assert.ok(indexHtml.includes('data-phase="apply"'));
     assert.ok(indexHtml.includes('data-phase="evolve"'));
+    assert.ok(!indexHtml.includes('data-phase="apply"'), 'apply crumb gone');
     assert.ok(!indexHtml.includes('data-phase="past"'), 'old data-phase="past" removed');
     assert.ok(!indexHtml.includes('data-phase="future"'), 'old data-phase="future" removed');
 });
 
 test('dot classes exist in styles.css and are used in index.html', () => {
-    ['dot-construct', 'dot-apply', 'dot-evolve'].forEach(cls => {
+    ['dot-construct', 'dot-evolve'].forEach(cls => {
         assert.ok(stylesCss.includes('.' + cls), `.${cls} defined in css`);
         assert.ok(indexHtml.includes(cls), `${cls} used in html`);
     });
@@ -330,7 +349,7 @@ test('_diffStatus detects overview additions', () => {
         { overview: [{ text: 'a' }] },
         { overview: [{ text: 'a' }, { text: 'b' }] }
     );
-    assert.deepStrictEqual(plain(changes), [{ kind: 'overview_add', itemType: 'bullet', text: 'b' }]);
+    assert.deepStrictEqual(plain(changes), [{ kind: 'overview_add', field: 'overview', itemType: 'bullet', text: 'b' }]);
 });
 
 test('_diffStatus detects overview removals', () => {
@@ -339,7 +358,7 @@ test('_diffStatus detects overview removals', () => {
         { overview: [{ text: 'stays here fine' }, { text: 'goes away entirely' }] },
         { overview: [{ text: 'stays here fine' }] }
     );
-    assert.deepStrictEqual(plain(changes), [{ kind: 'overview_remove', itemType: 'bullet', text: 'goes away entirely', oldText: 'goes away entirely' }]);
+    assert.deepStrictEqual(plain(changes), [{ kind: 'overview_remove', field: 'overview', itemType: 'bullet', text: 'goes away entirely', oldText: 'goes away entirely' }]);
 });
 
 test('_diffStatus pairs prefix-matched remove+add as an edit', () => {
@@ -361,6 +380,18 @@ test('_diffStatus is overview-only (ignores concepts_traversed if present)', () 
         { overview: [{ text: 'same' }], concepts_traversed: [{ title: 'Transformers' }] }
     );
     assert.strictEqual(changes.length, 0, 'concept-only diffs produce no changes');
+});
+
+test('_diffStatus diffs goals when the proposed payload includes goals', () => {
+    const { Sidebar } = makeEnv();
+    const changes = Sidebar._diffStatus(
+        { overview: [], goals: [{ id: 'g1', text: 'Keep this' }] },
+        { overview: [], goals: [{ text: 'Keep this' }, { text: 'New goal' }] }
+    );
+    assert.strictEqual(changes.length, 1);
+    assert.strictEqual(changes[0].kind, 'goal_add');
+    assert.strictEqual(changes[0].field, 'goals');
+    assert.strictEqual(changes[0].text, 'New goal');
 });
 
 test('_stageProposal with no changes logs proposal_empty and returns false', () => {
@@ -476,12 +507,16 @@ test('proposal edit commits user-modified content with source user', () => {
 
 console.log('\n─── Phase 5: intentions ───');
 
-test('all intention lifecycle events logged with stage evolve', () => {
-    ['goal_saved', 'goal_dismissed',
-     'goal_modified', 'goal_authored', 'goal_removed'].forEach(evt => {
+test('all intention lifecycle events logged with stage evolve or construct', () => {
+    ['goal_saved', 'goal_dismissed', 'goal_modified'].forEach(evt => {
         const idx = sidebarSrc.indexOf(`'${evt}'`);
         assert.ok(idx > -1, `${evt} logged in sidebar.js`);
-        assert.ok(sidebarSrc.slice(idx, idx + 200).includes("'evolve'"), `${evt} tagged stage evolve`);
+        assert.ok(sidebarSrc.slice(idx, idx + 280).includes("'evolve'"), `${evt} tagged stage evolve`);
+    });
+    ['goal_authored', 'goal_removed'].forEach(evt => {
+        const idx = sidebarSrc.indexOf(`'${evt}'`);
+        assert.ok(idx > -1, `${evt} logged in sidebar.js`);
+        assert.ok(sidebarSrc.slice(idx, idx + 280).includes("'construct'"), `${evt} tagged stage construct`);
     });
     assert.ok(!sidebarSrc.includes("'goal_explored'"),
         'goal_explored retired — goals stay until deleted');
@@ -547,11 +582,11 @@ test('contested marker strike-through is re-applied on reload', () => {
         '_appendMessage re-applies conn-marker-contested from stored message');
 });
 
-test('sendMessage filters excluded and suppressed chats from injected context', () => {
+test('sendMessage filters excluded chats from injected context', () => {
     assert.ok(appContent.includes('excludedChatIds'), 'topic excludedChatIds filter');
-    assert.ok(appContent.includes('suppressedChatIds'), 'chat suppressedChatIds filter');
-    assert.ok(appContent.includes("'context_suppressed_in_chat'") || sidebarSrc.includes("'context_suppressed_in_chat'"),
-        'context_suppressed_in_chat logged');
+    assert.ok(!appContent.includes('suppressedChatIds'), 'chat-level suppressedChatIds removed');
+    assert.ok(appContent.includes("'context_excluded_for_topic'"),
+        'context_excluded_for_topic logged');
 });
 
 test('old ✓/✗ relevance calibration removed from past chat cards', () => {
@@ -583,6 +618,17 @@ test('_serializeStatus is overview-only (no stance phrasing)', () => {
     assert.ok(out.includes('Knows Python'));
     assert.ok(!out.includes('User flagged interest'));
     assert.ok(!out.includes('A'), 'concepts not serialized');
+});
+
+test('_serializeStatus includes goals when present', () => {
+    const { Sidebar } = makeEnv();
+    const out = Sidebar._serializeStatus({
+        overview: [{ text: 'Knows Python' }],
+        goals: [{ text: 'Compare X and Y' }],
+    });
+    assert.ok(out.includes('Knows Python'));
+    assert.ok(out.includes('Goals:'));
+    assert.ok(out.includes('Compare X and Y'));
 });
 
 test('backend serialize and chat stream no longer emit stance_context', () => {
@@ -624,13 +670,13 @@ test('removed events are gone from the frontend', () => {
 test('kept construct/apply/evolve events carry stage tags', () => {
     const src = appContent + sidebarSrc;
     [['current_profile_edited', 'construct'],
-     ['context_suppressed_in_chat', 'apply'],
+     ['context_excluded_for_topic', 'user'],
      ['connection_contested', 'apply'],
      ['goal_question_asked', 'evolve'],
      ['future_directions_refreshed', 'evolve']].forEach(([evt, stage]) => {
         const idx = src.indexOf(`'${evt}'`);
         assert.ok(idx > -1, `${evt} exists`);
-        assert.ok(src.slice(idx, idx + 220).includes(`'${stage}'`), `${evt} tagged stage ${stage}`);
+        assert.ok(src.slice(idx, idx + 280).includes(`'${stage}'`), `${evt} tagged ${stage}`);
     });
 });
 
@@ -648,7 +694,7 @@ test('admin dashboard groups events by Construct/Apply/Evolve/Scrutability', () 
 test('admin category lists contain the new event names', () => {
     ['proposal_shown', 'proposal_accepted', 'proposal_dismissed'].forEach(e =>
         assert.ok(mainPy.includes(`'${e}'`), `${e} in admin lists`));
-    ['connection_contested', 'context_suppressed_in_chat'].forEach(e =>
+    ['context_card_shown', 'context_excluded_for_topic', 'context_link_opened'].forEach(e =>
         assert.ok(mainPy.includes(`'${e}'`), `${e} in admin lists`));
     ['goal_saved', 'goal_explored', 'goal_authored'].forEach(e =>
         assert.ok(mainPy.includes(`'${e}'`), `${e} in admin lists`));

@@ -19,7 +19,7 @@ const Sidebar = {
 
   _activateListTab() {
     if (this.currentTopicId) {
-      ['sectionPast', 'sectionCurrent', 'sectionFuture'].forEach(id => {
+      ['sectionCurrent', 'sectionFuture'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.style.display = 'block';
       });
@@ -31,7 +31,6 @@ const Sidebar = {
   show(topicId) {
     if (STUDY_CONDITION === 'baseline') return;
     this.currentTopicId = topicId;
-    StudyLog.event('past_lookup', { topicId });
     document.getElementById('sidebarEmpty').style.display = 'none';
 
     const topic = Storage.getTopic(topicId);
@@ -44,8 +43,8 @@ const Sidebar = {
       badge.style.background = tc.light;
       badge.style.color = tc.color;
 
-      document.getElementById('pastTopicName').textContent = topic.name;
-      document.getElementById('currentTopicName').textContent = topic.name;
+      const currentName = document.getElementById('currentTopicName');
+      if (currentName) currentName.textContent = topic.name;
 
       this._activateListTab();
 
@@ -68,7 +67,6 @@ const Sidebar = {
 
   hide() {
     this.currentTopicId = null;
-    document.getElementById('sectionPast').style.display = 'none';
     document.getElementById('sectionCurrent').style.display = 'none';
     document.getElementById('sectionFuture').style.display = 'none';
     document.getElementById('topicBadge').style.display = 'none';
@@ -148,113 +146,9 @@ const Sidebar = {
     }
     this._renderStatus(topic.statusSummary || null);
 
-    // Past: clear loading skeleton — past chats are populated by showPastChats() after each response
-    const pastList = document.getElementById('pastChatsList');
-    if (pastList && pastList.querySelector('.skeleton')) {
-      pastList.innerHTML = '<p class="temporal-empty-hint">Past context will appear here after your first response.</p>';
-    }
-
     // Future: goals + suggested goals — always breadth first, depth second
     this._renderGoals(topic);
     this._renderSuggestedGoals((data.newDirections || []).map(d => this._normalizeDirection(d)));
-  },
-
-  // ── Past: Persistent Section ──────────────────────────────────────────
-
-  /**
-   * Render the Past section with the injected past chats from this response.
-   * Called from app.js after each assistant response.
-   */
-  showPastChats(injectedPastChats) {
-    const container = document.getElementById('pastChatsList');
-    if (!container) return;
-    if (!injectedPastChats || injectedPastChats.length === 0) {
-      container.innerHTML = '<p class="temporal-empty-hint">No relevant past chats found for this question.</p>';
-      return;
-    }
-    container.innerHTML = '';
-    injectedPastChats.forEach((chat, idx) => {
-      container.appendChild(this._createPastChatCard(chat, idx));
-    });
-    StudyLog.event('past_lookup', { topicId: this.currentTopicId, count: injectedPastChats.length });
-  },
-
-  _createPastChatCard(chat, idx) {
-    const el = document.createElement('div');
-    el.className = 'temporal-card past-chat-card';
-    el.draggable = false;
-
-    const title = Utils.escapeHtml(chat.title || 'Past conversation');
-    const userAsked = chat.userAsked ? Utils.escapeHtml(chat.userAsked.slice(0, 120)) : '';
-
-    // Cards already contested for this topic render pre-struck
-    const topic = this.currentTopicId ? Storage.getTopic(this.currentTopicId) : null;
-    if (topic && chat.chatId && (topic.excludedChatIds || []).includes(chat.chatId)) {
-      el.classList.add('past-chat-contested');
-    }
-
-    el.innerHTML = `
-      <div class="temporal-card-header">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11" class="temporal-card-icon">
-          <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-          <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-        </svg>
-        <span class="temporal-card-title">${title}</span>
-      </div>
-      ${userAsked ? `<div class="temporal-card-excerpt">${userAsked}</div>` : ''}
-      <div class="temporal-card-meta">Related to your current chat</div>
-      <div class="temporal-card-actions">
-        <button class="past-suppress-btn" title="Don't use this">Don't use this</button>
-        <button class="past-continue-btn" data-chat-id="${Utils.escapeHtml(chat.chatId || '')}" title="Continue this chat">Continue this chat →</button>
-      </div>
-    `;
-
-    // Don't use this: suppress for current chat; toast offers topic-wide upgrade
-    el.querySelector('.past-suppress-btn').addEventListener('click', (e) => {
-      e.stopPropagation();
-      const curChat = Storage.getChat(Storage.getCurrentChatId());
-      if (curChat && chat.chatId) {
-        if (!Array.isArray(curChat.suppressedChatIds)) curChat.suppressedChatIds = [];
-        if (!curChat.suppressedChatIds.includes(chat.chatId)) curChat.suppressedChatIds.push(chat.chatId);
-        Storage.saveChat(curChat);
-      }
-      StudyLog.event('context_suppressed_in_chat', { stage: 'apply', initiative: 'user', chatId: chat.chatId });
-      Utils.showToast("Won't be used in this chat", 'info', {
-        label: 'Never for this topic',
-        onClick: () => {
-          const t = this.currentTopicId ? Storage.getTopic(this.currentTopicId) : null;
-          if (!t || !chat.chatId) return;
-          if (!Array.isArray(t.excludedChatIds)) t.excludedChatIds = [];
-          if (!t.excludedChatIds.includes(chat.chatId)) t.excludedChatIds.push(chat.chatId);
-          // Remove from chat-level suppress once topic-excluded
-          const c = Storage.getChat(Storage.getCurrentChatId());
-          if (c && Array.isArray(c.suppressedChatIds)) {
-            c.suppressedChatIds = c.suppressedChatIds.filter(id => id !== chat.chatId);
-            Storage.saveChat(c);
-          }
-          Storage.saveTopic(t);
-          el.classList.add('past-chat-contested');
-          StudyLog.event('connection_contested', { stage: 'apply', initiative: 'user', topicId: this.currentTopicId, chatId: chat.chatId });
-          Utils.showToast("Won't be used in this topic", 'info');
-        },
-      });
-    });
-
-    // Continue this chat → navigate to the past chat
-    el.querySelector('.past-continue-btn').addEventListener('click', (e) => {
-      e.stopPropagation();
-      const chatId = chat.chatId;
-      if (!chatId) return;
-      const target = Storage.getChat(chatId);
-      if (!target) return;
-      this._flushDirtyLabels();
-      App._summarizeCurrentChat();
-      App.msgCountSinceRefresh = 0;
-      App._renderChat(chatId);
-      App._renderChatList();
-    });
-
-    return el;
   },
 
   // ── Current: Overview status ──────────────────────────────────────────
@@ -272,6 +166,8 @@ const Sidebar = {
 
     if (!statusData && !proposal) {
       container.innerHTML = '<p class="temporal-empty-hint">Chat to build your profile.</p>';
+      this._renderConstructGoals(null, null, false);
+      this._bindStatusItemActions();
       return;
     }
 
@@ -295,7 +191,6 @@ const Sidebar = {
 
     if (proposal) {
       html += this._renderSuggestionOverview(overview, proposal, editMode);
-      html += this._renderProposalActionsBar(proposal, editMode);
     } else if (overview.length > 0) {
       overview.forEach((pt, i) => {
         html += this._renderNormalOverviewItem(pt, i);
@@ -306,6 +201,7 @@ const Sidebar = {
 
     html += '</div></div>';
     container.innerHTML = html;
+    this._renderConstructGoals(statusData, proposal, editMode);
     this._bindStatusItemActions();
     if (proposal) this._bindProposalActions(editMode);
   },
@@ -345,6 +241,135 @@ const Sidebar = {
       <span class="status-item-actions">
         <button class="status-item-btn status-item-del" title="Remove">×</button>
       </span></div>`;
+  },
+
+  _ensureStatusShape(topic) {
+    if (!topic) return;
+    if (!topic.statusSummary || typeof topic.statusSummary !== 'object' || Array.isArray(topic.statusSummary)) {
+      topic.statusSummary = { overview: [], goals: [] };
+    } else {
+      if (!Array.isArray(topic.statusSummary.overview)) topic.statusSummary.overview = [];
+      if (!Array.isArray(topic.statusSummary.goals)) topic.statusSummary.goals = [];
+    }
+  },
+
+  _getConfirmedGoals(topic) {
+    if (!topic || !topic.statusSummary || !Array.isArray(topic.statusSummary.goals)) return [];
+    return topic.statusSummary.goals;
+  },
+
+  _normalizeGoalItem(it, defaultSource) {
+    if (typeof it === 'string') {
+      const text = it.trim();
+      return text ? { text, source: defaultSource || 'inferred' } : null;
+    }
+    if (!it || typeof it !== 'object') return null;
+    const text = (it.text || it.title || '').trim();
+    if (!text) return null;
+    const item = { text, source: it.source || defaultSource || 'inferred' };
+    if (it.id) item.id = it.id;
+    if (it.suggestionTitle) item.suggestionTitle = it.suggestionTitle;
+    if (it.suggestionType) item.suggestionType = it.suggestionType;
+    return item;
+  },
+
+  _goalText(g) {
+    if (!g) return '';
+    if (typeof g === 'string') return g.trim();
+    return (g.text || g.title || '').trim();
+  },
+
+  _renderNormalGoalItem(g, i) {
+    const item = this._normalizeGoalItem(g) || { text: '' };
+    const src = item.source || null;
+    const srcBadge = src === 'label-derived' ? '<span class="status-item-source">from your labels</span>'
+      : src === 'user' ? '<span class="status-item-source">you wrote this</span>' : '';
+    return `<div class="status-item status-bullet" data-section="goals" data-idx="${i}">
+      <span class="status-item-text">${Utils.escapeHtml(item.text)}${srcBadge}</span>
+      <span class="status-item-actions">
+        <button class="status-item-btn status-item-del" title="Remove">×</button>
+      </span></div>`;
+  },
+
+  _renderSuggestionGoals(goals, proposal, editMode) {
+    const changes = proposal.changes || [];
+    const keyOf = (c, field) => ((c[field] || c.text || c.oldText || '').trim().toLowerCase());
+    const removeSet = new Set(
+      changes.filter(c => c.kind === 'goal_remove').map(c => keyOf(c, 'text'))
+    );
+    const editMap = new Map();
+    changes.filter(c => c.kind === 'goal_edit').forEach(c => editMap.set(keyOf(c, 'oldText'), c));
+    const addChanges = changes
+      .map((c, i) => ({ c, i }))
+      .filter(({ c }) => c.kind === 'goal_add');
+
+    let html = '';
+    goals.forEach((g, i) => {
+      const text = this._goalText(g);
+      const key = text.toLowerCase();
+      const edit = editMap.get(key);
+      if (removeSet.has(key)) {
+        const chIdx = changes.findIndex(c => c.kind === 'goal_remove' && keyOf(c, 'text') === key);
+        if (editMode) {
+          html += `<div class="status-item status-bullet suggestion-edit-row" data-change-idx="${chIdx}" data-field="goals">
+            <textarea class="status-inline-edit proposal-edit-input" rows="1" disabled>${Utils.escapeHtml(text)}</textarea>
+            <button class="status-item-btn proposal-drop-change" data-change-idx="${chIdx}" title="Remove this change">×</button>
+          </div>`;
+        } else {
+          html += `<div class="status-item status-bullet suggestion-item" data-change-idx="${chIdx}">
+            <span class="status-item-text"><span class="diff-del">${Utils.escapeHtml(text)}</span></span>
+          </div>`;
+        }
+      } else if (edit) {
+        const chIdx = changes.findIndex(c => c.kind === 'goal_edit' && keyOf(c, 'oldText') === key);
+        if (editMode) {
+          html += `<div class="status-item status-bullet suggestion-edit-row" data-change-idx="${chIdx}" data-field="goals">
+            <textarea class="status-inline-edit proposal-edit-input" rows="1">${Utils.escapeHtml(edit.text || '')}</textarea>
+            <button class="status-item-btn proposal-drop-change" data-change-idx="${chIdx}" title="Remove this change">×</button>
+          </div>`;
+        } else {
+          html += `<div class="status-item status-bullet suggestion-item" data-change-idx="${chIdx}">
+            <span class="status-item-text">${this._renderWordDiffHtml(edit.oldText, edit.text)}</span>
+          </div>`;
+        }
+      } else {
+        html += this._renderNormalGoalItem(g, i);
+      }
+    });
+
+    addChanges.forEach(({ c, i }) => {
+      if (editMode) {
+        html += `<div class="status-item status-bullet suggestion-edit-row" data-change-idx="${i}" data-field="goals">
+          <textarea class="status-inline-edit proposal-edit-input" rows="1">${Utils.escapeHtml(c.text || '')}</textarea>
+          <button class="status-item-btn proposal-drop-change" data-change-idx="${i}" title="Remove this change">×</button>
+        </div>`;
+      } else {
+        html += `<div class="status-item status-bullet suggestion-item" data-change-idx="${i}">
+          <span class="status-item-text"><span class="diff-add">${Utils.escapeHtml(c.text || '')}</span></span>
+        </div>`;
+      }
+    });
+    return html;
+  },
+
+  _renderConstructGoals(statusData, proposal, editMode) {
+    const list = document.getElementById('constructGoalsList');
+    if (!list) return;
+    const goals = (statusData && typeof statusData === 'object' && Array.isArray(statusData.goals))
+      ? statusData.goals : [];
+    const goalChanges = proposal
+      ? (proposal.changes || []).filter(c => c.field === 'goals' || (c.kind || '').startsWith('goal_'))
+      : [];
+    let html = '';
+    if (proposal && goalChanges.length > 0) {
+      html += this._renderSuggestionGoals(goals, proposal, editMode);
+    } else if (goals.length > 0) {
+      goals.forEach((g, i) => { html += this._renderNormalGoalItem(g, i); });
+    } else {
+      html = '<p class="temporal-empty-hint">Goals the system infers or you add will appear here.</p>';
+    }
+    if (proposal) html += this._renderProposalActionsBar(proposal, editMode);
+    list.innerHTML = html;
   },
 
   _renderWordDiffHtml(oldText, newText) {
@@ -485,15 +510,22 @@ const Sidebar = {
   _diffStatus(currentSummary, proposedSummary) {
     const cur = (currentSummary && typeof currentSummary === 'object') ? currentSummary : {};
     const prop = (proposedSummary && typeof proposedSummary === 'object') ? proposedSummary : {};
+    const changes = this._diffOverviewItems(cur.overview || [], prop.overview || []);
+    if (prop && Object.prototype.hasOwnProperty.call(prop, 'goals')) {
+      changes.push(...this._diffGoalItems(cur.goals || [], prop.goals || []));
+    }
+    return changes;
+  },
+
+  _diffOverviewItems(curOverview, propOverview) {
     const norm = s => (s || '').trim().toLowerCase();
-    const curItems = (cur.overview || []).map(it => this._normalizeOverviewItem(it)).filter(Boolean);
-    const propItems = (prop.overview || []).map(it => this._normalizeOverviewItem(it)).filter(Boolean);
+    const curItems = (curOverview || []).map(it => this._normalizeOverviewItem(it)).filter(Boolean);
+    const propItems = (propOverview || []).map(it => this._normalizeOverviewItem(it)).filter(Boolean);
 
     const usedOld = new Set();
     const usedNew = new Set();
     const pairs = [];
 
-    // Exact matches first (same type + text)
     curItems.forEach((oldItem, oi) => {
       const ni = propItems.findIndex((t, j) =>
         !usedNew.has(j) && t.type === oldItem.type && norm(t.text) === norm(oldItem.text));
@@ -503,7 +535,6 @@ const Sidebar = {
       }
     });
 
-    // Similarity pairs for remaining (headers↔headers, bullets↔bullets only)
     const candidates = [];
     curItems.forEach((oldItem, oi) => {
       if (usedOld.has(oi)) return;
@@ -527,6 +558,7 @@ const Sidebar = {
       usedNew.add(c.ni);
       pairs.push({
         kind: 'overview_edit',
+        field: 'overview',
         itemType: c.itemType,
         oldText: c.oldText,
         text: c.newText,
@@ -538,6 +570,7 @@ const Sidebar = {
       if (!usedOld.has(oi)) {
         changes.push({
           kind: 'overview_remove',
+          field: 'overview',
           itemType: oldItem.type,
           text: oldItem.text,
           oldText: oldItem.text,
@@ -546,7 +579,68 @@ const Sidebar = {
     });
     propItems.forEach((newItem, ni) => {
       if (!usedNew.has(ni)) {
-        changes.push({ kind: 'overview_add', itemType: newItem.type, text: newItem.text });
+        changes.push({ kind: 'overview_add', field: 'overview', itemType: newItem.type, text: newItem.text });
+      }
+    });
+    return changes;
+  },
+
+  _diffGoalItems(curGoals, propGoals) {
+    const norm = s => (s || '').trim().toLowerCase();
+    const curItems = (curGoals || []).map(it => this._normalizeGoalItem(it)).filter(Boolean);
+    const propItems = (propGoals || []).map(it => this._normalizeGoalItem(it)).filter(Boolean);
+    const usedOld = new Set();
+    const usedNew = new Set();
+    const pairs = [];
+
+    curItems.forEach((oldItem, oi) => {
+      const ni = propItems.findIndex((t, j) => !usedNew.has(j) && norm(t.text) === norm(oldItem.text));
+      if (ni >= 0) {
+        usedOld.add(oi);
+        usedNew.add(ni);
+      }
+    });
+
+    const candidates = [];
+    curItems.forEach((oldItem, oi) => {
+      if (usedOld.has(oi)) return;
+      propItems.forEach((newItem, ni) => {
+        if (usedNew.has(ni)) return;
+        const sim = this._textSimilarity(oldItem.text, newItem.text);
+        if (sim >= 0.5) {
+          candidates.push({ oi, ni, sim, oldText: oldItem.text, newText: newItem.text, oldId: oldItem.id });
+        }
+      });
+    });
+    candidates.sort((a, b) => b.sim - a.sim);
+    candidates.forEach(c => {
+      if (usedOld.has(c.oi) || usedNew.has(c.ni)) return;
+      usedOld.add(c.oi);
+      usedNew.add(c.ni);
+      pairs.push({
+        kind: 'goal_edit',
+        field: 'goals',
+        oldText: c.oldText,
+        text: c.newText,
+        goalId: c.oldId,
+      });
+    });
+
+    const changes = [...pairs];
+    curItems.forEach((oldItem, oi) => {
+      if (!usedOld.has(oi)) {
+        changes.push({
+          kind: 'goal_remove',
+          field: 'goals',
+          text: oldItem.text,
+          oldText: oldItem.text,
+          goalId: oldItem.id,
+        });
+      }
+    });
+    propItems.forEach((newItem, ni) => {
+      if (!usedNew.has(ni)) {
+        changes.push({ kind: 'goal_add', field: 'goals', text: newItem.text });
       }
     });
     return changes;
@@ -572,16 +666,21 @@ const Sidebar = {
         return { type: 'bullet', text: n.text, source: defaultSource };
       }).filter(Boolean),
     };
-    const changes = this._diffStatus(
-      { overview: (topic.statusSummary && topic.statusSummary.overview) || [] },
-      effective
-    );
+    if (statusUpdate && Object.prototype.hasOwnProperty.call(statusUpdate, 'goals')) {
+      const proposedGoals = (statusUpdate.goals || []).map(it => this._normalizeGoalItem(it, defaultSource)).filter(Boolean);
+      const currentGoals = (topic.statusSummary && topic.statusSummary.goals) || [];
+      // Empty goals from the model should not wipe user-authored goals
+      if (!(proposedGoals.length === 0 && currentGoals.length > 0)) {
+        effective.goals = proposedGoals;
+      }
+    }
+    const changes = this._diffStatus(topic.statusSummary || { overview: [], goals: [] }, effective);
     if (changes.length === 0) {
-      StudyLog.event('proposal_empty', { stage: 'construct', initiative: 'mixed', topicId: topic.id, trigger });
+      StudyLog.event('proposal_empty', { stage: 'construct', initiative: 'mixed', topicId: topic.id, trigger, ...this._proposalLogPayload(changes) });
       return false;
     }
     if (topic.pendingProposal) {
-      StudyLog.event('proposal_superseded', { stage: 'construct', initiative: 'mixed', topicId: topic.id, trigger });
+      StudyLog.event('proposal_superseded', { stage: 'construct', initiative: 'mixed', topicId: topic.id, trigger, ...this._proposalLogPayload(topic.pendingProposal.changes) });
     }
     topic.pendingProposal = {
       ts: Utils.timestamp(),
@@ -593,8 +692,17 @@ const Sidebar = {
     Storage.saveTopic(topic);
     StudyLog.event('proposal_shown', {
       stage: 'construct', initiative: 'mixed', topicId: topic.id, trigger, nChanges: changes.length,
+      ...this._proposalLogPayload(changes),
     });
     return true;
+  },
+
+  _proposalLogPayload(changes) {
+    const fields = [...new Set((changes || []).map(c => c.field).filter(Boolean))];
+    const extra = {};
+    if (fields.length === 1) extra.field = fields[0];
+    else if (fields.length > 1) extra.fields = fields;
+    return extra;
   },
 
   // ── Proposal actions (inline suggestion mode) ─────────────────────────
@@ -609,18 +717,20 @@ const Sidebar = {
     if (editMode) {
       bind('.proposal-save-btn', () => this._saveProposalEdits());
       bind('.proposal-cancel-btn', () => this._renderStatus(this._getCurrentStatus()));
-      const container = this._getStatusContainer();
-      container.querySelectorAll('.proposal-drop-change').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          this._dropProposalChange(parseInt(btn.dataset.changeIdx, 10));
+      const wrap = document.getElementById('statusContent') || this._getStatusContainer();
+      if (wrap) {
+        wrap.querySelectorAll('.proposal-drop-change').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this._dropProposalChange(parseInt(btn.dataset.changeIdx, 10));
+          });
         });
-      });
-      container.querySelectorAll('.proposal-edit-input').forEach(ta => {
-        const grow = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; };
-        ta.addEventListener('input', grow);
-        grow();
-      });
+        wrap.querySelectorAll('.proposal-edit-input').forEach(ta => {
+          const grow = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; };
+          ta.addEventListener('input', grow);
+          grow();
+        });
+      }
     } else {
       bind('.proposal-accept-btn', () => this._acceptProposal());
       bind('.proposal-edit-btn', () => this._editProposal());
@@ -646,17 +756,18 @@ const Sidebar = {
     if (!topic) return;
     const p = topic.pendingProposal;
     Storage.pushStatusSnapshot(topic, 'proposal_accept');
-    if (!topic.statusSummary || typeof topic.statusSummary !== 'object') {
-      topic.statusSummary = { overview: [] };
-    }
+    this._ensureStatusShape(topic);
     const summary = topic.statusSummary;
-    if (!Array.isArray(summary.overview)) summary.overview = [];
     const findOverviewIdx = (text, itemType) => {
       const key = this._overviewItemKey(itemType || 'bullet', text);
       return summary.overview.findIndex(it => {
         const n = this._normalizeOverviewItem(it);
         return n && this._overviewItemKey(n.type, n.text) === key;
       });
+    };
+    const findGoalIdx = (text) => {
+      const key = (text || '').trim().toLowerCase();
+      return summary.goals.findIndex(g => this._goalText(g).toLowerCase() === key);
     };
     const source = this._sourceForProposalChange(p);
 
@@ -692,6 +803,25 @@ const Sidebar = {
               : { type: 'bullet', text: ch.text, source }
           );
         }
+      } else if (ch.kind === 'goal_remove') {
+        const i = findGoalIdx(ch.text || ch.oldText);
+        if (i >= 0) summary.goals.splice(i, 1);
+      } else if (ch.kind === 'goal_edit') {
+        const i = findGoalIdx(ch.oldText);
+        if (i >= 0 && ch.text) {
+          if (typeof summary.goals[i] === 'object') {
+            summary.goals[i].text = ch.text;
+            summary.goals[i].source = source;
+          } else {
+            summary.goals[i] = { id: 'goal_' + Utils.generateId(), text: ch.text, source };
+          }
+        } else if (ch.text) {
+          summary.goals.push({ id: 'goal_' + Utils.generateId(), text: ch.text, source });
+        }
+      } else if (ch.kind === 'goal_add') {
+        if (ch.text) {
+          summary.goals.push({ id: 'goal_' + Utils.generateId(), text: ch.text, source });
+        }
       }
     });
 
@@ -700,9 +830,11 @@ const Sidebar = {
     topic.pendingProposal = null;
     Storage.saveTopic(topic);
     this._renderStatus(topic.statusSummary);
+    this._renderGoals(topic);
     StudyLog.event('proposal_accepted', {
       stage: 'construct', initiative: 'mixed', topicId: topic.id,
       trigger: p.trigger, nChanges: (p.changes || []).length,
+      ...this._proposalLogPayload(p.changes),
     });
   },
 
@@ -716,6 +848,7 @@ const Sidebar = {
     StudyLog.event('proposal_dismissed', {
       stage: 'construct', initiative: 'user', topicId: topic.id,
       trigger: p.trigger, nChanges: (p.changes || []).length,
+      ...this._proposalLogPayload(p.changes),
     });
   },
 
@@ -745,11 +878,8 @@ const Sidebar = {
     if (!topic || !container) return;
     const p = topic.pendingProposal;
     Storage.pushStatusSnapshot(topic, 'proposal_edit');
-    if (!topic.statusSummary || typeof topic.statusSummary !== 'object') {
-      topic.statusSummary = { overview: [] };
-    }
+    this._ensureStatusShape(topic);
     const summary = topic.statusSummary;
-    if (!Array.isArray(summary.overview)) summary.overview = [];
     const findOverviewIdx = (text, itemType) => {
       const key = this._overviewItemKey(itemType || 'bullet', text);
       return summary.overview.findIndex(it => {
@@ -757,8 +887,13 @@ const Sidebar = {
         return n && this._overviewItemKey(n.type, n.text) === key;
       });
     };
+    const findGoalIdx = (text) => {
+      const key = (text || '').trim().toLowerCase();
+      return summary.goals.findIndex(g => this._goalText(g).toLowerCase() === key);
+    };
 
-    container.querySelectorAll('.suggestion-edit-row').forEach(row => {
+    const statusContent = document.getElementById('statusContent') || container;
+    statusContent.querySelectorAll('.suggestion-edit-row').forEach(row => {
       const ch = p.changes[parseInt(row.dataset.changeIdx, 10)];
       if (!ch) return;
       const itemType = ch.itemType || 'bullet';
@@ -794,6 +929,29 @@ const Sidebar = {
             itemType === 'header' ? { type: 'header', text } : { type: 'bullet', text, source: 'user' }
           );
         }
+      } else if (ch.kind === 'goal_remove') {
+        const i = findGoalIdx(ch.oldText || ch.text);
+        if (i >= 0) summary.goals.splice(i, 1);
+      } else if (ch.kind === 'goal_edit') {
+        const i = findGoalIdx(ch.oldText);
+        if (text) {
+          if (i >= 0) {
+            if (typeof summary.goals[i] === 'object') {
+              summary.goals[i].text = text;
+              summary.goals[i].source = 'user';
+            } else {
+              summary.goals[i] = { id: 'goal_' + Utils.generateId(), text, source: 'user' };
+            }
+          } else {
+            summary.goals.push({ id: 'goal_' + Utils.generateId(), text, source: 'user' });
+          }
+        } else if (i >= 0) {
+          summary.goals.splice(i, 1);
+        }
+      } else if (ch.kind === 'goal_add') {
+        if (text) {
+          summary.goals.push({ id: 'goal_' + Utils.generateId(), text, source: 'user' });
+        }
       }
     });
 
@@ -802,43 +960,46 @@ const Sidebar = {
     topic.pendingProposal = null;
     Storage.saveTopic(topic);
     this._renderStatus(topic.statusSummary);
+    this._renderGoals(topic);
     StudyLog.event('proposal_edited', {
       stage: 'construct', initiative: 'user', topicId: topic.id,
       trigger: p.trigger, nChanges: (p.changes || []).length,
+      ...this._proposalLogPayload(p.changes),
     });
   },
 
   _bindStatusItemActions() {
-    const container = this._getStatusContainer();
-    if (!container) return;
+    const containers = [this._getStatusContainer(), document.getElementById('constructGoalsList')].filter(Boolean);
 
-    // Overview delete
-    container.querySelectorAll('.status-item .status-item-del').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const item = btn.closest('.status-item');
-        const section = item.dataset.section;
-        const idx = parseInt(item.dataset.idx);
-        this._deleteStatusItem(section, idx);
+    containers.forEach(container => {
+      container.querySelectorAll('.status-item .status-item-del').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const item = btn.closest('.status-item');
+          const section = item.dataset.section;
+          const idx = parseInt(item.dataset.idx);
+          this._deleteStatusItem(section, idx);
+        });
+      });
+
+      container.querySelectorAll('.status-item[data-section]').forEach(item => {
+        item.addEventListener('dblclick', (e) => {
+          e.stopPropagation();
+          this._startInlineEdit(item, item.dataset.section, parseInt(item.dataset.idx));
+        });
       });
     });
 
-    // Overview inline edit on double-click
-    container.querySelectorAll('.status-item[data-section]').forEach(item => {
-      item.addEventListener('dblclick', (e) => {
-        e.stopPropagation();
-        this._startInlineEdit(item, item.dataset.section, parseInt(item.dataset.idx));
+    const overviewContainer = this._getStatusContainer();
+    if (overviewContainer) {
+      overviewContainer.querySelectorAll('.overview-ai-edit-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          this._showAiEditPrompt();
+        });
       });
-    });
-
-    // AI-edit button for overview
-    container.querySelectorAll('.overview-ai-edit-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        this._showAiEditPrompt();
-      });
-    });
+    }
   },
 
   _startInlineEdit(item, section, idx) {
@@ -894,7 +1055,11 @@ const Sidebar = {
     topic.statusLastUpdated = Utils.timestamp();
     Storage.saveTopic(topic);
     this._renderStatus(topic.statusSummary);
-    StudyLog.event('current_profile_edited', { stage: 'construct', initiative: 'user', topicId: this.currentTopicId, section, editType: 'delete', itemIdx: idx });
+    if (section === 'goals') this._renderGoals(topic);
+    StudyLog.event('current_profile_edited', { stage: 'construct', initiative: 'user', topicId: this.currentTopicId, section, editType: 'delete', itemIdx: idx, field: section === 'goals' ? 'goals' : 'overview' });
+    if (section === 'goals') {
+      StudyLog.event('goal_removed', { stage: 'construct', initiative: 'user', surface: 'sidebar', topicId: this.currentTopicId, field: 'goals' });
+    }
   },
 
   _editStatusItem(section, idx, newText) {
@@ -903,20 +1068,30 @@ const Sidebar = {
     const arr = topic.statusSummary[section];
     if (!arr || idx < 0 || idx >= arr.length) return;
     Storage.pushStatusSnapshot(topic, 'inline_edit');
-    const prev = this._normalizeOverviewItem(arr[idx]);
-    if (prev && prev.type === 'header') {
-      arr[idx] = { type: 'header', text: newText };
-    } else if (arr[idx] && typeof arr[idx] === 'object') {
-      arr[idx].type = 'bullet';
-      arr[idx].text = newText;
-      arr[idx].source = 'user';
+    if (section === 'goals') {
+      if (arr[idx] && typeof arr[idx] === 'object') {
+        arr[idx].text = newText;
+        arr[idx].source = 'user';
+      } else {
+        arr[idx] = { id: 'goal_' + Utils.generateId(), text: newText, source: 'user' };
+      }
     } else {
-      arr[idx] = { type: 'bullet', text: newText, source: 'user' };
+      const prev = this._normalizeOverviewItem(arr[idx]);
+      if (prev && prev.type === 'header') {
+        arr[idx] = { type: 'header', text: newText };
+      } else if (arr[idx] && typeof arr[idx] === 'object') {
+        arr[idx].type = 'bullet';
+        arr[idx].text = newText;
+        arr[idx].source = 'user';
+      } else {
+        arr[idx] = { type: 'bullet', text: newText, source: 'user' };
+      }
     }
     topic.statusLastUpdated = Utils.timestamp();
     Storage.saveTopic(topic);
     this._renderStatus(topic.statusSummary);
-    StudyLog.event('current_profile_edited', { stage: 'construct', initiative: 'user', topicId: this.currentTopicId, section, editType: 'edit', itemIdx: idx });
+    if (section === 'goals') this._renderGoals(topic);
+    StudyLog.event('current_profile_edited', { stage: 'construct', initiative: 'user', topicId: this.currentTopicId, section, editType: 'edit', itemIdx: idx, field: section === 'goals' ? 'goals' : 'overview' });
   },
 
   _showAiEditPrompt() {
@@ -1009,12 +1184,22 @@ const Sidebar = {
   _serializeStatus(statusSummary) {
     if (!statusSummary) return '';
     if (typeof statusSummary === 'string') return statusSummary;
-    if (!statusSummary.overview || statusSummary.overview.length === 0) return '';
     const parts = [];
-    for (const it of statusSummary.overview) {
+    for (const it of statusSummary.overview || []) {
       const n = this._normalizeOverviewItem(it);
       if (!n) continue;
       parts.push(n.type === 'header' ? `## ${n.text}` : `- ${n.text}`);
+    }
+    const goals = statusSummary.goals || [];
+    const goalLines = [];
+    for (const g of goals) {
+      const text = this._goalText(g);
+      if (text) goalLines.push(`- ${text}`);
+    }
+    if (goalLines.length) {
+      if (parts.length) parts.push('');
+      parts.push('Goals:');
+      parts.push(...goalLines);
     }
     return parts.join('\n');
   },
@@ -1121,7 +1306,11 @@ const Sidebar = {
           Utils.showToast('Could not generate a question', 'error');
           return;
         }
-        StudyLog.event('goal_question_asked', { stage: 'evolve', initiative: 'user', topicId: this.currentTopicId, directionIdx });
+        StudyLog.event('goal_question_asked', {
+          stage: 'evolve', initiative: 'user', surface: 'sidebar',
+          topicId: this.currentTopicId, directionIdx,
+          suggestionId: d.title || null,
+        });
         this._startGoalInNewChat({ title: d.title, question: q });
         // Asking a suggested goal also saves it (stays active until deleted)
         if (!isSaved) this._saveSuggestedGoal(d, { silent: true });
@@ -1164,9 +1353,10 @@ const Sidebar = {
   // ── Future: Goals ─────────────────────────────────────────────────────
 
   _findGoal(topic, title) {
-    if (!topic || !Array.isArray(topic.goals) || !title) return null;
+    const goals = this._getConfirmedGoals(topic);
+    if (!goals.length || !title) return null;
     const norm = (title || '').trim().toLowerCase();
-    return topic.goals.find(i => (i.title || '').trim().toLowerCase() === norm) || null;
+    return goals.find(i => this._goalText(i).toLowerCase() === norm) || null;
   },
 
   _persistGoalExampleQuestion(title, question) {
@@ -1194,7 +1384,7 @@ const Sidebar = {
   _renderGoals(topic) {
     const container = document.getElementById('goalsList');
     if (!container) return;
-    const goals = (topic && Array.isArray(topic.goals)) ? topic.goals : [];
+    const goals = this._getConfirmedGoals(topic);
     container.innerHTML = '';
     if (goals.length === 0) return;
 
@@ -1206,7 +1396,7 @@ const Sidebar = {
         <svg class="saved-goals-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="10" height="10">
           <polyline points="6 9 12 15 18 9"/>
         </svg>
-        <span class="saved-goals-toggle-label">Saved goals</span>
+        <span class="saved-goals-toggle-label">Goals</span>
         <span class="saved-goals-count">${goals.length}</span>
       </button>
       <div class="saved-goals-body"></div>
@@ -1231,35 +1421,11 @@ const Sidebar = {
     const normalized = [...(dirs || [])]
       .map(d => this._normalizeDirection(d))
       .filter(d => !dismissed.has((d.title || '').toLowerCase()));
-    const byTitle = new Map();
-    normalized.forEach(d => {
-      const key = (d.title || '').trim().toLowerCase();
-      if (key && !byTitle.has(key)) byTitle.set(key, d);
-    });
 
-    // Prioritize saved goals as cards; enrich from matching suggestions when available.
-    const cards = [];
-    const goals = (topic && Array.isArray(topic.goals)) ? topic.goals : [];
-    goals.forEach(goal => {
-      const key = (goal.title || '').trim().toLowerCase();
-      const match = key ? byTitle.get(key) : null;
-      cards.push(this._normalizeDirection({
-        title: goal.title || '',
-        type: (match && match.type) || goal.type || null,
-        reason: (match && match.reason) || goal.reason || null,
-        anchor: match ? match.anchor : null,
-        exampleQuestion: (match && match.exampleQuestion) || goal.exampleQuestion || '',
-        suggestedAt: (match && match.suggestedAt) || goal.suggestedAt || goal.savedAt || null,
-        editedByUser: !!(goal.editedByUser || (match && match.editedByUser)),
-      }));
-    });
-
-    // Also include at most one unsaved suggestion (breadth before depth).
     const order = { breadth: 0, depth: 1 };
-    const unsaved = normalized
+    const cards = normalized
       .filter(d => !this._findGoal(topic, d.title))
       .sort((a, b) => (order[a.type] ?? 2) - (order[b.type] ?? 2));
-    if (unsaved[0]) cards.push(unsaved[0]);
 
     dirContainer.innerHTML = '';
     if (cards.length === 0) {
@@ -1280,10 +1446,10 @@ const Sidebar = {
   _createGoalCard(goal) {
     const el = document.createElement('div');
     el.className = 'saved-goal-row';
+    const title = this._goalText(goal);
     el.innerHTML = `
-      <span class="saved-goal-row-title">${Utils.escapeHtml(goal.title || '')}</span>
+      <span class="saved-goal-row-title">${Utils.escapeHtml(title)}</span>
       <button class="probe-btn goal-ask-btn" title="Ask a question">Ask</button>
-      <button class="goal-icon-btn intention-remove-btn" title="Remove goal">×</button>
     `;
 
     el.querySelector('.goal-ask-btn').addEventListener('click', async (e) => {
@@ -1291,20 +1457,21 @@ const Sidebar = {
       const btn = e.currentTarget;
       btn.disabled = true;
       try {
-        const question = await this._fetchGoalQuestion(goal.title);
+        const question = await this._fetchGoalQuestion(title);
         if (question) {
-          StudyLog.event('goal_question_asked', { stage: 'evolve', initiative: 'user', topicId: this.currentTopicId, goalId: goal.id });
-          this._startGoalInNewChat({ title: goal.title, question });
+          StudyLog.event('goal_question_asked', {
+            stage: 'evolve', initiative: 'user', surface: 'sidebar',
+            topicId: this.currentTopicId, goalId: goal.id,
+            goalSource: goal.source || 'user',
+            ...(goal.suggestionTitle ? { suggestionId: goal.suggestionTitle } : {}),
+          });
+          this._startGoalInNewChat({ title, question });
         }
       } catch (err) {
         console.error('Goal question failed:', err);
         Utils.showToast('Could not generate a question', 'error');
       }
       btn.disabled = false;
-    });
-    el.querySelector('.intention-remove-btn').addEventListener('click', (e) => {
-      e.stopPropagation();
-      this._removeGoal(goal.id);
     });
 
     return el;
@@ -1335,25 +1502,21 @@ const Sidebar = {
       if (!opts.silent) this._renderEvolveSection(topic);
       return;
     }
-    const now = Utils.timestamp();
-    if (!Array.isArray(topic.goals)) topic.goals = [];
-    topic.goals.push({
+    this._ensureStatusShape(topic);
+    topic.statusSummary.goals.push({
       id: 'goal_' + Utils.generateId(),
-      title: dir.title || '',
-      type: dir.type || null,
-      reason: dir.reason || null,
-      exampleQuestion: dir.exampleQuestion || '',
-      source: 'system',
-      status: 'saved',
-      suggestedAt: dir.suggestedAt || now,
-      savedAt: now,
-      exploredAt: null,
-      chatId: null,
-      editedByUser: !!dir.editedByUser,
+      text: dir.title || '',
+      source: 'user',
+      suggestionTitle: dir.title || '',
+      suggestionType: dir.type || null,
     });
     Storage.saveTopic(topic);
+    this._renderStatus(topic.statusSummary);
     this._renderEvolveSection(topic);
-    StudyLog.event('goal_saved', { stage: 'evolve', initiative: 'mixed', topicId: topic.id, title: dir.title });
+    StudyLog.event('goal_saved', {
+      stage: 'evolve', initiative: 'system', surface: 'sidebar',
+      topicId: topic.id, suggestionTitle: dir.title, anchor: dir.anchor || null,
+    });
   },
 
   _dismissSuggestedGoal(dir, el) {
@@ -1378,13 +1541,15 @@ const Sidebar = {
   _removeGoal(goalId) {
     const topic = this.currentTopicId ? Storage.getTopic(this.currentTopicId) : null;
     if (!topic) return;
-    const idx = (topic.goals || []).findIndex(i => i.id === goalId);
+    this._ensureStatusShape(topic);
+    const idx = topic.statusSummary.goals.findIndex(i => i.id === goalId);
     if (idx < 0) return;
-    const title = topic.goals[idx].title;
-    topic.goals.splice(idx, 1);
+    const title = this._goalText(topic.statusSummary.goals[idx]);
+    topic.statusSummary.goals.splice(idx, 1);
     Storage.saveTopic(topic);
+    this._renderStatus(topic.statusSummary);
     this._renderEvolveSection(topic);
-    StudyLog.event('goal_removed', { stage: 'evolve', initiative: 'user', topicId: topic.id, title });
+    StudyLog.event('goal_removed', { stage: 'construct', initiative: 'user', surface: 'sidebar', topicId: topic.id, title, field: 'goals' });
   },
 
   _startSuggestedGoalEdit(el, dir) {
@@ -1460,23 +1625,20 @@ const Sidebar = {
       if (!text || !this.currentTopicId) return;
       const topic = Storage.getTopic(this.currentTopicId);
       if (!topic) return;
-      if (!Array.isArray(topic.goals)) topic.goals = [];
+      this._ensureStatusShape(topic);
       const words = text.split(/\s+/);
-      topic.goals.push({
+      topic.statusSummary.goals.push({
         id: 'goal_' + Utils.generateId(),
-        title: words.slice(0, 8).join(' '),
+        text: words.slice(0, 8).join(' '),
         source: 'user',
-        status: 'saved',
-        suggestedAt: null,
-        savedAt: Utils.timestamp(),
-        exploredAt: null,
-        chatId: null,
-        editedByUser: false,
       });
       Storage.saveTopic(topic);
       input.value = '';
+      this._renderStatus(topic.statusSummary);
       this._renderEvolveSection(topic);
-      StudyLog.event('goal_authored', { stage: 'evolve', initiative: 'user', topicId: topic.id });
+      StudyLog.event('goal_authored', {
+        stage: 'construct', initiative: 'user', surface: 'sidebar', topicId: topic.id, field: 'goals',
+      });
     };
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); submit(); }
@@ -1506,11 +1668,6 @@ const Sidebar = {
       <div class="skeleton skeleton-line" style="width:70%"></div>
       <div class="skeleton skeleton-line" style="width:80%"></div>
     `;
-    // Past section is not loaded here — it's populated by showPastChats() from the SSE done event
-    const pastList = document.getElementById('pastChatsList');
-    if (pastList && !pastList.querySelector('.past-chat-card')) {
-      pastList.innerHTML = '<p class="temporal-empty-hint">Past context will appear here after your first response.</p>';
-    }
     const dirCards = document.getElementById('directionCards');
     if (dirCards) dirCards.innerHTML = '<div class="skeleton skeleton-card"></div>';
   },
@@ -1743,7 +1900,7 @@ const Sidebar = {
     topic._lastStableBeforeRestore = {
       ts: Utils.timestamp(),
       trigger: 'pre_restore',
-      statusSummary: JSON.parse(JSON.stringify(topic.statusSummary || { overview: [] })),
+      statusSummary: JSON.parse(JSON.stringify(topic.statusSummary || { overview: [], goals: [] })),
     };
 
     topic.statusSummary = JSON.parse(JSON.stringify(snapshot.statusSummary));
@@ -1851,6 +2008,27 @@ const Sidebar = {
     return out;
   },
 
+  _collectAllAnnotations(topic) {
+    if (!topic) return [];
+    const out = [];
+    const chats = Storage.getChats().filter(c => c.topicId === topic.id);
+    for (const chat of chats) {
+      for (const m of Storage.getMessages(chat.id)) {
+        if (m.role !== 'assistant' || !Array.isArray(m.annotations)) continue;
+        for (const a of m.annotations) {
+          if (!a || !a.spanText) continue;
+          out.push({
+            id: a.id,
+            spanText: a.spanText || '',
+            label: a.label,
+            comment: a.comment,
+          });
+        }
+      }
+    }
+    return out;
+  },
+
   _markAnnotationsFlushed(topic, annotations) {
     if (!topic || !annotations || annotations.length === 0) return;
     const ids = new Set(topic._flushedAnnotationIds || []);
@@ -1895,6 +2073,7 @@ const Sidebar = {
     const chatId = Storage.getCurrentChatId();
     const messages = chatId ? Storage.getMessages(chatId) : [];
     const currentSummary = messages.slice(-4).map(m => `${m.role}: ${m.content}`).join('\n');
+    const annos = this._collectAllAnnotations(topic);
 
     try {
       const resp = await fetch('/api/sidebar/directions', {
@@ -1906,6 +2085,9 @@ const Sidebar = {
           allChatSummaries: Storage.getAllChatSummariesForTopic(topic.id),
           currentSummary,
           previouslySuggested,
+          annotations: annos.map(a => ({
+            spanText: a.spanText, label: a.label, comment: a.comment,
+          })),
           model: Storage.getSidebarModel(),
         }),
       });

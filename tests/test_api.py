@@ -2102,9 +2102,9 @@ class TestModule2InlineAnnotations:
 
     def test_module_2_sidebar_section_exists(self):
         html = _get_client().get("/").text
-        assert 'id="sectionPast"' in html
-        assert 'id="pastChatsList"' in html
-        assert '>Apply<' in html
+        assert 'id="sectionPast"' not in html
+        assert 'past-context-panel' in _get_client().get("/static/styles.css").text
+        assert "Don't use for this topic" in _get_client().get("/static/app.js").text
 
     def test_conn_marker_css_exists(self):
         css = _get_client().get("/static/styles.css").text
@@ -2554,6 +2554,7 @@ class TestStructuredStatusPrompt:
         from prompts import STATUS_UPDATE_PROMPT
         assert "overview" in STATUS_UPDATE_PROMPT.lower()
         assert '"overview"' in STATUS_UPDATE_PROMPT
+        assert '"goals"' in STATUS_UPDATE_PROMPT
         assert "concepts_traversed" not in STATUS_UPDATE_PROMPT
         assert '"stance"' not in STATUS_UPDATE_PROMPT
 
@@ -2955,17 +2956,13 @@ class TestBug3DeleteBtnOverlay:
 class TestBug4StatusPromptNotes:
     """Status prompt should capture user-provided notes and self-reported knowledge."""
 
-    def test_prompt_mentions_self_reported(self):
-        from prompts import STATUS_UPDATE_PROMPT
-        assert "self-reported" in STATUS_UPDATE_PROMPT
-
     def test_prompt_mentions_background(self):
         from prompts import STATUS_UPDATE_PROMPT
         assert "background" in STATUS_UPDATE_PROMPT.lower()
 
-    def test_prompt_mentions_skill_level(self):
+    def test_prompt_mentions_goals_field(self):
         from prompts import STATUS_UPDATE_PROMPT
-        assert "skill level" in STATUS_UPDATE_PROMPT
+        assert '"goals"' in STATUS_UPDATE_PROMPT
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

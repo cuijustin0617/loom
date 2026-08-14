@@ -24,6 +24,7 @@ from prompts import (
     CHAT_STREAM_SYSTEM_PROMPT,
     CHAT_STREAM_BASELINE_PROMPT,
     CHAT_STREAM_MEMORY_PROMPT,
+    CHAT_STREAM_PROFILE_BLOCK,
     CHAT_METADATA_PROMPT,
     SIDEBAR_NEW_DIRECTIONS_PROMPT,
     SIDEBAR_GOAL_QUESTION_PROMPT,
@@ -224,6 +225,7 @@ class DirectionsRequest(BaseModel):
     allConcepts: list[dict] = []  # ignored — kept for older clients
     currentSummary: str = ""
     previouslySuggested: list[str] = []
+    annotations: list[dict] = []
     model: Optional[str] = None
 
 
@@ -310,6 +312,19 @@ def _serialize_status_to_str(status) -> str:
             parts.append(f"## {text}")
         else:
             parts.append(f"- {text}")
+    goal_lines = []
+    for g in status.get("goals") or []:
+        if isinstance(g, dict):
+            text = (g.get("text") or g.get("title") or "").strip()
+        else:
+            text = str(g).strip() if g else ""
+        if text:
+            goal_lines.append(f"- {text}")
+    if goal_lines:
+        if parts:
+            parts.append("")
+        parts.append("Goals:")
+        parts.extend(goal_lines)
     return "\n".join(parts) if parts else ""
 
 
@@ -454,13 +469,25 @@ async def chat_stream_endpoint(req: ChatRequest):
     elif req.condition == "baseline":
         prompt_mode = "BASELINE prompt (no profile yet)"
         system_prompt = CHAT_STREAM_SYSTEM_PROMPT
-    elif past_chats_for_prompt:
-        prompt_mode = "MEMORY prompt (with connections)"
-        system_prompt = CHAT_STREAM_MEMORY_PROMPT.format(
-            past_chats_json=json.dumps(past_chats_for_prompt, indent=2),
-        )
     else:
-        system_prompt = CHAT_STREAM_SYSTEM_PROMPT
+        if isinstance(req.topicStatus, dict):
+            profile_str = _serialize_status_to_str(req.topicStatus)
+        elif isinstance(req.topicStatus, str):
+            profile_str = req.topicStatus.strip()
+        else:
+            profile_str = ""
+        profile_block = (
+            "\n\n" + CHAT_STREAM_PROFILE_BLOCK.format(profile=profile_str)
+            if profile_str else ""
+        )
+        if past_chats_for_prompt:
+            prompt_mode = "MEMORY prompt (with connections)"
+            system_prompt = CHAT_STREAM_MEMORY_PROMPT.format(
+                past_chats_json=json.dumps(past_chats_for_prompt, indent=2),
+            ) + profile_block
+        else:
+            prompt_mode = "SYSTEM prompt"
+            system_prompt = CHAT_STREAM_SYSTEM_PROMPT + profile_block
 
     async def event_generator():
         full_response_parts = []
@@ -520,9 +547,12 @@ async def sidebar_refresh(req: SidebarRefreshRequest):
     topic_status_str = _serialize_status_to_str(req.topicStatus)
     coverage = _build_coverage_str(req.topicStatus, req.allChatSummaries)
 
+    annotations_str = _serialize_annotations(req.annotations)
+
     directions_prompt = SIDEBAR_NEW_DIRECTIONS_PROMPT.format(
         topic_name=req.topicName,
         topic_status=topic_status_str or "No status yet.",
+        annotations=annotations_str,
         coverage=coverage,
         current_summary=current_messages_text[:500],
         previously_suggested="None",
@@ -568,6 +598,8 @@ async def sidebar_refresh(req: SidebarRefreshRequest):
     if isinstance(status_result, dict):
         if "overview" in status_result:
             status_update = {"overview": status_result["overview"]}
+            if "goals" in status_result:
+                status_update["goals"] = status_result["goals"]
         elif "status" in status_result:
             status_update = status_result.get("status")
 
@@ -639,7 +671,10 @@ async def update_topic_status(req: StatusUpdateRequest):
         model=req.model,
     )
     if isinstance(result, dict) and "overview" in result:
-        return {"overview": result["overview"]}
+        out = {"overview": result["overview"]}
+        if "goals" in result:
+            out["goals"] = result["goals"]
+        return out
     return result
 
 
@@ -812,6 +847,7 @@ async def sidebar_directions(req: DirectionsRequest):
     directions_prompt = SIDEBAR_NEW_DIRECTIONS_PROMPT.format(
         topic_name=req.topicName,
         topic_status=topic_status_str or "No status yet.",
+        annotations=_serialize_annotations(req.annotations),
         coverage=coverage,
         current_summary=req.currentSummary[:500],
         previously_suggested=previously_suggested_str,
@@ -1380,11 +1416,12 @@ function renderHeatmap(events) {
 
 const CONSTRUCT = ['proposal_shown','proposal_accepted','proposal_edited','proposal_dismissed','proposal_superseded',
   'current_profile_edited','text_label_applied','text_label_removed','text_comment_committed',
-  'topic_suggestion_accepted','topic_suggestion_dismissed','topic_created','topic_renamed','topic_assigned','topic_merge_confirmed'];
-const APPLY = ['connection_contested','context_suppressed_in_chat'];
-const EVOLVE = ['goal_saved','goal_explored','goal_dismissed','goal_modified','goal_authored',
+  'topic_suggestion_accepted','topic_suggestion_dismissed','topic_created','topic_renamed','topic_assigned','topic_merge_confirmed',
+  'construct_included_in_chat','goal_authored'];
+const APPLY = ['context_card_shown','context_excluded_for_topic','context_link_opened','connection_contested'];
+const EVOLVE = ['goal_saved','goal_explored','goal_dismissed','goal_modified',
   'goal_removed','goal_question_asked','future_directions_refreshed'];
-const SCRUTABILITY = ['update_undone','version_restored','connection_contested','context_suppressed_in_chat'];
+const SCRUTABILITY = ['update_undone','version_restored','context_excluded_for_topic','connection_contested'];
 const TOPIC = ['topic_created','topic_renamed','topic_assigned','topic_merge_confirmed','topic_merge_drag'];
 
 function renderSummaryTable(events) {

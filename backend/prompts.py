@@ -28,6 +28,11 @@ Rules:
 
 CHAT_STREAM_SYSTEM_PROMPT = """You are a helpful AI assistant. Respond naturally and helpfully to the user's message. Prefer concise, clear responses — no fluff or unnecessary preamble."""
 
+CHAT_STREAM_PROFILE_BLOCK = """You also have a profile of this user: what they've been doing (overview) and what they want (goals). Keep it in mind while replying — when the query naturally connects to a goal, subtly relate your answer to it; never force the association, and never mention the profile explicitly. Answer the user's question directly first.
+
+User profile:
+{profile}"""
+
 CHAT_STREAM_BASELINE_PROMPT = """You are a helpful AI assistant. Respond naturally and helpfully to the user's message. Prefer concise, clear responses — no fluff or unnecessary preamble.
 
 Here is what you know about this user from previous conversations. Use this context when it's genuinely relevant to give a more personalized and helpful answer — but do NOT mention the profile explicitly or say things like "based on your profile". Just let it naturally inform your response when appropriate.
@@ -119,6 +124,15 @@ User highlights / labels on assistant responses:
 You are writing a profile of the USER — what they have told you about themselves,
 what they are doing, and how they react to the assistant's responses.
 
+The profile has two fields:
+- Overview: descriptive only — things that happened, background, experience,
+  reactions. Write "User is comparing X and Y for their thesis", never
+  "User wants to learn X" / "User needs Y" / "User should explore Z" unless
+  the user said so themselves. Describe, don't prescribe.
+- Goals: short bullet points (one line each, no subtitle headers) describing
+  what the user wants. This is where prescriptive phrasing lives
+  ("User wants to compare X and Y", "User is deciding whether to…").
+
 Evidence, in order of authority:
 1. Comments the user wrote (comment annotations) — explicit statements; almost
    always produce an ADD or EDIT. Phrase as a fact about the user, never as a
@@ -140,25 +154,26 @@ user adopting it.
 
 Organize the overview as an ordered mix of short subtitle headers and bullets.
 Use 2–4 short subtitles when they help (e.g. "Background", "Experience",
-"Goals", "Interests"). Bullets under a subtitle may be short fragments, not
-full sentences. One level only — never nest headers under headers.
+"Interests"). Do NOT put a "Goals" subtitle in overview — goals live in the
+goals field. Bullets under a subtitle may be short fragments, not full
+sentences. One level only — never nest headers under headers.
 
-Rules:
+Rules (apply to both overview and goals):
 - Only propose a change when there is concrete NEW evidence (new user message,
   label, or comment since the current profile was written). If nothing new is
-  known about the user, return the current overview unchanged.
+  known about the user, return the current overview and goals unchanged.
 - Propose only changes that are clearly necessary — a new point that is clearly
   missing, an old point that is clearly wrong or outdated, an edit with an
   obvious reason. Do NOT reword, shuffle, merge, split, or tweak bullets or
   headers without a clear reason; small stylistic rewrites are not a valid
   change. If in doubt, leave the item untouched.
-- Describe the user, don't prescribe: write "User is comparing X and Y for
-  their thesis", never "User wants to learn X" / "User needs Y" / "User should
-  explore Z" — unless the user said so themselves.
 - Mainly ADD or EDIT; don't remove unless directly contradicted by the user.
 - Keep each bullet to 1 short line.
 - Preserve any steering notes the user wrote about themselves (e.g. "skip
   basics of X", "avoid Z") — treat them as authoritative.
+- Seed candidates: saved/confirmed goals already in the current profile MUST
+  be preserved unless directly contradicted. They are user-authored — treat
+  them as authoritative, like steering notes.
 
 Return JSON:
 {{
@@ -166,6 +181,10 @@ Return JSON:
     {{"type": "header", "text": "Background"}},
     {{"type": "bullet", "text": "point under that subtitle"}},
     {{"type": "bullet", "text": "another point"}}
+  ],
+  "goals": [
+    {{"text": "User wants to compare X and Y"}},
+    {{"text": "User is deciding whether to…"}}
   ]
 }}"""
 
@@ -176,6 +195,11 @@ SIDEBAR_NEW_DIRECTIONS_PROMPT = """Suggest exactly two focused goal-level direct
 Topic: {topic_name}
 User's current profile:
 {topic_status}
+User highlights / labels on assistant responses:
+{annotations}
+
+Labels are direct evidence of interest/disinterest — suggestions should build on
+comment-labeled material and avoid ✗-labeled (not relevant) material.
 What's already been covered (overview + past chats):
 {coverage}
 Recent conversation context:

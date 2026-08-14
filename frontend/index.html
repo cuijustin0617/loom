@@ -129,7 +129,7 @@
           </div>
           <input type="file" id="fileInput" multiple accept="image/*,.pdf,.txt,.csv,.json" style="display:none;">
         </div>
-        <div class="chat-footer-note" id="modelFooterNote">Externalized personal context probe: construct · apply · evolve</div>
+        <div class="chat-footer-note" id="modelFooterNote">Externalized personal context probe: construct · evolve</div>
       </div>
     </main>
     <div class="resize-handle" id="resizeRight">
@@ -140,7 +140,7 @@
       </button>
     </div>
 
-    <!-- Right Sidebar: Unified Personal Context (Construct · Apply · Evolve) -->
+    <!-- Right Sidebar: Unified Personal Context (Construct · Evolve) -->
     <aside class="right-sidebar" id="rightSidebar">
       <div class="knowledge-header">
         <div class="knowledge-title">
@@ -154,8 +154,6 @@
         <div class="temporal-breadcrumb" id="temporalBreadcrumb">
           <span class="temporal-crumb" data-phase="construct">Construct</span>
           <span class="temporal-crumb-sep">·</span>
-          <span class="temporal-crumb" data-phase="apply">Apply</span>
-          <span class="temporal-crumb-sep">·</span>
           <span class="temporal-crumb" data-phase="evolve">Evolve</span>
         </div>
       </div>
@@ -164,10 +162,10 @@
         <!-- Empty state -->
         <div class="sidebar-empty" id="sidebarEmpty">
           <p>Start chatting to see your personal context here.</p>
-          <p class="sidebar-hint">Your context construct, applied context, and future directions will appear once a topic is detected.</p>
+          <p class="sidebar-hint">Your construct and future directions will appear once a topic is detected.</p>
         </div>
 
-        <!-- CONSTRUCT: Active profile and concepts traversed -->
+        <!-- CONSTRUCT: Active profile (overview + goals) -->
         <div class="temporal-section section-current" id="sectionCurrent" style="display:none;">
           <div class="temporal-section-header" data-section="sectionCurrent">
             <div class="temporal-section-label">
@@ -197,28 +195,17 @@
           <div class="module-body" id="sectionCurrentBody">
             <div class="status-content" id="statusContent">
               <div class="status-structured" id="statusStructured"></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- APPLY: Historical context shaping this response -->
-        <div class="temporal-section section-past" id="sectionPast" style="display:none;">
-          <div class="temporal-section-header" data-section="sectionPast">
-            <div class="temporal-section-label">
-              <span class="temporal-phase-dot dot-apply"></span>
-              <span class="temporal-section-title">Apply</span>
-              <span class="temporal-section-subtitle" id="pastTopicName"></span>
-            </div>
-            <button class="module-collapse-btn" data-module="sectionPast" title="Collapse">
-              <svg class="module-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="10" height="10">
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </button>
-          </div>
-          <div class="temporal-section-subtitle">shaping this response</div>
-          <div class="module-body" id="sectionPastBody">
-            <div class="past-chats-list" id="pastChatsList">
-              <p class="temporal-empty-hint">No relevant past chats yet. Keep chatting to build history.</p>
+              <div class="status-section status-section-goals" id="constructGoalsSection">
+                <div class="status-section-label collapsible" data-section-toggle="goals">
+                  <span class="section-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="8" height="8"><polyline points="6 9 12 15 18 9"/></svg></span>
+                  Goals
+                </div>
+                <div class="status-section-items" id="constructGoalsList" data-section-items="goals"></div>
+                <div class="add-intention-row add-goal-row">
+                  <input type="text" id="addGoalInput" class="add-intention-input" placeholder="Add a goal…" />
+                  <button id="addGoalBtn" class="add-intention-btn" title="Add goal">+</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -249,10 +236,6 @@
           <div class="temporal-section-subtitle">where it's heading</div>
           <div class="module-body" id="sectionFutureBody">
             <div class="goals-list" id="goalsList"></div>
-            <div class="add-intention-row add-goal-row">
-              <input type="text" id="addGoalInput" class="add-intention-input" placeholder="Add a goal…" />
-              <button id="addGoalBtn" class="add-intention-btn" title="Add goal">+</button>
-            </div>
             <div class="direction-cards" id="directionCards"></div>
           </div>
         </div>

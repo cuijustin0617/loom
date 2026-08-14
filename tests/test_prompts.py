@@ -65,6 +65,7 @@ class TestNewDirectionsPrompt:
             coverage="- Overview: Cardio\n- Past chat: Protein basics",
             current_summary="Asking about protein",
             previously_suggested="None",
+            annotations="(none)",
         )
         assert "Fitness" in result
         assert "Cardio" in result
@@ -75,6 +76,7 @@ class TestNewDirectionsPrompt:
             topic_name="T", topic_status="S",
             coverage="None yet.", current_summary="test",
             previously_suggested="None",
+            annotations="(none)",
         )
         assert "newDirections" in result
 
@@ -83,15 +85,17 @@ class TestNewDirectionsPrompt:
             topic_name="T", topic_status="S",
             coverage="None yet.", current_summary="test",
             previously_suggested="None",
+            annotations="(none)",
         )
         assert '"title"' in result
-        assert '"question"' in result
+        assert '"exampleQuestion"' in result
 
     def test_empty_coverage_formats(self):
         result = SIDEBAR_NEW_DIRECTIONS_PROMPT.format(
             topic_name="T", topic_status="S",
             coverage="None yet.", current_summary="test",
             previously_suggested="None",
+            annotations="(none)",
         )
         assert "None yet." in result
 
@@ -131,6 +135,7 @@ class TestStatusUpdatePrompt:
             annotations="(none)",
         )
         assert '"overview"' in result
+        assert '"goals"' in result
         assert '"concepts_traversed"' not in result
         assert '"stance"' not in result
 

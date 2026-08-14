@@ -121,13 +121,19 @@ const Storage = {
       });
     }
 
-    const s = topic.statusSummary;
-    if (s && typeof s === 'object') {
-      if (Array.isArray(s.overview)) {
-        s.overview = s.overview.map(pt =>
-          typeof pt === 'string' ? { text: pt, source: 'inferred' } : pt
-        );
-      }
+    let s = topic.statusSummary;
+    if (typeof s === 'string') {
+      const text = s.trim();
+      s = { overview: text ? [{ text, source: 'inferred' }] : [], goals: [] };
+      topic.statusSummary = s;
+    } else if (!s || typeof s !== 'object' || Array.isArray(s)) {
+      s = { overview: [], goals: [] };
+      topic.statusSummary = s;
+    } else {
+      if (!Array.isArray(s.overview)) s.overview = [];
+      s.overview = s.overview.map(pt =>
+        typeof pt === 'string' ? { text: pt, source: 'inferred' } : pt
+      );
       // One-time archive of concepts_traversed (removed from the framework)
       if (Array.isArray(s.concepts_traversed) && s.concepts_traversed.length > 0) {
         if (!Array.isArray(topic._archivedConcepts)) topic._archivedConcepts = [];
@@ -137,7 +143,6 @@ const Storage = {
           .filter(c => c.stance === 'interested' && c.title)
           .map(c => c.title);
         if (interested.length > 0) {
-          if (!Array.isArray(s.overview)) s.overview = [];
           const already = s.overview.some(pt => {
             const t = (typeof pt === 'string' ? pt : (pt && pt.text) || '').toLowerCase();
             return t.startsWith('interested in:');
@@ -147,6 +152,19 @@ const Storage = {
           }
         }
         delete s.concepts_traversed;
+      }
+      // Seed Construct goals from the legacy topic.goals array (keep topic.goals unused)
+      if (!Array.isArray(s.goals)) {
+        const legacy = Array.isArray(topic.goals) ? topic.goals : [];
+        s.goals = legacy.map(g => {
+          if (!g || typeof g !== 'object') {
+            const text = String(g || '').trim();
+            return text ? { id: 'goal_' + Utils.generateId(), text, source: 'user' } : null;
+          }
+          const text = (g.text || g.title || '').trim();
+          if (!text) return null;
+          return { id: g.id || ('goal_' + Utils.generateId()), text, source: 'user' };
+        }).filter(Boolean);
       }
     }
     if (topic.statusHistory.length > 10) {
@@ -306,7 +324,7 @@ const Storage = {
     this._saveAll(data);
   },
 
-  createTopic(name, statusSummary = '') {
+  createTopic(name, statusSummary) {
     const topics = this.getTopics();
     const existingHues = topics.map(t => {
       if (t.colorHue !== undefined && t.colorHue !== null) return t.colorHue;
@@ -314,11 +332,22 @@ const Storage = {
       return legacy.hue;
     });
     const colorHue = Utils.findDistantHue(existingHues);
+    let summary;
+    if (statusSummary && typeof statusSummary === 'object' && !Array.isArray(statusSummary)) {
+      summary = {
+        overview: Array.isArray(statusSummary.overview) ? statusSummary.overview : [],
+        goals: Array.isArray(statusSummary.goals) ? statusSummary.goals : [],
+      };
+    } else if (typeof statusSummary === 'string' && statusSummary.trim()) {
+      summary = { overview: [{ text: statusSummary.trim(), source: 'user' }], goals: [] };
+    } else {
+      summary = { overview: [], goals: [] };
+    }
     const topic = {
       id: 'topic_' + Utils.generateId(),
       name,
       colorHue,
-      statusSummary,
+      statusSummary: summary,
       statusLastUpdated: Utils.timestamp(),
       userCreated: true,
       lastActive: Utils.timestamp(),

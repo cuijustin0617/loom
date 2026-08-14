@@ -94,8 +94,8 @@ class TestBuildCoverageStr:
             {"overview": [{"text": "Knows Python"}, "Uses PyTorch"]},
             [{"title": "NN intro", "summary": "Covered backprop"}],
         )
-        assert "- Overview: Knows Python" in out
-        assert "- Overview: Uses PyTorch" in out
+        assert "- Knows Python" in out
+        assert "- Uses PyTorch" in out
         assert "- Past chat: NN intro — Covered backprop" in out
 
     def test_empty_is_none_yet(self):
@@ -104,7 +104,7 @@ class TestBuildCoverageStr:
 
     def test_string_topic_status(self):
         out = _build_coverage_str("Legacy profile text", [])
-        assert "- Overview: Legacy profile text" in out
+        assert "Legacy profile text" in out
 
     def test_ignores_concepts_traversed(self):
         out = _build_coverage_str(
@@ -112,7 +112,7 @@ class TestBuildCoverageStr:
             [],
         )
         assert "SVM" not in out
-        assert "- Overview: Goal: NLP" in out
+        assert "- Goal: NLP" in out
 
 
 # ── Admin dashboard re-key (Phase 8) ─────────────────────────────────────────
@@ -140,14 +140,15 @@ class TestAdminDashboardCategories:
 
     def test_apply_events(self):
         html = backend_main._ADMIN_HTML
-        for e in ("past_build_on_click", "connection_contested",
-                  "context_suppressed_in_chat", "context_item_scoped", "context_block_added"):
+        for e in ("context_card_shown", "context_excluded_for_topic",
+                  "context_link_opened", "connection_contested"):
             assert f"'{e}'" in html
+        assert "context_suppressed_in_chat" not in html
 
     def test_evolve_events(self):
         html = backend_main._ADMIN_HTML
-        for e in ("intention_saved", "intention_explored", "intention_authored",
-                  "future_direction_new_chat", "future_directions_refreshed"):
+        for e in ("goal_saved", "goal_authored", "goal_question_asked",
+                  "future_directions_refreshed"):
             assert f"'{e}'" in html
 
     def test_scrutability_events(self):

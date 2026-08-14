@@ -64,6 +64,9 @@ const TopicSuggester = {
       if (Array.isArray(s.overview)) {
         parts.push(...s.overview.map(it => (typeof it === 'string' ? it : (it && it.text) || '')));
       }
+      if (Array.isArray(s.goals)) {
+        parts.push(...s.goals.map(g => (typeof g === 'string' ? g : (g && (g.text || g.title)) || '')));
+      }
       if (Array.isArray(s.threads)) {
         s.threads.forEach(t => { if (t.label) parts.push(t.label); });
       }
@@ -1023,12 +1026,9 @@ const App = {
             embedding: c.embedding, topicId: c.topicId,
           }))
         : [];
-      // Exclude contested (topic-level) and suppressed (chat-level) past chats
+      // Exclude contested (topic-level) past chats
       const chatTopic = currentChat2?.topicId ? Storage.getTopic(currentChat2.topicId) : null;
-      const excluded = new Set([
-        ...((chatTopic && chatTopic.excludedChatIds) || []),
-        ...((currentChat2 && currentChat2.suppressedChatIds) || []),
-      ]);
+      const excluded = new Set((chatTopic && chatTopic.excludedChatIds) || []);
       if (excluded.size > 0) {
         sameTopicSummaries = sameTopicSummaries.filter(s => !excluded.has(s.id));
       }
@@ -1052,6 +1052,16 @@ const App = {
     };
     if (apiAttachments) {
       reqBody.attachments = apiAttachments;
+    }
+    if (reqBody.topicStatus) {
+      const overview = (currentTopic.statusSummary && currentTopic.statusSummary.overview) || [];
+      const goals = (currentTopic.statusSummary && currentTopic.statusSummary.goals) || [];
+      StudyLog.event('construct_included_in_chat', {
+        topicId: currentTopic.id,
+        nOverview: overview.length,
+        nGoals: goals.length,
+        surface: 'chat',
+      });
     }
 
     // Create a live assistant message element for streaming
@@ -1105,10 +1115,6 @@ const App = {
             if (STUDY_CONDITION === 'loom') {
               if (evt.topic && evt.topic.confidence > 0.35) {
                 await this._handleTopicDetection(evt.topic);
-              }
-              const chat = Storage.getChat(this.currentChatId);
-              if (!this._isUnassignedTopic(chat?.topicId)) {
-                Sidebar.showPastChats(evt.injectedPastChats || []);
               }
             }
           } else if (evt.type === 'error') {
@@ -1495,6 +1501,7 @@ const App = {
     StudyLog.event('text_label_applied', {
       stage: 'construct',
       initiative: 'mixed',
+      origin: 'user',
       label,
       hasComment: label === 'comment',
       msgId: state.msgId,
@@ -1945,18 +1952,75 @@ const App = {
 
   _renderInjectedPastPanel(assistantEl, injectedPastChats) {
     if (!injectedPastChats || injectedPastChats.length === 0) return;
+    const existing = assistantEl.querySelector('.past-context-panel');
+    if (existing) existing.remove();
+
+    const currentChat = this.currentChatId ? Storage.getChat(this.currentChatId) : null;
+    const topic = currentChat?.topicId ? Storage.getTopic(currentChat.topicId) : null;
+    const excluded = new Set((topic && topic.excludedChatIds) || []);
+
     const panel = document.createElement('div');
     panel.className = 'past-context-panel';
-    const cardsHtml = injectedPastChats.map(chat => {
+    const label = document.createElement('span');
+    label.className = 'past-context-label';
+    label.textContent = 'Context used:';
+    panel.appendChild(label);
+
+    injectedPastChats.forEach(chat => {
+      const card = document.createElement('div');
+      card.className = 'past-context-card';
+      if (chat.chatId && excluded.has(chat.chatId)) {
+        card.classList.add('past-chat-contested');
+      }
       const title = Utils.escapeHtml(chat.title || 'Past conversation');
-      const excerpt = chat.userAsked ? Utils.escapeHtml(chat.userAsked.slice(0, 80)) : '';
-      return `<span class="past-context-tag" title="${excerpt}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="9" height="9"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-        ${title}
-      </span>`;
-    }).join('');
-    panel.innerHTML = `<span class="past-context-label">Context used:</span>${cardsHtml}`;
+      const excerpt = chat.userAsked ? Utils.escapeHtml(chat.userAsked.slice(0, 120)) : '';
+      card.innerHTML = `
+        <div class="temporal-card-header">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11" class="temporal-card-icon">
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+          </svg>
+          <span class="temporal-card-title">${title}</span>
+        </div>
+        ${excerpt ? `<div class="temporal-card-excerpt">${excerpt}</div>` : ''}
+        <div class="temporal-card-actions">
+          <button class="past-context-exclude-btn" type="button">Don't use for this topic</button>
+          <button class="past-context-open-btn" type="button" data-chat-id="${Utils.escapeHtml(chat.chatId || '')}">Open chat →</button>
+        </div>
+      `;
+      card.querySelector('.past-context-exclude-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!topic || !chat.chatId) return;
+        if (!Array.isArray(topic.excludedChatIds)) topic.excludedChatIds = [];
+        if (!topic.excludedChatIds.includes(chat.chatId)) topic.excludedChatIds.push(chat.chatId);
+        Storage.saveTopic(topic);
+        card.classList.add('past-chat-contested');
+        StudyLog.event('context_excluded_for_topic', {
+          topicId: topic.id, chatId: chat.chatId, initiative: 'user', surface: 'chat',
+        });
+      });
+      card.querySelector('.past-context-open-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        const chatId = chat.chatId;
+        if (!chatId || !Storage.getChat(chatId)) return;
+        Sidebar._flushDirtyLabels();
+        this._summarizeCurrentChat();
+        this.msgCountSinceRefresh = 0;
+        this._renderChat(chatId);
+        this._renderChatList();
+        StudyLog.event('context_link_opened', {
+          topicId: topic ? topic.id : null, chatId, surface: 'chat',
+        });
+      });
+      panel.appendChild(card);
+    });
+
     assistantEl.insertBefore(panel, assistantEl.firstChild);
+    StudyLog.event('context_card_shown', {
+      topicId: topic ? topic.id : null,
+      count: injectedPastChats.length,
+      surface: 'chat',
+    });
   },
 
   _isUnassignedTopic(topicId) {
@@ -2319,14 +2383,6 @@ const App = {
       Sidebar.hide();
     }
 
-    if (!this._isUnassignedTopic(chat?.topicId)) {
-      // Show past chats from the most recent assistant message that has injected context
-      const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant' && m.injectedPastChats?.length > 0);
-      if (lastAssistant) {
-        Sidebar.showPastChats(lastAssistant.injectedPastChats);
-      }
-    }
-
     this._highlightActiveChat(chatId);
   },
 
@@ -2396,14 +2452,15 @@ const App = {
     const cards = [];
     // Saved goals come first on the welcome screen
     for (const topic of topics) {
-      const goals = topic.goals || [];
+      const goals = (topic.statusSummary && Array.isArray(topic.statusSummary.goals))
+        ? topic.statusSummary.goals : [];
       for (const g of goals) {
         cards.push({
           topicId: topic.id,
           topicName: topic.name,
           topicColorObj: topic,
           statusSummary: Sidebar._serializeStatus(topic.statusSummary) || '',
-          title: g.title || '',
+          title: g.text || g.title || '',
           question: '',
           isGoal: true,
           goalId: g.id,

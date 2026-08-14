@@ -1742,8 +1742,11 @@ body {
 
 .sidebar-content {
   flex: 1;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   padding: 12px 16px;
+  min-height: 0;
 }
 
 .sidebar-empty {
@@ -3055,10 +3058,24 @@ body {
   animation: slideUp 0.25s ease;
 }
 
+.section-current {
+  flex: 0 1 auto;
+  overflow: auto;
+  min-height: 0;
+  max-height: 75%;
+}
+
+.section-future {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 45%;
+  overflow: auto;
+}
+
 .temporal-section + .temporal-section {
   border-top: 1px solid var(--border);
-  padding-top: 10px;
-  margin-top: 10px;
+  padding-top: 8px;
+  margin-top: 8px;
 }
 
 .temporal-section-header {
@@ -3811,11 +3828,10 @@ body {
 /* ── Past Context Panel (above assistant messages) ────────────────────── */
 .past-context-panel {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 6px;
-  flex-wrap: wrap;
-  padding: 4px min(76px, 2.36%) 0;
-  margin-bottom: -2px;
+  padding: 6px min(76px, 2.36%) 8px;
+  margin-bottom: 4px;
 }
 
 .past-context-label {
@@ -3825,17 +3841,91 @@ body {
   flex-shrink: 0;
 }
 
-.past-context-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 10px;
-  font-weight: 500;
-  color: var(--accent-blue);
-  background: var(--accent-blue-light);
-  padding: 2px 7px;
-  border-radius: 10px;
+.past-context-panel .past-context-card {
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  border-left: 2px solid rgba(35, 131, 226, 0.3);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
   cursor: default;
+}
+
+.past-context-panel .past-context-card:hover {
+  border-left-color: var(--accent-blue);
+  background: rgba(35, 131, 226, 0.04);
+}
+
+.past-context-panel .temporal-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.past-context-panel .temporal-card-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.past-context-panel .temporal-card-excerpt {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 3px;
+  line-height: 1.4;
+}
+
+.past-context-panel .temporal-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.past-context-exclude-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.past-context-exclude-btn:hover {
+  color: var(--text-secondary);
+  text-decoration: underline;
+}
+
+.past-context-open-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 10px;
+  color: var(--accent-blue);
+  margin-left: auto;
+}
+
+.past-context-open-btn:hover {
+  text-decoration: underline;
+}
+
+.past-context-panel .past-chat-contested .temporal-card-header,
+.past-context-panel .past-chat-contested .temporal-card-excerpt {
+  text-decoration: line-through;
+  opacity: 0.55;
+}
+
+.past-context-panel .past-chat-contested .past-context-exclude-btn {
+  pointer-events: none;
+  opacity: 0.4;
+}
+
+.status-section-goals {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
 }
 
 /* ── Concept Tag Chips ────────────────────────────────────────────────── */
@@ -4215,7 +4305,6 @@ body {
 }
 
 /* ── Baseline Mode ────────────────────────────────────────────────────── */
-body.baseline-mode .section-past,
 body.baseline-mode .section-current,
 body.baseline-mode .section-future,
 body.baseline-mode #sidebarRefreshBtn,

@@ -65,11 +65,15 @@ test('padding reduction is approximately 30% (108 → ~76)', () => {
 
 console.log('\n─── Construct / Apply / Evolve Temporal Sections ───');
 
-test('HTML has section-past with pastChatsList', () => {
-    assert.ok(htmlContent.includes('id="sectionPast"'),
-        'index.html should have sectionPast');
-    assert.ok(htmlContent.includes('id="pastChatsList"'),
-        'index.html should have pastChatsList');
+test('HTML has Construct + Evolve sections (Apply moved in-chat)', () => {
+    assert.ok(htmlContent.includes('id="sectionCurrent"'),
+        'index.html should have sectionCurrent');
+    assert.ok(htmlContent.includes('id="sectionFuture"'),
+        'index.html should have sectionFuture');
+    assert.ok(!htmlContent.includes('id="sectionPast"'),
+        'Apply sectionPast should be removed from the sidebar');
+    assert.ok(!htmlContent.includes('id="pastChatsList"'),
+        'pastChatsList should be removed from the sidebar');
 });
 
 test('HTML has section-current with statusStructured', () => {
@@ -87,19 +91,20 @@ test('HTML has section-future with directionCards', () => {
     assert.ok(!htmlContent.includes('evolve-subheader-suggested'),
         'index.html should not hardcode a Suggested subheader (tags live on cards)');
     const goalsIdx = htmlContent.indexOf('id="goalsList"');
-    const addIdx = htmlContent.indexOf('addGoalInput');
     const dirsIdx = htmlContent.indexOf('id="directionCards"');
-    assert.ok(goalsIdx < addIdx && addIdx < dirsIdx,
-        'Evolve order: goalsList → add-goal → directionCards');
+    assert.ok(goalsIdx > -1 && dirsIdx > -1 && goalsIdx < dirsIdx,
+        'Evolve order: goalsList → directionCards');
+    assert.ok(htmlContent.includes('id="addGoalInput"') && htmlContent.includes('constructGoals'),
+        'Add-goal input lives in Construct');
 });
 
-test('HTML has temporal breadcrumb with Construct/Apply/Evolve crumbs', () => {
+test('HTML has temporal breadcrumb with Construct/Evolve crumbs', () => {
     assert.ok(htmlContent.includes('data-phase="construct"'),
         'index.html should have construct temporal crumb');
-    assert.ok(htmlContent.includes('data-phase="apply"'),
-        'index.html should have apply temporal crumb');
     assert.ok(htmlContent.includes('data-phase="evolve"'),
         'index.html should have evolve temporal crumb');
+    assert.ok(!htmlContent.includes('data-phase="apply"'),
+        'Apply crumb should be removed');
 });
 
 test('graph view is disabled in HTML', () => {
@@ -182,15 +187,15 @@ test('old statusUpdateBtn text element is removed from HTML', () => {
 
 console.log('\n─── TODO 4: Collapsible Modules ───');
 
-test('all 3 modules have module-collapse-btn', () => {
+test('Construct and Evolve modules have module-collapse-btn', () => {
     const collapseButtons = htmlContent.match(/module-collapse-btn/g);
-    assert.ok(collapseButtons && collapseButtons.length >= 3,
-        `Should have at least 3 module-collapse-btn occurrences, found ${collapseButtons ? collapseButtons.length : 0}`);
+    assert.ok(collapseButtons && collapseButtons.length >= 2,
+        `Should have at least 2 module-collapse-btn occurrences, found ${collapseButtons ? collapseButtons.length : 0}`);
 });
 
-test('all 3 temporal sections have module-body wrapper', () => {
-    assert.ok(htmlContent.includes('id="sectionPastBody"'),
-        'Past section should have sectionPastBody');
+test('Construct and Evolve sections have module-body wrapper', () => {
+    assert.ok(!htmlContent.includes('id="sectionPastBody"'),
+        'Past section body should be removed');
     assert.ok(htmlContent.includes('id="sectionCurrentBody"'),
         'Current section should have sectionCurrentBody');
     assert.ok(htmlContent.includes('id="sectionFutureBody"'),
@@ -212,8 +217,8 @@ test('module-body.collapsed hides content', () => {
 });
 
 test('temporal section headers have data-module attributes for collapse', () => {
-    assert.ok(htmlContent.includes('data-module="sectionPast"'),
-        'Past section header should have data-module="sectionPast"');
+    assert.ok(!htmlContent.includes('data-module="sectionPast"'),
+        'Past section collapse control should be removed');
     assert.ok(htmlContent.includes('data-module="sectionCurrent"'),
         'Current section header should have data-module="sectionCurrent"');
     assert.ok(htmlContent.includes('data-module="sectionFuture"'),
@@ -272,7 +277,7 @@ test('overview items have independent scroll container', () => {
         'sidebar render should tag overview section');
     assert.ok(cssContent.includes('.status-section-overview .status-section-items'),
         'CSS should define independent overview scrolling');
-    assert.ok(cssContent.includes('max-height: 140px') && cssContent.includes('overflow-y: auto'),
+    assert.ok(cssContent.includes('max-height: 220px') && cssContent.includes('overflow-y: auto'),
         'Overview section items should have max-height + overflow auto');
 });
 
@@ -326,16 +331,13 @@ test('module collapse localStorage logic: toggle and persist', () => {
 
 console.log('\n─── Past Chat Cards & Context Drag ───');
 
-test('sidebar.js has _createPastChatCard method', () => {
-    assert.ok(sidebarContent.includes('_createPastChatCard'),
-        'sidebar.js should define _createPastChatCard');
-});
-
-test('past chat card has continue + dont-use actions', () => {
-    assert.ok(sidebarContent.includes('past-continue-btn') || sidebarContent.includes('Continue this chat'),
-        'Past chat card should have Continue this chat');
-    assert.ok(sidebarContent.includes("Don't use this") || sidebarContent.includes('past-suppress-btn'),
-        'Past chat card should have Don\'t use this');
+test('app.js renders in-chat past context cards', () => {
+    assert.ok(appContent.includes('_renderInjectedPastPanel'),
+        'app.js should define _renderInjectedPastPanel');
+    assert.ok(appContent.includes("Don't use for this topic"),
+        'In-chat cards should have Don\'t use for this topic');
+    assert.ok(appContent.includes('Open chat →'),
+        'In-chat cards should have Open chat');
 });
 
 test('suggested goal cards are not draggable', () => {
@@ -687,16 +689,16 @@ test('sendMessage provides default message for attachment-only sends', () => {
 
 console.log('\n─── NEW TODO 5: Deduplicate Connection Cards ───');
 
-test('sidebar.js has showPastChats method for rendering past context', () => {
-    assert.ok(sidebarContent.includes('showPastChats('),
-        'sidebar.js should define showPastChats method');
+test('app.js renders in-chat past context from injectedPastChats', () => {
+    assert.ok(appContent.includes('_renderInjectedPastPanel('),
+        'app.js should define _renderInjectedPastPanel');
+    assert.ok(!sidebarContent.includes('showPastChats('),
+        'sidebar Apply showPastChats should be removed');
 });
 
-test('past chat cards render userAsked excerpt', () => {
-    assert.ok(sidebarContent.includes('userAsked'),
-        'Past chat cards should render userAsked excerpt');
-    assert.ok(sidebarContent.includes('Related to your current chat'),
-        'Past chat meta should say Related to your current chat');
+test('past context cards render userAsked excerpt', () => {
+    assert.ok(appContent.includes('userAsked'),
+        'Past context cards should render userAsked excerpt');
 });
 
 test('CSS has past-chat-card style', () => {
@@ -1688,11 +1690,11 @@ test('CSS has .type-breadth/.type-depth (no badge pills)', () => {
         'CSS should style depth directions');
 });
 
-test('sidebar.js prioritizes saved goal cards and includes one suggestion', () => {
-    assert.ok(sidebarContent.includes('at most one unsaved') || sidebarContent.includes('unsaved[0]'),
-        'Evolve cards should include at most one unsaved suggestion');
+test('sidebar.js shows unsaved suggested goals with breadth before depth', () => {
+    assert.ok(sidebarContent.includes('_findGoal(topic, d.title)'),
+        'Suggested cards skip already-saved goals');
     assert.ok(sidebarContent.includes("breadth: 0") || sidebarContent.includes("order[a.type]"),
-        'Unsaved suggestion slot should prefer breadth before depth');
+        'Unsaved suggestions prefer breadth before depth');
 });
 
 test('backend main.py serializes status for directions prompt', () => {

@@ -164,16 +164,16 @@ test('current_profile_section_toggled event exists (replaces overview_section_to
         'Should log section toggle event');
 });
 
-test('past_lookup event exists (replaces module2_connection_shown)', () => {
-    assert.ok(sidebarContent.includes("'past_lookup'"),
-        'Should log past_lookup event');
+test('context_card_shown event exists (replaces past_lookup)', () => {
+    assert.ok(appContent.includes("'context_card_shown'"),
+        'Should log context_card_shown event');
 });
 
 test('past continue uses navigation not build-on event', () => {
     assert.ok(!sidebarContent.includes("'past_build_on_click'"),
         'past_build_on_click removed');
-    assert.ok(sidebarContent.includes('past-continue-btn') || sidebarContent.includes('Continue this chat'),
-        'Continue this chat present');
+    assert.ok(appContent.includes('Open chat →') || appContent.includes('past-context-open-btn'),
+        'Open chat present on in-chat cards');
 });
 
 test('future_direction_clicked event removed', () => {
@@ -338,21 +338,21 @@ test('section_collapsed event logged in sidebar.js', () => {
 
 console.log('\n─── New Events: Past Section ───');
 
-test('past_lookup event logged with topicId', () => {
-    assert.ok(sidebarContent.includes("'past_lookup'"), 'Should log past_lookup');
-    const idx = sidebarContent.indexOf("'past_lookup'");
-    const surrounding = sidebarContent.substring(idx - 20, idx + 200);
-    assert.ok(surrounding.includes('topicId'), 'past_lookup should include topicId');
+test('context_card_shown event logged with topicId', () => {
+    assert.ok(appContent.includes("'context_card_shown'"), 'Should log context_card_shown');
+    const idx = appContent.indexOf("'context_card_shown'");
+    const surrounding = appContent.substring(idx - 20, idx + 280);
+    assert.ok(surrounding.includes('topicId'), 'context_card_shown should include topicId');
 });
 
-test('connection_contested event logged for user feedback', () => {
-    assert.ok(sidebarContent.includes("'connection_contested'"),
+test('connection_contested event logged for inline connection cards', () => {
+    assert.ok(appContent.includes("'connection_contested'"),
         'Should log connection_contested event');
 });
 
-test('context_suppressed_in_chat event logged for chat-level suppression', () => {
-    assert.ok(sidebarContent.includes("'context_suppressed_in_chat'"),
-        'Should log context_suppressed_in_chat event');
+test('context_excluded_for_topic event logged for topic-level exclusion', () => {
+    assert.ok(appContent.includes("'context_excluded_for_topic'"),
+        'Should log context_excluded_for_topic event');
 });
 
 test('context_item_scoped event removed with scope toggle', () => {
@@ -491,8 +491,8 @@ test('no duplicate event names with different meanings', () => {
         'chat_selected', 'view_switched', 'topic_auto_detect_triggered',
         'topic_picker_opened', 'topic_picker_selected', 'topic_picker_keyboard_select',
         'topic_merge_drag', 'topic_merge_dialog_opened', 'topic_merge_confirmed', 'topic_merge_cancelled',
-        'past_lookup',
-        'connection_contested', 'context_suppressed_in_chat',
+        'context_card_shown',
+        'connection_contested', 'context_excluded_for_topic',
         'current_profile_edited',
         'proposal_shown', 'proposal_accepted', 'proposal_edited', 'proposal_dismissed',
         'proposal_empty', 'proposal_superseded',
@@ -527,8 +527,9 @@ const ALL_EXPECTED_EVENTS = [
     'topic_picker_opened', 'topic_picker_selected', 'topic_picker_keyboard_select',
     'topic_merge_drag', 'topic_merge_dialog_opened', 'topic_merge_confirmed', 'topic_merge_cancelled',
     // Past section
-    'past_lookup',
-    'connection_contested', 'context_suppressed_in_chat',
+    'context_card_shown', 'context_excluded_for_topic', 'context_link_opened',
+    'connection_contested',
+    'construct_included_in_chat',
     // Current profile
     'current_profile_edited',
     'proposal_shown', 'proposal_accepted', 'proposal_edited', 'proposal_dismissed',
