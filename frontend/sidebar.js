@@ -34,7 +34,7 @@ const Sidebar = {
     document.getElementById('sidebarEmpty').style.display = 'none';
 
     const topic = Storage.getTopic(topicId);
-    this._renderGoals(topic);
+    this._renderEvolveSection(topic);
     if (topic) {
       const tc = Utils.getTopicColor(topic);
       const badge = document.getElementById('topicBadge');
@@ -118,6 +118,10 @@ const Sidebar = {
       const data = await resp.json();
       if (Array.isArray(data.newDirections)) {
         data.newDirections = data.newDirections.map(d => this._normalizeDirection(d));
+        StudyLog.event('directions_refreshed', {
+          stage: 'evolve', initiative: 'system', surface: 'sidebar', topicId: topic.id,
+          count: data.newDirections.length,
+        });
       }
       this.currentData = data;
       this.render(data, topic);
@@ -146,8 +150,6 @@ const Sidebar = {
     }
     this._renderStatus(topic.statusSummary || null);
 
-    // Future: goals + suggested goals — always breadth first, depth second
-    this._renderGoals(topic);
     this._renderSuggestedGoals((data.newDirections || []).map(d => this._normalizeDirection(d)));
   },
 
@@ -245,12 +247,25 @@ const Sidebar = {
 
   _ensureStatusShape(topic) {
     if (!topic) return;
-    if (!topic.statusSummary || typeof topic.statusSummary !== 'object' || Array.isArray(topic.statusSummary)) {
-      topic.statusSummary = { overview: [], goals: [] };
-    } else {
-      if (!Array.isArray(topic.statusSummary.overview)) topic.statusSummary.overview = [];
-      if (!Array.isArray(topic.statusSummary.goals)) topic.statusSummary.goals = [];
+    const s = topic.statusSummary;
+    if (typeof s === 'string') {
+      const text = s.trim();
+      topic.statusSummary = { overview: text ? [{ text, source: 'inferred' }] : [], goals: [] };
+      return;
     }
+    if (!s || typeof s !== 'object') {
+      topic.statusSummary = { overview: [], goals: [] };
+      return;
+    }
+    if (Array.isArray(s)) {
+      topic.statusSummary = {
+        overview: s.map(pt => this._normalizeOverviewItem(pt)).filter(Boolean),
+        goals: [],
+      };
+      return;
+    }
+    if (!Array.isArray(s.overview)) s.overview = [];
+    if (!Array.isArray(s.goals)) s.goals = [];
   },
 
   _getConfirmedGoals(topic) {
@@ -284,9 +299,10 @@ const Sidebar = {
     const src = item.source || null;
     const srcBadge = src === 'label-derived' ? '<span class="status-item-source">from your labels</span>'
       : src === 'user' ? '<span class="status-item-source">you wrote this</span>' : '';
-    return `<div class="status-item status-bullet" data-section="goals" data-idx="${i}">
+    return `<div class="status-item status-bullet" data-section="goals" data-idx="${i}" data-goal-id="${Utils.escapeHtml(item.id || '')}">
       <span class="status-item-text">${Utils.escapeHtml(item.text)}${srcBadge}</span>
       <span class="status-item-actions">
+        <button class="status-item-btn status-item-ask" title="Ask">Ask</button>
         <button class="status-item-btn status-item-del" title="Remove">×</button>
       </span></div>`;
   },
@@ -318,6 +334,7 @@ const Sidebar = {
         } else {
           html += `<div class="status-item status-bullet suggestion-item" data-change-idx="${chIdx}">
             <span class="status-item-text"><span class="diff-del">${Utils.escapeHtml(text)}</span></span>
+            ${this._proposalLineActionsHtml(chIdx)}
           </div>`;
         }
       } else if (edit) {
@@ -330,6 +347,7 @@ const Sidebar = {
         } else {
           html += `<div class="status-item status-bullet suggestion-item" data-change-idx="${chIdx}">
             <span class="status-item-text">${this._renderWordDiffHtml(edit.oldText, edit.text)}</span>
+            ${this._proposalLineActionsHtml(chIdx)}
           </div>`;
         }
       } else {
@@ -346,6 +364,7 @@ const Sidebar = {
       } else {
         html += `<div class="status-item status-bullet suggestion-item" data-change-idx="${i}">
           <span class="status-item-text"><span class="diff-add">${Utils.escapeHtml(c.text || '')}</span></span>
+          ${this._proposalLineActionsHtml(i)}
         </div>`;
       }
     });
@@ -413,6 +432,7 @@ const Sidebar = {
         } else {
           html += `<div class="${rowCls} suggestion-item" data-change-idx="${chIdx}">
             <span class="status-item-text"><span class="diff-del">${Utils.escapeHtml(item.text)}</span></span>
+            ${this._proposalLineActionsHtml(chIdx)}
           </div>`;
         }
       } else if (edit) {
@@ -425,6 +445,7 @@ const Sidebar = {
         } else {
           html += `<div class="${rowCls} suggestion-item" data-change-idx="${chIdx}">
             <span class="status-item-text">${this._renderWordDiffHtml(edit.oldText, edit.text)}</span>
+            ${this._proposalLineActionsHtml(chIdx)}
           </div>`;
         }
       } else {
@@ -442,10 +463,25 @@ const Sidebar = {
       } else {
         html += `<div class="${rowCls} suggestion-item" data-change-idx="${i}">
           <span class="status-item-text"><span class="diff-add">${Utils.escapeHtml(c.text || '')}</span></span>
+          ${this._proposalLineActionsHtml(i)}
         </div>`;
       }
     });
     return html;
+  },
+
+  _proposalLineActionsHtml(chIdx) {
+    return `<span class="status-item-actions proposal-line-actions">
+      <button class="status-item-btn proposal-accept-change" data-change-idx="${chIdx}" title="Accept">✓</button>
+      <button class="status-item-btn proposal-drop-change" data-change-idx="${chIdx}" title="Reject">×</button>
+    </span>`;
+  },
+
+  _changeKindShort(kind) {
+    if ((kind || '').endsWith('_add')) return 'add';
+    if ((kind || '').endsWith('_edit')) return 'edit';
+    if ((kind || '').endsWith('_remove')) return 'remove';
+    return kind || '';
   },
 
   _proposalEvidenceHint(proposal) {
@@ -676,11 +712,11 @@ const Sidebar = {
     }
     const changes = this._diffStatus(topic.statusSummary || { overview: [], goals: [] }, effective);
     if (changes.length === 0) {
-      StudyLog.event('proposal_empty', { stage: 'construct', initiative: 'mixed', topicId: topic.id, trigger, ...this._proposalLogPayload(changes) });
+      StudyLog.event('proposal_empty', { stage: 'construct', initiative: 'mixed', surface: 'sidebar', topicId: topic.id, trigger, ...this._proposalLogPayload(changes) });
       return false;
     }
     if (topic.pendingProposal) {
-      StudyLog.event('proposal_superseded', { stage: 'construct', initiative: 'mixed', topicId: topic.id, trigger, ...this._proposalLogPayload(topic.pendingProposal.changes) });
+      StudyLog.event('proposal_superseded', { stage: 'construct', initiative: 'mixed', surface: 'sidebar', topicId: topic.id, trigger, ...this._proposalLogPayload(topic.pendingProposal.changes) });
     }
     topic.pendingProposal = {
       ts: Utils.timestamp(),
@@ -691,7 +727,7 @@ const Sidebar = {
     };
     Storage.saveTopic(topic);
     StudyLog.event('proposal_shown', {
-      stage: 'construct', initiative: 'mixed', topicId: topic.id, trigger, nChanges: changes.length,
+      stage: 'construct', initiative: 'mixed', surface: 'sidebar', topicId: topic.id, trigger, nChanges: changes.length,
       ...this._proposalLogPayload(changes),
     });
     return true;
@@ -709,22 +745,29 @@ const Sidebar = {
 
   _bindProposalActions(editMode) {
     const bar = document.getElementById('proposalActionsBar');
-    if (!bar) return;
     const bind = (sel, fn) => {
-      const btn = bar.querySelector(sel);
+      const btn = bar && bar.querySelector(sel);
       if (btn) btn.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
     };
+    const wrap = document.getElementById('statusContent') || this._getStatusContainer();
+    if (wrap) {
+      wrap.querySelectorAll('.proposal-accept-change').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this._acceptProposalChange(parseInt(btn.dataset.changeIdx, 10));
+        });
+      });
+      wrap.querySelectorAll('.proposal-drop-change').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this._dropProposalChange(parseInt(btn.dataset.changeIdx, 10), { editMode });
+        });
+      });
+    }
     if (editMode) {
       bind('.proposal-save-btn', () => this._saveProposalEdits());
       bind('.proposal-cancel-btn', () => this._renderStatus(this._getCurrentStatus()));
-      const wrap = document.getElementById('statusContent') || this._getStatusContainer();
       if (wrap) {
-        wrap.querySelectorAll('.proposal-drop-change').forEach(btn => {
-          btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this._dropProposalChange(parseInt(btn.dataset.changeIdx, 10));
-          });
-        });
         wrap.querySelectorAll('.proposal-edit-input').forEach(ta => {
           const grow = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; };
           ta.addEventListener('input', grow);
@@ -751,15 +794,10 @@ const Sidebar = {
     return 'inferred';
   },
 
-  _acceptProposal() {
-    const topic = this._getProposalTopic();
-    if (!topic) return;
-    const p = topic.pendingProposal;
-    Storage.pushStatusSnapshot(topic, 'proposal_accept');
-    this._ensureStatusShape(topic);
-    const summary = topic.statusSummary;
-    const findOverviewIdx = (text, itemType) => {
-      const key = this._overviewItemKey(itemType || 'bullet', text);
+  _applyChangeToSummary(summary, ch, source) {
+    const itemType = ch.itemType || 'bullet';
+    const findOverviewIdx = (text, type) => {
+      const key = this._overviewItemKey(type || 'bullet', text);
       return summary.overview.findIndex(it => {
         const n = this._normalizeOverviewItem(it);
         return n && this._overviewItemKey(n.type, n.text) === key;
@@ -769,70 +807,77 @@ const Sidebar = {
       const key = (text || '').trim().toLowerCase();
       return summary.goals.findIndex(g => this._goalText(g).toLowerCase() === key);
     };
+    if (ch.kind === 'overview_remove') {
+      const i = findOverviewIdx(ch.text || ch.oldText, itemType);
+      if (i >= 0) summary.overview.splice(i, 1);
+    } else if (ch.kind === 'overview_edit') {
+      const i = findOverviewIdx(ch.oldText, itemType);
+      if (i >= 0) {
+        if (itemType === 'header') {
+          summary.overview[i] = { type: 'header', text: ch.text };
+        } else if (typeof summary.overview[i] === 'object') {
+          summary.overview[i].type = 'bullet';
+          summary.overview[i].text = ch.text;
+          summary.overview[i].source = source;
+        } else {
+          summary.overview[i] = { type: 'bullet', text: ch.text, source };
+        }
+      } else if (ch.text) {
+        summary.overview.push(
+          itemType === 'header'
+            ? { type: 'header', text: ch.text }
+            : { type: 'bullet', text: ch.text, source }
+        );
+      }
+    } else if (ch.kind === 'overview_add') {
+      if (ch.text) {
+        summary.overview.push(
+          itemType === 'header'
+            ? { type: 'header', text: ch.text }
+            : { type: 'bullet', text: ch.text, source }
+        );
+      }
+    } else if (ch.kind === 'goal_remove') {
+      const i = findGoalIdx(ch.text || ch.oldText);
+      if (i >= 0) summary.goals.splice(i, 1);
+    } else if (ch.kind === 'goal_edit') {
+      const i = findGoalIdx(ch.oldText);
+      if (i >= 0 && ch.text) {
+        if (typeof summary.goals[i] === 'object') {
+          summary.goals[i].text = ch.text;
+          summary.goals[i].source = source;
+        } else {
+          summary.goals[i] = { id: 'goal_' + Utils.generateId(), text: ch.text, source };
+        }
+      } else if (ch.text) {
+        summary.goals.push({ id: 'goal_' + Utils.generateId(), text: ch.text, source });
+      }
+    } else if (ch.kind === 'goal_add') {
+      if (ch.text) {
+        summary.goals.push({ id: 'goal_' + Utils.generateId(), text: ch.text, source });
+      }
+    }
+  },
+
+  _acceptProposal() {
+    const topic = this._getProposalTopic();
+    if (!topic) return;
+    const p = topic.pendingProposal;
+    Storage.pushStatusSnapshot(topic, 'proposal_accept');
+    this._ensureStatusShape(topic);
+    const summary = topic.statusSummary;
     const source = this._sourceForProposalChange(p);
 
-    (p.changes || []).forEach(ch => {
-      const itemType = ch.itemType || 'bullet';
-      if (ch.kind === 'overview_remove') {
-        const i = findOverviewIdx(ch.text || ch.oldText, itemType);
-        if (i >= 0) summary.overview.splice(i, 1);
-      } else if (ch.kind === 'overview_edit') {
-        const i = findOverviewIdx(ch.oldText, itemType);
-        if (i >= 0) {
-          if (itemType === 'header') {
-            summary.overview[i] = { type: 'header', text: ch.text };
-          } else if (typeof summary.overview[i] === 'object') {
-            summary.overview[i].type = 'bullet';
-            summary.overview[i].text = ch.text;
-            summary.overview[i].source = source;
-          } else {
-            summary.overview[i] = { type: 'bullet', text: ch.text, source };
-          }
-        } else if (ch.text) {
-          summary.overview.push(
-            itemType === 'header'
-              ? { type: 'header', text: ch.text }
-              : { type: 'bullet', text: ch.text, source }
-          );
-        }
-      } else if (ch.kind === 'overview_add') {
-        if (ch.text) {
-          summary.overview.push(
-            itemType === 'header'
-              ? { type: 'header', text: ch.text }
-              : { type: 'bullet', text: ch.text, source }
-          );
-        }
-      } else if (ch.kind === 'goal_remove') {
-        const i = findGoalIdx(ch.text || ch.oldText);
-        if (i >= 0) summary.goals.splice(i, 1);
-      } else if (ch.kind === 'goal_edit') {
-        const i = findGoalIdx(ch.oldText);
-        if (i >= 0 && ch.text) {
-          if (typeof summary.goals[i] === 'object') {
-            summary.goals[i].text = ch.text;
-            summary.goals[i].source = source;
-          } else {
-            summary.goals[i] = { id: 'goal_' + Utils.generateId(), text: ch.text, source };
-          }
-        } else if (ch.text) {
-          summary.goals.push({ id: 'goal_' + Utils.generateId(), text: ch.text, source });
-        }
-      } else if (ch.kind === 'goal_add') {
-        if (ch.text) {
-          summary.goals.push({ id: 'goal_' + Utils.generateId(), text: ch.text, source });
-        }
-      }
-    });
+    (p.changes || []).forEach(ch => this._applyChangeToSummary(summary, ch, source));
 
     topic.statusLastUpdated = Utils.timestamp();
     if (topic.sidebarCache) topic.sidebarCache.statusUpdate = topic.statusSummary;
     topic.pendingProposal = null;
     Storage.saveTopic(topic);
     this._renderStatus(topic.statusSummary);
-    this._renderGoals(topic);
+    this._renderEvolveSection(topic);
     StudyLog.event('proposal_accepted', {
-      stage: 'construct', initiative: 'mixed', topicId: topic.id,
+      stage: 'construct', initiative: 'mixed', surface: 'sidebar', topicId: topic.id,
       trigger: p.trigger, nChanges: (p.changes || []).length,
       ...this._proposalLogPayload(p.changes),
     });
@@ -846,7 +891,7 @@ const Sidebar = {
     Storage.saveTopic(topic);
     this._renderStatus(topic.statusSummary || null);
     StudyLog.event('proposal_dismissed', {
-      stage: 'construct', initiative: 'user', topicId: topic.id,
+      stage: 'construct', initiative: 'user', surface: 'sidebar', topicId: topic.id,
       trigger: p.trigger, nChanges: (p.changes || []).length,
       ...this._proposalLogPayload(p.changes),
     });
@@ -856,12 +901,40 @@ const Sidebar = {
     this._renderStatus(this._getCurrentStatus(), { editMode: true });
   },
 
-  _dropProposalChange(idx) {
+  _acceptProposalChange(idx) {
     const topic = this._getProposalTopic();
     if (!topic || !topic.pendingProposal) return;
     const changes = topic.pendingProposal.changes || [];
     if (idx < 0 || idx >= changes.length) return;
+    const ch = changes[idx];
+    this._ensureStatusShape(topic);
+    const source = this._sourceForProposalChange(topic.pendingProposal);
+    this._applyChangeToSummary(topic.statusSummary, ch, source);
     changes.splice(idx, 1);
+    const field = ch.field || ((ch.kind || '').startsWith('goal_') ? 'goals' : 'overview');
+    StudyLog.event('proposal_change_accepted', {
+      stage: 'construct', initiative: 'user', surface: 'sidebar',
+      topicId: topic.id, field, kind: this._changeKindShort(ch.kind),
+    });
+    if (changes.length === 0) topic.pendingProposal = null;
+    topic.statusLastUpdated = Utils.timestamp();
+    Storage.saveTopic(topic);
+    this._renderStatus(topic.statusSummary);
+    this._renderEvolveSection(topic);
+  },
+
+  _dropProposalChange(idx, opts = {}) {
+    const topic = this._getProposalTopic();
+    if (!topic || !topic.pendingProposal) return;
+    const changes = topic.pendingProposal.changes || [];
+    if (idx < 0 || idx >= changes.length) return;
+    const ch = changes[idx];
+    const field = ch.field || ((ch.kind || '').startsWith('goal_') ? 'goals' : 'overview');
+    changes.splice(idx, 1);
+    StudyLog.event('proposal_change_dismissed', {
+      stage: 'construct', initiative: 'user', surface: 'sidebar',
+      topicId: topic.id, field, kind: this._changeKindShort(ch.kind),
+    });
     if (changes.length === 0) {
       topic.pendingProposal = null;
       Storage.saveTopic(topic);
@@ -869,7 +942,7 @@ const Sidebar = {
       return;
     }
     Storage.saveTopic(topic);
-    this._renderStatus(this._getCurrentStatus(), { editMode: true });
+    this._renderStatus(this._getCurrentStatus(), { editMode: !!opts.editMode });
   },
 
   _saveProposalEdits() {
@@ -960,9 +1033,9 @@ const Sidebar = {
     topic.pendingProposal = null;
     Storage.saveTopic(topic);
     this._renderStatus(topic.statusSummary);
-    this._renderGoals(topic);
+    this._renderEvolveSection(topic);
     StudyLog.event('proposal_edited', {
-      stage: 'construct', initiative: 'user', topicId: topic.id,
+      stage: 'construct', initiative: 'user', surface: 'sidebar', topicId: topic.id,
       trigger: p.trigger, nChanges: (p.changes || []).length,
       ...this._proposalLogPayload(p.changes),
     });
@@ -972,6 +1045,40 @@ const Sidebar = {
     const containers = [this._getStatusContainer(), document.getElementById('constructGoalsList')].filter(Boolean);
 
     containers.forEach(container => {
+      container.querySelectorAll('.status-item .status-item-ask').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const item = btn.closest('.status-item');
+          const idx = parseInt(item.dataset.idx, 10);
+          const topic = this.currentTopicId ? Storage.getTopic(this.currentTopicId) : null;
+          const goal = topic && topic.statusSummary && topic.statusSummary.goals
+            ? topic.statusSummary.goals[idx] : null;
+          if (!goal) return;
+          btn.disabled = true;
+          try {
+            const title = this._goalText(goal);
+            const question = await this._fetchGoalQuestion(title, goal.exampleQuestion || '');
+            if (!question) {
+              Utils.showToast('Could not generate a question', 'error');
+              return;
+            }
+            goal.exampleQuestion = question;
+            Storage.saveTopic(topic);
+            StudyLog.event('goal_question_asked', {
+              stage: 'construct', initiative: 'user', surface: 'sidebar',
+              topicId: this.currentTopicId, goalId: goal.id,
+              goalSource: goal.source || 'user',
+              ...(goal.suggestionTitle ? { suggestionId: goal.suggestionTitle } : {}),
+            });
+            this._startGoalInNewChat({ title, question });
+          } catch (err) {
+            console.error('Goal question failed:', err);
+            Utils.showToast('Could not generate a question', 'error');
+          }
+          btn.disabled = false;
+        });
+      });
+
       container.querySelectorAll('.status-item .status-item-del').forEach(btn => {
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
@@ -1055,8 +1162,8 @@ const Sidebar = {
     topic.statusLastUpdated = Utils.timestamp();
     Storage.saveTopic(topic);
     this._renderStatus(topic.statusSummary);
-    if (section === 'goals') this._renderGoals(topic);
-    StudyLog.event('current_profile_edited', { stage: 'construct', initiative: 'user', topicId: this.currentTopicId, section, editType: 'delete', itemIdx: idx, field: section === 'goals' ? 'goals' : 'overview' });
+    if (section === 'goals') this._renderEvolveSection(topic);
+    StudyLog.event('current_profile_edited', { stage: 'construct', initiative: 'user', surface: 'sidebar', topicId: this.currentTopicId, section, editType: 'delete', itemIdx: idx, field: section === 'goals' ? 'goals' : 'overview' });
     if (section === 'goals') {
       StudyLog.event('goal_removed', { stage: 'construct', initiative: 'user', surface: 'sidebar', topicId: this.currentTopicId, field: 'goals' });
     }
@@ -1090,8 +1197,8 @@ const Sidebar = {
     topic.statusLastUpdated = Utils.timestamp();
     Storage.saveTopic(topic);
     this._renderStatus(topic.statusSummary);
-    if (section === 'goals') this._renderGoals(topic);
-    StudyLog.event('current_profile_edited', { stage: 'construct', initiative: 'user', topicId: this.currentTopicId, section, editType: 'edit', itemIdx: idx, field: section === 'goals' ? 'goals' : 'overview' });
+    if (section === 'goals') this._renderEvolveSection(topic);
+    StudyLog.event('current_profile_edited', { stage: 'construct', initiative: 'user', surface: 'sidebar', topicId: this.currentTopicId, section, editType: 'edit', itemIdx: idx, field: section === 'goals' ? 'goals' : 'overview' });
   },
 
   _showAiEditPrompt() {
@@ -1171,7 +1278,7 @@ const Sidebar = {
       Storage.saveTopic(topic);
       this._renderStatus(topic.statusSummary);
       Utils.showToast('Profile updated', 'success');
-      StudyLog.event('current_profile_edited', { stage: 'construct', initiative: 'user', topicId: this.currentTopicId, trigger: 'ai_edit' });
+      StudyLog.event('current_profile_edited', { stage: 'construct', initiative: 'user', surface: 'sidebar', topicId: this.currentTopicId, trigger: 'ai_edit' });
     } catch (err) {
       console.error('AI overview edit failed:', err);
       Utils.showToast('AI edit failed', 'error');
@@ -1212,11 +1319,11 @@ const Sidebar = {
     return { ...dir, exampleQuestion };
   },
 
-  _createSuggestedGoalCard(dir, directionIdx) {
+  _createSuggestedGoalCard(dir, directionIdx, opts = {}) {
     const d = this._normalizeDirection(dir);
     const topic = this.currentTopicId ? Storage.getTopic(this.currentTopicId) : null;
-    const matchedGoal = topic ? this._findGoal(topic, d.title) : null;
-    const isSaved = !!matchedGoal;
+    const matchedGoal = opts.goal || (topic ? this._findGoal(topic, d.title) : null);
+    const isSaved = opts.isSaved != null ? opts.isSaved : !!matchedGoal;
 
     const el = document.createElement('div');
     const typeClass = d.type === 'breadth' ? 'type-breadth' : d.type === 'depth' ? 'type-depth' : '';
@@ -1233,44 +1340,50 @@ const Sidebar = {
     if (typeWord) provenanceParts.push(typeWord);
     if (d.editedByUser) provenanceParts.push('edited by you');
     const provenance = provenanceParts.join(' · ');
+    const qText = (matchedGoal && matchedGoal.exampleQuestion) || d.exampleQuestion || '';
 
     const tagHtml = isSaved
       ? `<span class="goal-status-tag tag-saved">Saved</span>`
       : `<span class="goal-status-tag tag-suggested">Suggested</span>`;
 
     el.innerHTML = `
-      <div class="temporal-card-header">
+      <div class="goal-card-header-row">
+        <svg class="goal-card-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="10" height="10">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
         ${tagHtml}
         <span class="temporal-card-title">${Utils.escapeHtml(d.title || '')}</span>
       </div>
       ${provenance ? `<div class="direction-provenance">${Utils.escapeHtml(provenance)}</div>` : ''}
-      <div class="goal-try-asking">
-        <span class="goal-try-prefix">Try asking:</span>
-        <span class="temporal-card-question goal-example-question">${Utils.escapeHtml(d.exampleQuestion || '')}</span>
-      </div>
-      <div class="temporal-card-actions">
-        <button class="probe-btn card-new-chat-btn" title="Ask this">Ask this</button>
-        ${isSaved ? '' : `<button class="probe-btn direction-save-btn" title="Save goal">Save goal</button>`}
-        ${isSaved
-          ? `<button class="goal-icon-btn intention-remove-btn" title="Remove goal">×</button>`
-          : `<button class="goal-icon-btn direction-modify-btn" title="Modify goal">✎</button>
-             <button class="goal-icon-btn goal-regen-btn" title="Another angle">↻</button>
-             <button class="goal-icon-btn direction-dismiss-btn" title="Dismiss">×</button>`}
+      <div class="goal-card-body">
+        <div class="goal-try-asking">
+          <span class="goal-try-prefix">Try asking:</span>
+          <span class="temporal-card-question goal-example-question">${Utils.escapeHtml(qText)}</span>
+          <button class="goal-icon-btn goal-regen-btn" title="Another angle">↻</button>
+        </div>
+        <div class="temporal-card-actions">
+          ${isSaved
+            ? `<button class="goal-icon-btn intention-remove-btn" title="Remove goal">×</button>`
+            : `<button class="probe-btn direction-save-btn" title="Save goal">Save</button>
+               <button class="goal-icon-btn direction-dismiss-btn" title="Dismiss">×</button>`}
+        </div>
       </div>
     `;
+
+    const toggleExpand = async (e) => {
+      if (e.target.closest('button')) return;
+      e.stopPropagation();
+      const opening = !el.classList.contains('is-expanded');
+      el.classList.toggle('is-expanded', opening);
+      if (opening) await this._ensureCardQuestion(el, d, matchedGoal, isSaved);
+    };
+    el.querySelector('.goal-card-header-row').addEventListener('click', toggleExpand);
 
     const saveBtn = el.querySelector('.direction-save-btn');
     if (saveBtn) {
       saveBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         this._saveSuggestedGoal(d);
-      });
-    }
-    const modifyBtn = el.querySelector('.direction-modify-btn');
-    if (modifyBtn) {
-      modifyBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this._startSuggestedGoalEdit(el, d);
       });
     }
     const dismissBtn = el.querySelector('.direction-dismiss-btn');
@@ -1287,65 +1400,60 @@ const Sidebar = {
         this._removeGoal(matchedGoal.id);
       });
     }
-    el.querySelector('.card-new-chat-btn').addEventListener('click', async (e) => {
+    el.querySelector('.goal-try-asking').addEventListener('click', async (e) => {
+      if (e.target.closest('.goal-regen-btn')) return;
       e.stopPropagation();
-      const btn = e.currentTarget;
-      btn.disabled = true;
-      try {
-        let q = (el.querySelector('.goal-example-question')?.textContent || d.exampleQuestion || '').trim();
-        if (!q) {
-          q = await this._fetchGoalQuestion(d.title);
-          if (q) {
-            d.exampleQuestion = q;
-            const qEl = el.querySelector('.goal-example-question');
-            if (qEl) qEl.textContent = q;
-            this._persistGoalExampleQuestion(d.title, q);
-          }
-        }
-        if (!q) {
-          Utils.showToast('Could not generate a question', 'error');
-          return;
-        }
-        StudyLog.event('goal_question_asked', {
-          stage: 'evolve', initiative: 'user', surface: 'sidebar',
-          topicId: this.currentTopicId, directionIdx,
-          suggestionId: d.title || null,
-        });
-        this._startGoalInNewChat({ title: d.title, question: q });
-      } finally {
-        btn.disabled = false;
+      let q = (el.querySelector('.goal-example-question')?.textContent || '').trim();
+      if (!q) q = await this._ensureCardQuestion(el, d, matchedGoal, isSaved);
+      if (!q) {
+        Utils.showToast('Could not generate a question', 'error');
+        return;
       }
+      StudyLog.event('goal_question_asked', {
+        stage: 'evolve', initiative: 'user', surface: 'sidebar',
+        topicId: this.currentTopicId, directionIdx,
+        goalId: matchedGoal ? matchedGoal.id : null,
+        goalSource: matchedGoal ? (matchedGoal.source || 'user') : 'inferred',
+        suggestionId: d.title || null,
+      });
+      this._startGoalInNewChat({ title: d.title, question: q });
     });
     const regenBtn = el.querySelector('.goal-regen-btn');
     if (regenBtn) {
       regenBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        const btn = e.currentTarget;
-        btn.disabled = true;
+        regenBtn.disabled = true;
         const qEl = el.querySelector('.goal-example-question');
-        const currentQ = qEl ? qEl.textContent : (d.exampleQuestion || '');
+        const currentQ = qEl ? qEl.textContent : '';
         try {
           const question = await this._fetchGoalQuestion(d.title, currentQ);
           if (question) {
             d.exampleQuestion = question;
             if (qEl) qEl.textContent = question;
-            const topic = Storage.getTopic(this.currentTopicId);
-            if (topic && topic.sidebarCache) {
-              const entry = (topic.sidebarCache.newDirections || []).find(x => x.title === d.title);
-              if (entry) { entry.exampleQuestion = question; delete entry.question; }
-              Storage.saveTopic(topic);
-            }
             this._persistGoalExampleQuestion(d.title, question);
           }
         } catch (err) {
           console.error('Regenerate goal question failed:', err);
           Utils.showToast('Could not regenerate question', 'error');
         }
-        btn.disabled = false;
+        regenBtn.disabled = false;
       });
     }
 
     return el;
+  },
+
+  async _ensureCardQuestion(el, d, goal, isSaved) {
+    const qEl = el.querySelector('.goal-example-question');
+    let q = (qEl && qEl.textContent || '').trim() || d.exampleQuestion || (goal && goal.exampleQuestion) || '';
+    if (q) return q;
+    q = await this._fetchGoalQuestion(d.title, isSaved ? (goal && goal.exampleQuestion) : '');
+    if (q) {
+      d.exampleQuestion = q;
+      if (qEl) qEl.textContent = q;
+      this._persistGoalExampleQuestion(d.title, q);
+    }
+    return q || '';
   },
 
   // ── Future: Goals ─────────────────────────────────────────────────────
@@ -1374,41 +1482,8 @@ const Sidebar = {
 
   _renderEvolveSection(topic) {
     if (!topic) topic = this.currentTopicId ? Storage.getTopic(this.currentTopicId) : null;
-    this._renderGoals(topic);
     const dirs = (topic && topic.sidebarCache && topic.sidebarCache.newDirections) || [];
     this._renderSuggestedGoals(dirs);
-  },
-
-  _renderGoals(topic) {
-    const container = document.getElementById('goalsList');
-    if (!container) return;
-    const goals = this._getConfirmedGoals(topic);
-    container.innerHTML = '';
-    if (goals.length === 0) return;
-
-    const collapsed = localStorage.getItem('loom_savedGoalsCollapsed') !== 'false';
-    const wrap = document.createElement('div');
-    wrap.className = `saved-goals-fold${collapsed ? ' is-collapsed' : ''}`;
-    wrap.innerHTML = `
-      <button type="button" class="saved-goals-toggle" aria-expanded="${collapsed ? 'false' : 'true'}">
-        <svg class="saved-goals-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="10" height="10">
-          <polyline points="6 9 12 15 18 9"/>
-        </svg>
-        <span class="saved-goals-toggle-label">Goals</span>
-        <span class="saved-goals-count">${goals.length}</span>
-      </button>
-      <div class="saved-goals-body"></div>
-    `;
-    const body = wrap.querySelector('.saved-goals-body');
-    goals.forEach(goal => body.appendChild(this._createGoalCard(goal)));
-    wrap.querySelector('.saved-goals-toggle').addEventListener('click', (e) => {
-      e.stopPropagation();
-      const nowCollapsed = !wrap.classList.contains('is-collapsed');
-      wrap.classList.toggle('is-collapsed', nowCollapsed);
-      e.currentTarget.setAttribute('aria-expanded', nowCollapsed ? 'false' : 'true');
-      localStorage.setItem('loom_savedGoalsCollapsed', nowCollapsed ? 'true' : 'false');
-    });
-    container.appendChild(wrap);
   },
 
   _renderSuggestedGoals(dirs, emptyHint = 'Keep chatting to generate future directions.') {
@@ -1420,18 +1495,31 @@ const Sidebar = {
       .map(d => this._normalizeDirection(d))
       .filter(d => !dismissed.has((d.title || '').toLowerCase()));
 
+    const savedGoals = this._getConfirmedGoals(topic);
+    const savedKeys = new Set(savedGoals.map(g => this._goalText(g).toLowerCase()).filter(Boolean));
     const order = { breadth: 0, depth: 1 };
-    const cards = normalized
-      .filter(d => !this._findGoal(topic, d.title))
+    const unsaved = normalized
+      .filter(d => !savedKeys.has((d.title || '').toLowerCase()))
       .sort((a, b) => (order[a.type] ?? 2) - (order[b.type] ?? 2));
 
     dirContainer.innerHTML = '';
-    if (cards.length === 0) {
+    if (savedGoals.length === 0 && unsaved.length === 0) {
       dirContainer.innerHTML = `<p class="temporal-empty-hint">${emptyHint}</p>`;
       return;
     }
-    cards.forEach((dir, idx) => {
-      const card = this._createSuggestedGoalCard(dir, idx);
+    savedGoals.forEach((goal, idx) => {
+      const title = this._goalText(goal);
+      const match = normalized.find(d => (d.title || '').toLowerCase() === title.toLowerCase());
+      const dir = match || {
+        title,
+        exampleQuestion: goal.exampleQuestion || '',
+        type: goal.suggestionType || null,
+      };
+      const card = this._createSuggestedGoalCard(dir, idx, { isSaved: true, goal });
+      if (card && card.nodeType) dirContainer.appendChild(card);
+    });
+    unsaved.forEach((dir, idx) => {
+      const card = this._createSuggestedGoalCard(dir, savedGoals.length + idx);
       if (card && card.nodeType) dirContainer.appendChild(card);
     });
   },
@@ -1441,39 +1529,6 @@ const Sidebar = {
     this._renderSuggestedGoals(dirs, emptyHint);
   },
 
-  _createGoalCard(goal) {
-    const el = document.createElement('div');
-    el.className = 'saved-goal-row';
-    const title = this._goalText(goal);
-    el.innerHTML = `
-      <span class="saved-goal-row-title">${Utils.escapeHtml(title)}</span>
-      <button class="probe-btn goal-ask-btn" title="Ask a question">Ask</button>
-    `;
-
-    el.querySelector('.goal-ask-btn').addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const btn = e.currentTarget;
-      btn.disabled = true;
-      try {
-        const question = await this._fetchGoalQuestion(title);
-        if (question) {
-          StudyLog.event('goal_question_asked', {
-            stage: 'evolve', initiative: 'user', surface: 'sidebar',
-            topicId: this.currentTopicId, goalId: goal.id,
-            goalSource: goal.source || 'user',
-            ...(goal.suggestionTitle ? { suggestionId: goal.suggestionTitle } : {}),
-          });
-          this._startGoalInNewChat({ title, question });
-        }
-      } catch (err) {
-        console.error('Goal question failed:', err);
-        Utils.showToast('Could not generate a question', 'error');
-      }
-      btn.disabled = false;
-    });
-
-    return el;
-  },
 
   async _fetchGoalQuestion(goalTitle, excludeQuestion = '') {
     const topic = this.currentTopicId ? Storage.getTopic(this.currentTopicId) : null;
@@ -1504,7 +1559,7 @@ const Sidebar = {
     topic.statusSummary.goals.push({
       id: 'goal_' + Utils.generateId(),
       text: dir.title || '',
-      source: dir.editedByUser ? 'user' : 'inferred',
+      source: 'user',
       suggestionTitle: dir.title || '',
       suggestionType: dir.type || null,
     });
@@ -1525,7 +1580,7 @@ const Sidebar = {
       topic.dismissedGoals.push(dir.title);
     }
     Storage.saveTopic(topic);
-    StudyLog.event('goal_dismissed', { stage: 'evolve', initiative: 'user', topicId: topic.id, title: dir.title });
+    StudyLog.event('goal_dismissed', { stage: 'evolve', initiative: 'user', surface: 'sidebar', topicId: topic.id, title: dir.title });
     // Re-render so another unsaved suggestion can fill the single suggestion slot.
     this._renderEvolveSection(topic);
   },
@@ -1611,7 +1666,7 @@ const Sidebar = {
     }
     Storage.saveTopic(topic);
     this._renderEvolveSection(topic);
-    StudyLog.event('goal_modified', { stage: 'evolve', initiative: 'user', topicId: topic.id, title: newTitle });
+    StudyLog.event('goal_modified', { stage: 'evolve', initiative: 'user', surface: 'sidebar', topicId: topic.id, title: newTitle });
   },
 
   _initAddGoal() {
@@ -1843,9 +1898,12 @@ const Sidebar = {
       [...history].reverse().forEach(({ snap, idx }) => {
         const summary = snap.statusSummary || {};
         const overviewCount = (summary.overview || []).length;
-        html += `<div class="status-history-row">
+        const vid = snap.v != null ? snap.v : (idx + 1);
+        const isCurrent = topic && topic.currentVersion === vid;
+        html += `<div class="status-history-row${isCurrent ? ' is-current' : ''}">
+          <span class="status-history-vid">v${vid}</span>
           <div class="status-history-info">
-            <div class="status-history-title">${this._formatHistoryTs(snap.ts)} · ${Utils.escapeHtml(this._historyTriggerLabel(snap.trigger))}</div>
+            <div class="status-history-title">${this._formatHistoryTs(snap.ts)} · ${Utils.escapeHtml(this._historyTriggerLabel(snap.trigger))}${isCurrent ? '<span class="status-history-current-tag">current</span>' : ''}</div>
             <div class="status-history-meta">${overviewCount} items</div>
           </div>
           <button class="status-history-restore" data-idx="${idx}">Restore</button>
@@ -1902,14 +1960,17 @@ const Sidebar = {
 
     topic.statusSummary = JSON.parse(JSON.stringify(snapshot.statusSummary));
     topic.statusLastUpdated = Utils.timestamp();
+    if (snapshot.v != null) topic.currentVersion = snapshot.v;
     Storage.saveTopic(topic);
     this._renderStatus(topic.statusSummary);
     this._closeHistoryPopover();
     StudyLog.event('version_restored', {
       stage: 'construct',
       initiative: 'user',
+      surface: 'sidebar',
       topicId: this.currentTopicId,
       trigger: snapshot.trigger,
+      versionId: snapshot.v,
     });
   },
 
@@ -2103,12 +2164,12 @@ const Sidebar = {
 
       if (location === 'sidebar' && topicId === this.currentTopicId) {
         this._renderSuggestedGoals(newDirs, 'Keep chatting for suggestions.');
-        if (freshTopic) this._renderGoals(freshTopic);
+        if (freshTopic) this._renderEvolveSection(freshTopic);
         if (this.currentData) this.currentData.newDirections = newDirs;
       }
 
-      StudyLog.event('future_directions_refreshed', {
-        stage: 'evolve', initiative: 'user',
+      StudyLog.event('directions_shuffled', {
+        stage: 'evolve', initiative: 'user', surface: 'sidebar',
         topicId,
         location,
         oldCount: oldDirs.length,
@@ -2178,7 +2239,7 @@ const Sidebar = {
       const isCollapsed = label.classList.toggle('section-collapsed');
       itemsEl.classList.toggle('section-collapsed', isCollapsed);
       localStorage.setItem('loom_overviewCollapsed', isCollapsed);
-      StudyLog.event('current_profile_section_toggled', { section: sectionKey, collapsed: isCollapsed });
+      StudyLog.event('section_collapsed', { moduleId: 'sectionCurrent', section: sectionKey, collapsed: isCollapsed, surface: 'sidebar' });
     });
   },
 
@@ -2189,6 +2250,6 @@ const Sidebar = {
     const collapsed = body.classList.toggle('collapsed');
     if (btn) btn.classList.toggle('collapsed', collapsed);
     localStorage.setItem('loom_moduleCollapse_' + moduleId, collapsed);
-    StudyLog.event('section_collapsed', { moduleId, collapsed });
+    StudyLog.event('section_collapsed', { moduleId, collapsed, surface: 'sidebar' });
   },
 };

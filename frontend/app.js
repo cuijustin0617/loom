@@ -651,7 +651,6 @@ const App = {
       btn.addEventListener('click', () => {
         document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        StudyLog.event('view_switched', { view: btn.dataset.view });
         this._renderChatList(btn.dataset.view);
       });
     });
@@ -1502,21 +1501,17 @@ const App = {
       stage: 'construct',
       initiative: 'mixed',
       origin: 'user',
+      surface: 'chat',
       label,
       hasComment: label === 'comment',
       msgId: state.msgId,
     });
 
-    if (typeof Sidebar !== 'undefined') {
-      Sidebar._labelsDirty = true;
-    }
     if (label === 'comment') {
       Utils.showToast("Noted — it'll show up in your next profile suggestion.");
-      StudyLog.event('text_comment_committed', {
-        stage: 'construct',
-        initiative: 'user',
-        topicId: typeof Sidebar !== 'undefined' ? Sidebar.currentTopicId : null,
-      });
+    }
+    if (typeof Sidebar !== 'undefined') {
+      Sidebar._labelsDirty = true;
     }
     this._hideAnnoPopover();
     window.getSelection()?.removeAllRanges();
@@ -1535,6 +1530,8 @@ const App = {
     StudyLog.event('text_label_removed', {
       stage: 'construct',
       initiative: 'user',
+      origin: 'user',
+      surface: 'chat',
       msgId: state.msgId,
     });
     if (typeof Sidebar !== 'undefined') Sidebar._labelsDirty = true;
@@ -1903,8 +1900,12 @@ const App = {
   _bindConnectionCards(container) {
     container.querySelectorAll('.conn-marker.resolved').forEach(marker => {
       marker.style.cursor = 'pointer';
+      marker.addEventListener('mouseenter', () => {
+        StudyLog.event('connection_marker_hovered', { surface: 'chat' });
+      });
       marker.addEventListener('click', (e) => {
         e.stopPropagation();
+        StudyLog.event('connection_marker_clicked', { surface: 'chat' });
         this._showConnCard(marker);
       });
     });
@@ -1984,7 +1985,7 @@ const App = {
         </div>
         ${excerpt ? `<div class="temporal-card-excerpt">${excerpt}</div>` : ''}
         <div class="temporal-card-actions">
-          <button class="past-context-exclude-btn" type="button">Don't use for this topic</button>
+          <button class="past-context-exclude-btn" type="button">${excluded.has(chat.chatId) ? "Undo don't use" : "Don't use for this topic"}</button>
           <button class="past-context-open-btn" type="button" data-chat-id="${Utils.escapeHtml(chat.chatId || '')}">Open chat →</button>
         </div>
       `;
@@ -1992,12 +1993,25 @@ const App = {
         e.stopPropagation();
         if (!topic || !chat.chatId) return;
         if (!Array.isArray(topic.excludedChatIds)) topic.excludedChatIds = [];
-        if (!topic.excludedChatIds.includes(chat.chatId)) topic.excludedChatIds.push(chat.chatId);
-        Storage.saveTopic(topic);
-        card.classList.add('past-chat-contested');
-        StudyLog.event('context_excluded_for_topic', {
-          topicId: topic.id, chatId: chat.chatId, initiative: 'user', surface: 'chat',
-        });
+        const excludeBtn = e.currentTarget;
+        const already = topic.excludedChatIds.includes(chat.chatId);
+        if (already) {
+          topic.excludedChatIds = topic.excludedChatIds.filter(id => id !== chat.chatId);
+          Storage.saveTopic(topic);
+          card.classList.remove('past-chat-contested');
+          excludeBtn.textContent = "Don't use for this topic";
+          StudyLog.event('context_exclusion_reverted', {
+            topicId: topic.id, chatId: chat.chatId, initiative: 'user', surface: 'chat',
+          });
+        } else {
+          topic.excludedChatIds.push(chat.chatId);
+          Storage.saveTopic(topic);
+          card.classList.add('past-chat-contested');
+          excludeBtn.textContent = "Undo don't use";
+          StudyLog.event('context_excluded_for_topic', {
+            topicId: topic.id, chatId: chat.chatId, initiative: 'user', surface: 'chat',
+          });
+        }
       });
       card.querySelector('.past-context-open-btn').addEventListener('click', (e) => {
         e.stopPropagation();
@@ -2016,13 +2030,12 @@ const App = {
     });
 
     assistantEl.insertBefore(panel, assistantEl.firstChild);
-    if (!opts.replay) {
-      StudyLog.event('context_card_shown', {
-        topicId: topic ? topic.id : null,
-        count: injectedPastChats.length,
-        surface: 'chat',
-      });
-    }
+    StudyLog.event('context_card_shown', {
+      topicId: topic ? topic.id : null,
+      count: injectedPastChats.length,
+      surface: 'chat',
+      ...(opts.replay ? { replay: true } : {}),
+    });
   },
 
   _isUnassignedTopic(topicId) {
@@ -2234,7 +2247,6 @@ const App = {
     );
     if (candidateChats.length < 2) return;
 
-    StudyLog.event('topic_auto_detect_triggered', { candidateCount: candidateChats.length });
     try {
       const resp = await fetch(`${API_BASE}/api/topic/detect`, {
         method: 'POST',
@@ -2433,7 +2445,7 @@ const App = {
       if (shuffleBtn) {
         shuffleBtn.addEventListener('click', (e) => {
           e.stopPropagation();
-          StudyLog.event('future_directions_refreshed', { stage: 'evolve', initiative: 'user', location: 'welcome', topicId: null });
+          StudyLog.event('directions_shuffled', { stage: 'evolve', initiative: 'user', surface: 'welcome', location: 'welcome', topicId: null });
           shuffleBtn.classList.add('loading');
           const promises = suggestions.map(s => Sidebar.shuffleDirections('welcome', s.topicId));
           Promise.all(promises).then(() => {
@@ -2513,7 +2525,9 @@ const App = {
         const idx = parseInt(card.dataset.suggestionIdx, 10);
         const s = suggestions[idx];
         if (s) {
-          StudyLog.event('future_suggestion_clicked', { topicId: s.topicId, suggestionIdx: idx });
+          StudyLog.event('welcome_suggestion_clicked', {
+            initiative: 'user', surface: 'welcome', title: s.title || '', topicId: s.topicId, suggestionIdx: idx,
+          });
           this._startSuggestedChat(s);
         }
       });
@@ -2760,8 +2774,6 @@ const App = {
       el.querySelectorAll('.ctx-tag').forEach(tag => {
         tag.addEventListener('click', () => {
           const idx = parseInt(tag.dataset.ctxIdx);
-          const mod = visibleModules[idx];
-          StudyLog.event('context_tag_clicked', { type: mod?.type || '' });
           const panel = el.querySelector('.ctx-detail-panel');
           if (panel.classList.contains('visible') && panel.dataset.activeIdx === String(idx)) {
             panel.classList.remove('visible');
@@ -3335,7 +3347,6 @@ const App = {
         Storage.setPersonalDetails(data.details);
         this._renderBaselineDetails(data.details);
         Sidebar.showBaseline();
-        StudyLog.event('baseline_details_shown', { count: data.details.length });
       }
     } catch (err) {
       console.warn('Baseline extraction failed:', err);

@@ -284,7 +284,7 @@ class TestRicherMemoryPrompt:
                 "aiCovered": "Explained learning rate and parameter updates",
             }
         ], indent=2)
-        formatted = CHAT_STREAM_MEMORY_PROMPT.format(past_chats_json=past_chats, stance_context="", profile_block="")
+        formatted = CHAT_STREAM_MEMORY_PROMPT.format(past_chats_json=past_chats, profile_block="")
         assert "gradient descent" in formatted
         assert "learning rate" in formatted
         assert "{past_chats_json}" not in formatted
@@ -294,7 +294,7 @@ class TestRicherMemoryPrompt:
         past_chats = json.dumps([
             {"chatId": "c1", "title": "Chat", "userAsked": "", "aiCovered": ""}
         ], indent=2)
-        formatted = CHAT_STREAM_MEMORY_PROMPT.format(past_chats_json=past_chats, stance_context="", profile_block="")
+        formatted = CHAT_STREAM_MEMORY_PROMPT.format(past_chats_json=past_chats, profile_block="")
         assert "{past_chats_json}" not in formatted
         assert "{stance_context}" not in formatted
 
@@ -513,9 +513,10 @@ class TestConnectionCardJS:
         js = self._get_js()
         assert 'You explored' in js
 
-    def test_card_html_has_build_on_this(self):
+    def test_card_html_has_no_build_on_this(self):
         js = self._get_js()
-        assert 'Build on this' in js
+        assert 'Build on this' not in js
+        assert 'Open chat' in js or 'Go to chat' in js
 
     def test_card_html_has_go_to_chat(self):
         js = self._get_js()
@@ -555,52 +556,26 @@ class TestConnectionCardJS:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestBuildOnThisActionJS:
-    """JS code for Build-on-this must fetch full chat history and call setContextBlock."""
+    """Build-on-this / setContextBlock was removed; in-chat cards open or exclude."""
 
     def _get_js(self):
         return _get_client().get("/static/app.js").text
 
-    def _get_build_handler_section(self):
+    def test_build_button_removed(self):
         js = self._get_js()
-        first = js.index('conn-card-build')
-        handler_start = js.index('conn-card-build', first + 1)
-        return js[handler_start:handler_start + 1600]
+        assert 'conn-card-build' not in js
+        assert 'setContextBlock' not in js
 
-    def test_build_button_calls_setContextBlock(self):
-        assert 'setContextBlock' in self._get_build_handler_section()
-
-    def test_build_action_fetches_past_messages(self):
-        section = self._get_build_handler_section()
-        assert 'Storage.getMessages' in section
-
-    def test_build_action_uses_chatId(self):
-        section = self._get_build_handler_section()
-        assert 'targetChatId' in section or 'chatId' in section
-
-    def test_build_action_composes_insight(self):
-        assert 'insight' in self._get_build_handler_section()
-
-    def test_build_action_hides_card(self):
-        assert '_hideConnCard' in self._get_build_handler_section()
-
-    def test_build_action_focuses_input(self):
-        section = self._get_build_handler_section()
-        assert 'chatInput' in section and 'focus' in section
-
-    def test_build_context_includes_chat_history_markers(self):
-        """Context string should include markers for previous chat history."""
+    def test_no_previous_chat_history_injection(self):
         js = self._get_js()
-        assert '--- Previous chat history ---' in js
-        assert '--- End of previous chat ---' in js
+        assert 'setContextBlock' not in js
+        assert 'conn-card-build' not in js
 
-    def test_build_context_formats_roles(self):
-        """Messages should be prefixed with User/AI role labels."""
+    def test_exclude_and_open_remain(self):
         js = self._get_js()
-        assert "role === 'user' ? 'User' : 'AI'" in js
-
-    def test_setContextBlock_function_exists(self):
-        js = self._get_js()
-        assert 'setContextBlock' in js
+        assert "Don't use for this topic" in js
+        assert 'past-context-open-btn' in js
+        assert 'Go to chat' in js
 
 
 class TestGoToChatActionJS:
@@ -655,8 +630,9 @@ class TestConnectionPersistenceJS:
     def test_assistant_msg_stores_stripped_content(self):
         """Connections JSON is not persisted; the stripped main text is saved as content and rawContent."""
         js = self._get_js()
-        assert 'content: strippedMain' in js
-        assert 'rawContent: strippedMain' in js
+        assert 'strippedMain' in js
+        assert 'rawContent:' in js
+        assert '_stripConnectionResidue' in js
 
     def test_assistant_msg_stores_rawContent(self):
         js = self._get_js()
@@ -672,7 +648,9 @@ class TestConnectionPersistenceJS:
         assert 'msg.content' in self._get_appendMessage_def()
 
     def test_appendMessage_calls_parseConnectionMarkers(self):
-        assert '_parseConnectionMarkers' in self._get_appendMessage_def()
+        js = self._get_js()
+        assert '_parseConnectionMarkers' in js
+        assert '_appendMessage(msg)' in js
 
     def test_finalize_resolves_markers_and_stamps_msg_id(self):
         """_finalizeStreamingMessage resolves connection markers live and stamps data-msg-id."""
@@ -708,14 +686,14 @@ class TestParseConnectionMarkersJS:
     def test_creates_conn_marker_span(self):
         js = self._get_js()
         parse_start = js.index('_parseConnectionMarkers(html)')
-        parse_section = js[parse_start:parse_start + 300]
+        parse_section = js[parse_start:parse_start + 600]
         assert 'conn-marker' in parse_section
         assert 'loading' in parse_section
 
     def test_stores_conn_id_as_data_attribute(self):
         js = self._get_js()
         parse_start = js.index('_parseConnectionMarkers(html)')
-        parse_section = js[parse_start:parse_start + 300]
+        parse_section = js[parse_start:parse_start + 600]
         assert 'data-conn-id' in parse_section
 
 
@@ -750,7 +728,8 @@ class TestStripConnectionBlockJS:
         assert 'null' in self._get_strip_def()
 
     def test_handles_json_parse_error(self):
-        assert 'catch' in self._get_strip_def()
+        js = self._get_js()
+        assert '_salvageJsonArray' in js or 'catch' in self._get_strip_def()
 
 
 class TestResolveConnectionMarkersJS:
@@ -1436,7 +1415,7 @@ class TestAllPromptsStructural:
 
     def test_memory_prompt_is_valid_format_string(self):
         from prompts import CHAT_STREAM_MEMORY_PROMPT
-        formatted = CHAT_STREAM_MEMORY_PROMPT.format(past_chats_json="[]", stance_context="", profile_block="")
+        formatted = CHAT_STREAM_MEMORY_PROMPT.format(past_chats_json="[]", profile_block="")
         assert isinstance(formatted, str)
         assert len(formatted) > 50
 

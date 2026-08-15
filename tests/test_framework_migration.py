@@ -50,6 +50,14 @@ class TestSerializeStatusOverview:
     def test_plain_string_status_passthrough(self):
         assert _serialize_status_to_str("just a string") == "just a string"
 
+    def test_includes_goals_section(self):
+        out = _serialize_status_to_str({
+            "overview": [{"text": "Knows Python"}],
+            "goals": [{"text": "Explore generative AI system design"}],
+        })
+        assert "Goals:" in out
+        assert "Explore generative AI system design" in out
+
 
 class TestSerializeStatusOverviewOnly:
     """concepts_traversed / stance phrasing removed — serialize overview only."""
@@ -133,7 +141,7 @@ class TestAdminDashboardCategories:
         html = backend_main._ADMIN_HTML
         for e in ("proposal_shown", "proposal_accepted", "proposal_edited",
                   "proposal_dismissed", "current_profile_edited",
-                  "text_label_applied", "text_label_removed", "text_comment_committed"):
+                  "text_label_applied", "text_label_removed"):
             assert f"'{e}'" in html
         assert "current_concept_stance_set" not in html
         assert "current_concept_toggled" not in html
@@ -148,7 +156,7 @@ class TestAdminDashboardCategories:
     def test_evolve_events(self):
         html = backend_main._ADMIN_HTML
         for e in ("goal_saved", "goal_authored", "goal_question_asked",
-                  "future_directions_refreshed"):
+                  "directions_refreshed"):
             assert f"'{e}'" in html
 
     def test_scrutability_events(self):

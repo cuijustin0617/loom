@@ -91,6 +91,16 @@ const Storage = {
     if (!Array.isArray(topic.statusHistory)) topic.statusHistory = [];
     if (topic.pendingProposal === undefined) topic.pendingProposal = null;
     if (!Array.isArray(topic.excludedChatIds)) topic.excludedChatIds = [];
+    if (typeof topic.statusVersionCounter !== 'number') {
+      topic.statusHistory.forEach((snap, i) => {
+        if (snap && typeof snap === 'object' && snap.v == null) snap.v = i + 1;
+      });
+      const maxV = topic.statusHistory.reduce((m, s) => Math.max(m, (s && s.v) || 0), 0);
+      topic.statusVersionCounter = Math.max(maxV, topic.statusHistory.length);
+    }
+    if (typeof topic.currentVersion !== 'number') {
+      topic.currentVersion = topic.statusVersionCounter;
+    }
 
     // One-time: intentions → goals (drop question); dismissedDirections → dismissedGoals
     if (!Array.isArray(topic.goals)) {
@@ -159,32 +169,12 @@ const Storage = {
         s.goals = legacy.map(g => {
           if (!g || typeof g !== 'object') {
             const text = String(g || '').trim();
-            return text ? { id: 'goal_' + Utils.generateId(), text, source: 'inferred' } : null;
+            return text ? { id: 'goal_' + Utils.generateId(), text, source: 'user' } : null;
           }
           const text = (g.text || g.title || '').trim();
           if (!text) return null;
-          return { id: g.id || ('goal_' + Utils.generateId()), text, source: 'inferred' };
+          return { id: g.id || ('goal_' + Utils.generateId()), text, source: 'user' };
         }).filter(Boolean);
-      } else {
-        // Earlier builds tagged Evolve-saved / migrated goals as "user".
-        // "you wrote this" is only for text the user typed or edited.
-        const legacyTitles = new Set(
-          (Array.isArray(topic.goals) ? topic.goals : []).map(g => {
-            if (g == null) return '';
-            if (typeof g === 'string') return g.trim().toLowerCase();
-            return String(g.text || g.title || '').trim().toLowerCase();
-          }).filter(Boolean)
-        );
-        s.goals = s.goals.map(g => {
-          if (!g || typeof g !== 'object' || g.source !== 'user') return g;
-          const text = String(g.text || g.title || '').trim().toLowerCase();
-          if (!text) return g;
-          const sug = String(g.suggestionTitle || '').trim().toLowerCase();
-          if ((sug && sug === text) || legacyTitles.has(text)) {
-            return { ...g, source: 'inferred' };
-          }
-          return g;
-        });
       }
     }
     if (topic.statusHistory.length > 10) {
@@ -372,6 +362,8 @@ const Storage = {
       userCreated: true,
       lastActive: Utils.timestamp(),
       statusHistory: [],
+      statusVersionCounter: 0,
+      currentVersion: 0,
       pendingProposal: null,
       goals: [],
       excludedChatIds: [],
@@ -382,11 +374,18 @@ const Storage = {
 
   pushStatusSnapshot(topic, trigger) {
     if (!Array.isArray(topic.statusHistory)) topic.statusHistory = [];
+    if (typeof topic.statusVersionCounter !== 'number') {
+      topic.statusVersionCounter = topic.statusHistory.length;
+    }
+    topic.statusVersionCounter += 1;
+    const v = topic.statusVersionCounter;
     topic.statusHistory.push({
+      v,
       ts: Utils.timestamp(),
       trigger,
       statusSummary: JSON.parse(JSON.stringify(topic.statusSummary ?? null)),
     });
+    topic.currentVersion = v;
     if (topic.statusHistory.length > 10) {
       topic.statusHistory = topic.statusHistory.slice(-10);
     }

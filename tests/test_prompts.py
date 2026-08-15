@@ -303,3 +303,13 @@ class TestOverviewAiEditPrompt:
         assert "add" in lower
         assert "edit" in lower
         assert "remove" in lower
+
+
+class TestDesignProbeRound2Prompts:
+    def test_status_update_has_goal_phrasing_constraint(self):
+        assert "4–7" in STATUS_UPDATE_PROMPT or "4-7" in STATUS_UPDATE_PROMPT
+        assert "User wants to" in STATUS_UPDATE_PROMPT
+        assert "Explore generative AI system design" in STATUS_UPDATE_PROMPT
+
+    def test_directions_prompt_has_annotations_placeholder(self):
+        assert "{annotations}" in SIDEBAR_NEW_DIRECTIONS_PROMPT

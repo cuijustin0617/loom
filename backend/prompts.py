@@ -129,9 +129,11 @@ The profile has two fields:
   reactions. Write "User is comparing X and Y for their thesis", never
   "User wants to learn X" / "User needs Y" / "User should explore Z" unless
   the user said so themselves. Describe, don't prescribe.
-- Goals: short bullet points (one line each, no subtitle headers) describing
-  what the user wants. This is where prescriptive phrasing lives
-  ("User wants to compare X and Y", "User is deciding whether to…").
+- Goals: short phrases of ~4–7 words naming the topic or direction — never
+  a full sentence, never "User wants to…". Positive examples: "Explore
+  generative AI system design", "Master offline and online evaluation".
+  Banned: "User wants to learn X", "User is deciding whether to…", any
+  sentence with a subject and verb.
 
 Evidence, in order of authority:
 1. Comments the user wrote (comment annotations) — explicit statements; almost
@@ -183,8 +185,8 @@ Return JSON:
     {{"type": "bullet", "text": "another point"}}
   ],
   "goals": [
-    {{"text": "User wants to compare X and Y"}},
-    {{"text": "User is deciding whether to…"}}
+    {{"text": "Explore generative AI system design"}},
+    {{"text": "Master offline evaluation"}}
   ]
 }}"""
 

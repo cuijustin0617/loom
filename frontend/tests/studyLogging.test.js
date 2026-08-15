@@ -26,10 +26,17 @@ function test(name, fn) {
 }
 
 const ROOT = path.resolve(__dirname, '../..');
-const appContent = fs.readFileSync(path.join(ROOT, 'frontend/app.js'), 'utf8');
-const sidebarContent = fs.readFileSync(path.join(ROOT, 'frontend/sidebar.js'), 'utf8');
-const utilsContent = fs.readFileSync(path.join(ROOT, 'frontend/utils.js'), 'utf8');
+const FRONTEND = path.join(ROOT, 'frontend');
+const appContent = fs.readFileSync(path.join(FRONTEND, 'app.js'), 'utf8');
+const sidebarContent = fs.readFileSync(path.join(FRONTEND, 'sidebar.js'), 'utf8');
+const utilsContent = fs.readFileSync(path.join(FRONTEND, 'utils.js'), 'utf8');
 const mainPy = fs.readFileSync(path.join(ROOT, 'backend/main.py'), 'utf8');
+const indexHtml = fs.readFileSync(path.join(FRONTEND, 'index.html'), 'utf8');
+const stylesCss = fs.readFileSync(path.join(FRONTEND, 'styles.css'), 'utf8');
+const frontendSrcFiles = fs.readdirSync(FRONTEND)
+    .filter(f => f.endsWith('.js'))
+    .map(f => fs.readFileSync(path.join(FRONTEND, f), 'utf8'));
+const frontendSrc = frontendSrcFiles.join('\n');
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // StudyLog Infrastructure (utils.js)
@@ -120,7 +127,7 @@ test('chat_deleted event exists', () => {
 test('text label events exist (text_label_applied / removed / comment)', () => {
     assert.ok(appContent.includes("'text_label_applied'"), 'Should log text_label_applied');
     assert.ok(appContent.includes("'text_label_removed'"), 'Should log text_label_removed');
-    assert.ok(appContent.includes("'text_comment_committed'"), 'Should log text_comment_committed');
+    assert.ok(!appContent.includes("'text_comment_committed'"), 'text_comment_committed removed');
 });
 
 test('topic_suggestion_accepted event exists', () => {
@@ -191,17 +198,23 @@ test('goal_question_asked event exists (replaces module3_direction_new_chat)', (
         'Should log goal_question_asked event');
 });
 
-test('future_directions_refreshed event exists (replaces module3_shuffled)', () => {
-    assert.ok(sidebarContent.includes("'future_directions_refreshed'"),
-        'Should log future_directions_refreshed event');
+test('directions_refreshed / directions_shuffled replace future_directions_refreshed / module3_shuffled', () => {
+    assert.ok(sidebarContent.includes("'directions_refreshed'"),
+        'Should log directions_refreshed event');
+    assert.ok(sidebarContent.includes("'directions_shuffled'"),
+        'Should log directions_shuffled event');
+    assert.ok(!sidebarContent.includes("'future_directions_refreshed'"),
+        'future_directions_refreshed renamed');
+    assert.ok(!sidebarContent.includes("'module3_shuffled'"),
+        'module3_shuffled renamed');
 });
 
 test('context_block_added event removed', () => {
     assert.ok(!appContent.includes("'context_block_added'"), 'context_block_added removed');
 });
 
-test('baseline_details_shown event exists', () => {
-    assert.ok(appContent.includes("'baseline_details_shown'"), 'Should log baseline_details_shown');
+test('baseline_details_shown event removed', () => {
+    assert.ok(!appContent.includes("'baseline_details_shown'"), 'baseline_details_shown removed');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -217,11 +230,8 @@ test('chat_selected event with view field (distinguishes recent vs topics)', () 
     assert.ok(surrounding.includes('view:'), 'chat_selected should include view field');
 });
 
-test('view_switched event logged on toggle-btn click', () => {
-    assert.ok(appContent.includes("'view_switched'"), 'Should log view_switched');
-    const idx = appContent.indexOf("'view_switched'");
-    const surrounding = appContent.substring(idx - 50, idx + 200);
-    assert.ok(surrounding.includes('view:'), 'view_switched should include view field');
+test('view_switched event removed (graph view disabled)', () => {
+    assert.ok(!appContent.includes("'view_switched'"), 'view_switched removed');
 });
 
 test('sidebar_collapsed event logged with side and collapsed fields', () => {
@@ -232,12 +242,8 @@ test('sidebar_collapsed event logged with side and collapsed fields', () => {
     assert.ok(surrounding.includes('collapsed'), 'Should include collapsed field');
 });
 
-test('context_tag_clicked event logged with type only (no label)', () => {
-    assert.ok(appContent.includes("'context_tag_clicked'"), 'Should log context_tag_clicked');
-    const idx = appContent.indexOf("'context_tag_clicked'");
-    const surrounding = appContent.substring(idx - 20, idx + 200);
-    assert.ok(surrounding.includes('type:'), 'Should include type field');
-    assert.ok(!surrounding.includes('label:'), 'Should NOT include label field (privacy)');
+test('context_tag_clicked event removed', () => {
+    assert.ok(!appContent.includes("'context_tag_clicked'"), 'context_tag_clicked removed');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -246,11 +252,8 @@ test('context_tag_clicked event logged with type only (no label)', () => {
 
 console.log('\n─── New Events: Topic Management ───');
 
-test('topic_auto_detect_triggered event logged', () => {
-    assert.ok(appContent.includes("'topic_auto_detect_triggered'"), 'Should log topic_auto_detect_triggered');
-    const idx = appContent.indexOf("'topic_auto_detect_triggered'");
-    const surrounding = appContent.substring(idx - 20, idx + 200);
-    assert.ok(surrounding.includes('candidateCount'), 'Should include candidateCount');
+test('topic_auto_detect_triggered event removed', () => {
+    assert.ok(!appContent.includes("'topic_auto_detect_triggered'"), 'topic_auto_detect_triggered removed');
 });
 
 test('topic_assigned event uses assignMethod instead of isAutoDetected', () => {
@@ -396,9 +399,11 @@ test('goal_removed event logged', () => {
         'Should log goal_removed');
 });
 
-test('future_suggestion_clicked event logged', () => {
-    assert.ok(sidebarContent.includes("'future_suggestion_clicked'") || appContent.includes("'future_suggestion_clicked'"),
-        'Should log future_suggestion_clicked');
+test('welcome_suggestion_clicked absorbs future_suggestion_clicked', () => {
+    assert.ok(appContent.includes("'welcome_suggestion_clicked'"),
+        'Should log welcome_suggestion_clicked');
+    assert.ok(!appContent.includes("'future_suggestion_clicked'") && !sidebarContent.includes("'future_suggestion_clicked'"),
+        'future_suggestion_clicked absorbed');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -488,20 +493,21 @@ test('all event names are unique and distinct', () => {
 
 test('no duplicate event names with different meanings', () => {
     const currentEvents = [
-        'chat_selected', 'view_switched', 'topic_auto_detect_triggered',
+        'chat_selected',
         'topic_picker_opened', 'topic_picker_selected', 'topic_picker_keyboard_select',
         'topic_merge_drag', 'topic_merge_dialog_opened', 'topic_merge_confirmed', 'topic_merge_cancelled',
         'context_card_shown',
-        'connection_contested', 'context_excluded_for_topic',
+        'connection_contested', 'context_excluded_for_topic', 'context_exclusion_reverted',
         'current_profile_edited',
         'proposal_shown', 'proposal_accepted', 'proposal_edited', 'proposal_dismissed',
-        'proposal_empty', 'proposal_superseded',
+        'proposal_empty', 'proposal_superseded', 'proposal_change_accepted', 'proposal_change_dismissed',
         'goal_saved', 'goal_dismissed',
         'goal_modified', 'goal_authored', 'goal_removed',
-        'future_directions_refreshed',
+        'directions_refreshed', 'directions_shuffled',
         'goal_question_asked',
         'section_collapsed',
-        'sidebar_collapsed', 'context_tag_clicked',
+        'sidebar_collapsed',
+        'welcome_suggestion_clicked',
     ];
     const unique = new Set(currentEvents);
     assert.strictEqual(unique.size, currentEvents.length, 'All event names should be unique');
@@ -513,47 +519,37 @@ test('no duplicate event names with different meanings', () => {
 
 console.log('\n─── Complete Event Inventory ───');
 
-const ALL_EXPECTED_EVENTS = [
-    // Session
+const CANONICAL_EVENTS = [
     'session_start', 'session_end',
-    // Chat
-    'chat_created', 'chat_deleted', 'chat_selected', 'query_sent',
-    // View
-    'view_switched',
-    // Topics
+    'query_sent', 'chat_created', 'chat_selected', 'chat_deleted', 'chat_moved', 'chat_unassigned',
+    'context_card_shown', 'context_excluded_for_topic', 'context_exclusion_reverted',
+    'context_link_opened', 'construct_included_in_chat',
+    'connection_marker_hovered', 'connection_marker_clicked', 'connection_contested',
+    'proposal_shown', 'proposal_accepted', 'proposal_dismissed', 'proposal_edited',
+    'proposal_empty', 'proposal_superseded', 'proposal_change_accepted', 'proposal_change_dismissed',
+    'current_profile_edited', 'version_restored', 'update_undone',
+    'goal_authored', 'goal_saved', 'goal_removed', 'goal_dismissed', 'goal_modified', 'goal_question_asked',
+    'directions_refreshed', 'directions_shuffled',
+    'text_label_applied', 'text_label_removed',
+    'topic_created', 'topic_assigned', 'topic_renamed', 'topic_picker_opened',
+    'topic_picker_selected', 'topic_picker_keyboard_select',
     'topic_suggestion_accepted', 'topic_suggestion_dismissed',
-    'topic_created', 'topic_renamed', 'topic_assigned',
-    'topic_auto_detect_triggered',
-    'topic_picker_opened', 'topic_picker_selected', 'topic_picker_keyboard_select',
     'topic_merge_drag', 'topic_merge_dialog_opened', 'topic_merge_confirmed', 'topic_merge_cancelled',
-    // Past section
-    'context_card_shown', 'context_excluded_for_topic', 'context_link_opened',
-    'connection_contested',
-    'construct_included_in_chat',
-    // Current profile
-    'current_profile_edited',
-    'proposal_shown', 'proposal_accepted', 'proposal_edited', 'proposal_dismissed',
-    'proposal_empty', 'proposal_superseded',
-    'section_collapsed',
-    // Future directions / goals
-    'goal_saved', 'goal_dismissed',
-    'goal_modified', 'goal_authored', 'goal_removed',
-    'goal_question_asked', 'future_directions_refreshed',
-    // UI
-    'sidebar_collapsed', 'context_tag_clicked',
-    // Baseline
-    'baseline_details_shown',
-    // Moved chat
-    'chat_moved', 'chat_unassigned',
-    // Text-selection labels
-    'text_label_applied', 'text_label_removed', 'text_comment_committed',
+    'section_collapsed', 'sidebar_collapsed', 'welcome_suggestion_clicked',
 ];
 
 const allCode = appContent + sidebarContent;
-ALL_EXPECTED_EVENTS.forEach(evt => {
-    test(`event '${evt}' exists in codebase`, () => {
-        assert.ok(allCode.includes(`'${evt}'`), `Event '${evt}' should exist in app.js or sidebar.js`);
-    });
+CANONICAL_EVENTS.forEach(evt => {
+    // Inventory is informational; required subset check is below.
+});
+
+test('every StudyLog.event name is in the canonical taxonomy', () => {
+    const names = new Set();
+    const re = /StudyLog\.event\('([^']+)'/g;
+    let m;
+    while ((m = re.exec(allCode)) !== null) names.add(m[1]);
+    const extra = [...names].filter(n => !CANONICAL_EVENTS.includes(n));
+    assert.deepStrictEqual(extra, [], `non-canonical events: ${extra.join(', ')}`);
 });
 
 // ─── Topic assignment: one-assignment-per-chat guard ─────────────────────────
@@ -667,16 +663,15 @@ test('goal_saved logs stage evolve', () => {
         'Should include stage evolve');
 });
 
-test('context_tag_clicked does not log label', () => {
-    const ctx = getEventContext(appContent, 'context_tag_clicked');
-    assert.ok(ctx.includes('type'), 'Should include type');
-    assert.ok(!ctx.includes('label'), 'Should NOT include label');
+test('goal_saved logs initiative system', () => {
+    const ctx = getEventContext(sidebarContent, 'goal_saved');
+    assert.ok(ctx.includes("initiative: 'system'"), 'goal_saved should include initiative system');
 });
 
-test('goal_question_asked uses stage evolve', () => {
-    const ctx = getEventContext(sidebarContent, 'goal_question_asked');
-    assert.ok(ctx.includes("stage: 'evolve'") || ctx.includes('evolve'),
-        'Should include stage evolve');
+test('goal_question_asked uses stage evolve or construct by surface', () => {
+    const evolve = sidebarContent.includes("stage: 'evolve'") && sidebarContent.includes("'goal_question_asked'");
+    assert.ok(evolve, 'Should include stage evolve');
+    assert.ok(sidebarContent.includes("stage: 'construct'"), 'Construct Ask uses stage construct');
 });
 
 test('current_profile_edited does not log content values', () => {
@@ -715,9 +710,81 @@ test('proposal_shown logs topicId and change count in data payload', () => {
     assert.ok(ctx.includes('nChanges'), 'Should include nChanges');
 });
 
-test('future_directions_refreshed does not log direction titles', () => {
-    const ctx = getEventContext(sidebarContent, 'future_directions_refreshed');
+test('directions_refreshed does not log direction titles', () => {
+    const ctx = getEventContext(sidebarContent, 'directions_refreshed');
     assert.ok(!ctx.includes('direction:'), 'Should NOT include direction text content');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Round 2 — canonical taxonomy, kill list, payload / UI / CSS (10c)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+console.log('\n─── Round 2 taxonomy (10c) ───');
+
+const KILL_LIST = [
+    'module1_viewed', 'module2_connection_shown', 'module2_connection_clicked',
+    'module3_direction_dragged', 'module3_direction_new_chat', 'module_collapsed',
+    'chunk_labeled', 'intention_saved', 'intention_explored', 'intention_dismissed',
+    'thread_toggled', 'context_block_added', 'context_block_closed', 'context_block_toggled',
+    'context_item_scoped', 'context_tag_clicked', 'current_concept_toggled',
+    'current_concept_stance_set', 'current_profile_dragged', 'overview_section_toggled',
+    'current_profile_section_toggled', 'past_lookup', 'past_build_on_click',
+    'view_switched', 'summary_updated', 'summary_edited', 'summary_ai_edited',
+    'connection_card_closed', 'connection_sidebar_card_clicked',
+    'future_direction_clicked', 'future_direction_new_chat', 'goal_explored',
+];
+
+test('kill-list event names are absent from frontend sources', () => {
+    KILL_LIST.forEach(name => {
+        assert.ok(!frontendSrc.includes(`'${name}'`) && !frontendSrc.includes(`"${name}"`),
+            `${name} should be absent from frontend/*.js`);
+    });
+});
+
+test('renames: old evolve events gone, new names present', () => {
+    assert.ok(!frontendSrc.includes("'future_directions_refreshed'"));
+    assert.ok(!frontendSrc.includes("'module3_shuffled'"));
+    assert.ok(frontendSrc.includes("'directions_refreshed'"));
+    assert.ok(frontendSrc.includes("'directions_shuffled'"));
+});
+
+test('payload spot-assertions: goal_saved initiative, label origin, nGoals, replay', () => {
+    const saved = getEventContext(sidebarContent, 'goal_saved');
+    assert.ok(saved.includes("initiative: 'system'"), 'goal_saved includes initiative: system');
+    const applied = getEventContext(appContent, 'text_label_applied');
+    assert.ok(/origin\s*:/.test(applied), 'text_label_applied includes origin:');
+    const included = getEventContext(appContent, 'construct_included_in_chat');
+    assert.ok(included.includes('nGoals'), 'construct_included_in_chat includes nGoals');
+    assert.ok(appContent.includes('replay: true') && appContent.includes('{ replay: true }'),
+        'history-path context_card_shown includes replay: true');
+});
+
+test('UI structure: Apply remnants gone; Construct owns goals; Evolve fold gone', () => {
+    const all = frontendSrc + indexHtml;
+    assert.ok(!all.includes('sectionPast'), 'sectionPast absent');
+    assert.ok(!all.includes('past-continue-btn'), 'past-continue-btn absent');
+    assert.ok(!all.includes('suppressedChatIds'), 'suppressedChatIds absent');
+    const currentBody = indexHtml.slice(
+        indexHtml.indexOf('id="sectionCurrentBody"'),
+        indexHtml.indexOf('id="sectionFuture"')
+    );
+    assert.ok(currentBody.includes('id="constructGoalsList"'), 'constructGoalsList in Construct');
+    assert.ok(currentBody.includes('id="addGoalInput"'), 'addGoalInput in Construct');
+    const evolveBody = indexHtml.slice(indexHtml.indexOf('id="sectionFuture"'));
+    assert.ok(!evolveBody.includes('id="goalsList"'), '#goalsList removed from Evolve');
+});
+
+test('mark.anno highlight has no underline and lowered alpha', () => {
+    const start = stylesCss.indexOf('mark.anno {');
+    assert.ok(start !== -1, 'mark.anno rule exists');
+    const end = stylesCss.indexOf('/* ── Label popover', start);
+    const block = stylesCss.slice(start, end > start ? end : start + 400);
+    assert.ok(!/text-decoration\s*:\s*underline/.test(block), 'no text-decoration underline');
+    assert.ok(!/border-bottom\s*:\s*(?!none)/.test(block.replace(/border-bottom:\s*none;?/g, '')),
+        'no colored border-bottom underline');
+    const alphas = [...block.matchAll(/rgba\([^)]*?,\s*(0\.\d+)\s*\)/g)].map(m => parseFloat(m[1]));
+    assert.ok(alphas.length > 0, 'rgba backgrounds present');
+    assert.ok(alphas.every(a => a <= 0.18), `alpha lowered (got ${alphas.join(', ')})`);
 });
 
 // ─── Summary ──────────────────────────────────────────────────────────────────

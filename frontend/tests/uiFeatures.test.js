@@ -90,10 +90,11 @@ test('HTML has section-future with directionCards', () => {
         'index.html should have directionCards');
     assert.ok(!htmlContent.includes('evolve-subheader-suggested'),
         'index.html should not hardcode a Suggested subheader (tags live on cards)');
-    const goalsIdx = htmlContent.indexOf('id="goalsList"');
+    const goalsIdx = htmlContent.indexOf('id="constructGoalsList"');
     const dirsIdx = htmlContent.indexOf('id="directionCards"');
-    assert.ok(goalsIdx > -1 && dirsIdx > -1 && goalsIdx < dirsIdx,
-        'Evolve order: goalsList → directionCards');
+    assert.ok(goalsIdx > -1, 'Construct goals list present');
+    assert.ok(dirsIdx > -1, 'Evolve direction cards present');
+    assert.ok(!htmlContent.includes('id="goalsList"'), 'Evolve goals fold removed');
     assert.ok(htmlContent.includes('id="addGoalInput"') && htmlContent.includes('constructGoals'),
         'Add-goal input lives in Construct');
 });
@@ -347,15 +348,15 @@ test('suggested goal cards are not draggable', () => {
         'Suggested goal cards should not be draggable');
 });
 
-test('evolve cards tag saved vs suggested; saved goals fold compactly', () => {
+test('evolve cards tag saved vs suggested; expandable question on every card', () => {
     assert.ok(sidebarContent.includes('goal-status-tag') && sidebarContent.includes('tag-saved'),
         'Cards should show a Saved tag when already saved');
     assert.ok(sidebarContent.includes('tag-suggested'),
         'Cards should show a Suggested tag when not saved');
-    assert.ok(sidebarContent.includes('saved-goals-fold') && sidebarContent.includes('loom_savedGoalsCollapsed'),
-        'Saved goals should live in a collapsible fold');
-    assert.ok(sidebarContent.includes('saved-goal-row'),
-        'Saved goals fold should use compact rows');
+    assert.ok(sidebarContent.includes('goal-card-body') && sidebarContent.includes('is-expanded'),
+        'Cards expand to reveal a question');
+    assert.ok(!sidebarContent.includes('saved-goals-fold'),
+        'Evolve saved-goals fold removed');
 });
 
 test('app.js has drag-over drop handler', () => {
@@ -1692,7 +1693,7 @@ test('CSS has .type-breadth/.type-depth (no badge pills)', () => {
 
 test('sidebar.js shows unsaved suggested goals with breadth before depth', () => {
     assert.ok(sidebarContent.includes('_findGoal(topic, d.title)'),
-        'Suggested cards skip already-saved goals');
+        'Cards match saved goals by title');
     assert.ok(sidebarContent.includes("breadth: 0") || sidebarContent.includes("order[a.type]"),
         'Unsaved suggestions prefer breadth before depth');
 });

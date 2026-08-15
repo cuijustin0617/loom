@@ -75,7 +75,7 @@ test('comment goes through proposal pipeline (not immediate ai-edit)', () => {
   assert.ok(!appSrc.includes('_commitAnnotationComment'), 'comment commit helper removed');
   assert.ok(appSrc.includes("Noted — it'll show up in your next profile suggestion") || appSrc.includes('Noted'), 'comment toast');
   assert.ok(appSrc.includes('Sidebar._labelsDirty = true'), 'comments set labels dirty');
-  assert.ok(appSrc.includes("'text_comment_committed'"), 'comment logged');
+    assert.ok(appSrc.includes("'text_label_applied'"), 'label logged');
 });
 
 test('chunk labels are not injected into chat prompts', () => {
@@ -88,7 +88,7 @@ console.log('\n─── Logging ───');
 test('text_label_* events logged', () => {
   assert.ok(appSrc.includes("'text_label_applied'"), 'text_label_applied');
   assert.ok(appSrc.includes("'text_label_removed'"), 'text_label_removed');
-  assert.ok(appSrc.includes("'text_comment_committed'"), 'text_comment_committed');
+  assert.ok(appSrc.includes("'text_label_applied'"), 'text_label_applied');
   assert.ok(!appSrc.includes("'current_concept_toggled'"), 'old chunk event removed');
 });
 

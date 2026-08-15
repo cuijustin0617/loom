@@ -1444,9 +1444,9 @@ class TestFrontendSidebarJS:
         js = _get_client().get("/static/sidebar.js").text
         assert "topic.sidebarCache" in js
 
-    def test_sidebar_has_status_drag_init(self):
+    def test_sidebar_has_no_status_drag_init(self):
         js = _get_client().get("/static/sidebar.js").text
-        assert "_initStatusDrag" in js
+        assert "_initStatusDrag" not in js
 
     def test_sidebar_has_status_update_init(self):
         js = _get_client().get("/static/sidebar.js").text
@@ -1716,9 +1716,10 @@ class TestFrontendStatusUpdate:
         html = _get_client().get("/").text
         assert 'id="statusUpdateHeaderBtn"' in html
 
-    def test_status_text_draggable(self):
+    def test_status_text_not_draggable(self):
         html = _get_client().get("/").text
-        assert 'draggable="true"' in html
+        assert 'id="statusStructured"' in html
+        assert 'draggable="true"' not in html
 
     def test_status_update_btn_css(self):
         css = _get_client().get("/static/styles.css").text
@@ -1737,9 +1738,9 @@ class TestFrontendDragWholePanel:
 
 
 class TestFrontendContextOnlySend:
-    def test_app_js_context_only_message(self):
+    def test_app_js_context_only_message_removed(self):
         js = _get_client().get("/static/app.js").text
-        assert "Please continue building on this previous conversation" in js
+        assert "Please continue building on this previous conversation" not in js
 
 
 class TestFrontendFileUploadJS:
@@ -2576,7 +2577,7 @@ class TestStructuredStatusUI:
     def test_status_structured_container_exists(self):
         html = self._read_file("frontend/index.html")
         assert 'id="statusStructured"' in html
-        assert 'draggable="true"' in html
+        assert 'id="constructGoalsList"' in html
 
     def test_css_has_status_section_styles(self):
         css = self._read_file("frontend/styles.css")
@@ -2615,8 +2616,8 @@ class TestStructuredStatusUI:
 
     def test_render_status_handles_null(self):
         js = self._read_file("frontend/sidebar.js")
-        assert "if (!statusData)" in js
-        assert "Chat to build your current profile" in js
+        assert "if (!statusData && !proposal)" in js
+        assert "Chat to build your profile" in js
 
     def test_delete_btn_in_render(self):
         js = self._read_file("frontend/sidebar.js")
@@ -2782,16 +2783,13 @@ class TestSidebarNullGuards:
         assert "_getStatusContainer" in js
         assert "statusStructured" in js
 
-    def test_init_status_drag_has_guard(self):
+    def test_init_status_drag_removed(self):
         js = self._read_file("frontend/sidebar.js")
-        defn = js.index("_initStatusDrag() {")
-        drag_section = js[defn:js.index("},", defn)]
-        assert "_getStatusContainer" in drag_section
-        assert "if (!el) return" in drag_section
+        assert "_initStatusDrag" not in js
 
     def test_render_status_has_guard(self):
         js = self._read_file("frontend/sidebar.js")
-        defn = js.index("_renderStatus(statusData) {")
+        defn = js.index("_renderStatus(statusData")
         render_section = js[defn:js.index("\n  },\n", defn)]
         assert "_getStatusContainer" in render_section
         assert "if (!container) return" in render_section
@@ -3185,3 +3183,203 @@ class TestTopicRenamePromptImport:
         from pathlib import Path
         main_py = (Path(__file__).parent.parent / "backend" / "main.py").read_text()
         assert "TOPIC_RENAME_CHECK_PROMPT" in main_py
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Design-probe Round 2 (10d)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+CANONICAL_EVENT_TYPES = [
+    "session_start", "session_end",
+    "query_sent", "chat_created", "chat_selected", "chat_deleted", "chat_moved", "chat_unassigned",
+    "context_card_shown", "context_excluded_for_topic", "context_exclusion_reverted",
+    "context_link_opened", "construct_included_in_chat",
+    "connection_marker_hovered", "connection_marker_clicked", "connection_contested",
+    "proposal_shown", "proposal_accepted", "proposal_dismissed", "proposal_edited",
+    "proposal_empty", "proposal_superseded", "proposal_change_accepted", "proposal_change_dismissed",
+    "current_profile_edited", "version_restored", "update_undone",
+    "goal_authored", "goal_saved", "goal_removed", "goal_dismissed", "goal_modified", "goal_question_asked",
+    "directions_refreshed", "directions_shuffled",
+    "text_label_applied", "text_label_removed",
+    "topic_created", "topic_assigned", "topic_renamed", "topic_picker_opened",
+    "topic_picker_selected", "topic_picker_keyboard_select",
+    "topic_suggestion_accepted", "topic_suggestion_dismissed",
+    "topic_merge_drag", "topic_merge_dialog_opened", "topic_merge_confirmed", "topic_merge_cancelled",
+    "section_collapsed", "sidebar_collapsed", "welcome_suggestion_clicked",
+]
+
+
+class TestDesignProbeRound2Api:
+    def _mock_refresh_llm(self, status):
+        async def side_effect(messages, system_prompt, **kwargs):
+            msg = messages[0]["content"] if messages else ""
+            if "Suggest new directions" in msg:
+                return {"newDirections": []}
+            return status
+        return side_effect
+
+    def test_refresh_returns_overview_and_goals(self):
+        status = {
+            "overview": [{"type": "bullet", "text": "Knows Python"}],
+            "goals": [{"text": "Explore generative AI system design"}],
+        }
+        with patch("main.llm") as m, patch("main.embedder") as emb:
+            m.chat = AsyncMock(side_effect=self._mock_refresh_llm(status))
+            emb.embed_text = AsyncMock(return_value=[0.1] * 10)
+            data = _get_client().post("/api/sidebar/refresh", json={
+                "chatId": "c1", "messages": [{"role": "user", "content": "hi"}],
+                "topicId": "t1", "topicName": "ML", "topicStatus": "",
+                "allChatSummaries": [], "allConcepts": [],
+            }).json()
+            assert "overview" in data["statusUpdate"]
+            assert "goals" in data["statusUpdate"]
+            assert data["statusUpdate"]["goals"][0]["text"] == "Explore generative AI system design"
+
+    def test_refresh_overview_only_omits_goals_key(self):
+        status = {"overview": [{"type": "bullet", "text": "Knows Python"}]}
+        with patch("main.llm") as m, patch("main.embedder") as emb:
+            m.chat = AsyncMock(side_effect=self._mock_refresh_llm(status))
+            emb.embed_text = AsyncMock(return_value=[0.1] * 10)
+            data = _get_client().post("/api/sidebar/refresh", json={
+                "chatId": "c1", "messages": [{"role": "user", "content": "hi"}],
+                "topicId": "t1", "topicName": "ML", "topicStatus": "",
+                "allChatSummaries": [], "allConcepts": [],
+            }).json()
+            assert "overview" in data["statusUpdate"]
+            assert "goals" not in data["statusUpdate"]
+
+    def test_directions_prompt_includes_annotation_span(self):
+        captured = []
+
+        async def fake_chat(messages, system_prompt, **kwargs):
+            captured.append(system_prompt)
+            if messages and "direction" in messages[0]["content"].lower():
+                return {"newDirections": []}
+            return {"overview": []}
+
+        with patch("main.llm") as m, patch("main.embedder") as emb:
+            m.chat = AsyncMock(side_effect=fake_chat)
+            emb.embed_text = AsyncMock(return_value=[0.1] * 10)
+            _get_client().post("/api/sidebar/refresh", json={
+                "chatId": "c1", "messages": [{"role": "user", "content": "hi"}],
+                "topicId": "t1", "topicName": "ML", "topicStatus": "",
+                "allChatSummaries": [], "allConcepts": [],
+                "annotations": [{"spanText": "neural nets", "label": "interested"}],
+            })
+        joined = "\n".join(captured)
+        assert "neural nets" in joined
+
+    def test_chat_stream_profile_block_with_goals(self):
+        async def fake_stream(*args, **kwargs):
+            yield "ok"
+        with patch("main.llm") as m, patch("main.embedder") as emb:
+            m.chat_stream = MagicMock(return_value=fake_stream())
+            m.chat = AsyncMock(return_value={"topic": {}, "concepts": []})
+            emb.embed_text = AsyncMock(return_value=[0.1] * 10)
+            _get_client().post("/api/chat/stream", json={
+                "chatId": "c1",
+                "messages": [{"role": "user", "content": "hi"}],
+                "condition": "loom",
+                "topicStatus": {
+                    "overview": [{"text": "Knows Python"}],
+                    "goals": [{"text": "Explore generative AI system design"}],
+                },
+            })
+            prompt = m.chat_stream.call_args.kwargs.get("system_prompt") or ""
+            assert "Explore generative AI system design" in prompt
+            assert "You also have a profile of this user" in prompt
+
+    def test_chat_stream_empty_topic_status_has_no_profile_block(self):
+        async def fake_stream(*args, **kwargs):
+            yield "ok"
+        with patch("main.llm") as m:
+            m.chat_stream = MagicMock(return_value=fake_stream())
+            m.chat = AsyncMock(return_value={"topic": {}, "concepts": []})
+            _get_client().post("/api/chat/stream", json={
+                "chatId": "c1",
+                "messages": [{"role": "user", "content": "hi"}],
+                "condition": "loom",
+                "topicStatus": "",
+            })
+            prompt = m.chat_stream.call_args.kwargs.get("system_prompt") or ""
+            assert "You also have a profile of this user" not in prompt
+
+    def test_baseline_ignores_topic_status(self):
+        async def fake_stream(*args, **kwargs):
+            yield "ok"
+        with patch("main.llm") as m:
+            m.chat_stream = MagicMock(return_value=fake_stream())
+            m.chat = AsyncMock(return_value={"topic": {}, "concepts": []})
+            _get_client().post("/api/chat/stream", json={
+                "chatId": "c1",
+                "messages": [{"role": "user", "content": "hi"}],
+                "condition": "baseline",
+                "topicStatus": {
+                    "overview": [{"text": "Knows Python"}],
+                    "goals": [{"text": "Explore generative AI system design"}],
+                },
+            })
+            prompt = m.chat_stream.call_args.kwargs.get("system_prompt") or ""
+            assert "Explore generative AI system design" not in prompt
+            assert "You also have a profile of this user" not in prompt
+
+    def test_memory_prompt_profile_precedes_respond_directive(self):
+        async def fake_stream(*args, **kwargs):
+            yield "ok"
+        with patch("main.llm") as m, patch("main.embedder") as emb:
+            m.chat_stream = MagicMock(return_value=fake_stream())
+            m.chat = AsyncMock(return_value={"topic": {}, "concepts": []})
+            emb.embed_text = AsyncMock(return_value=[0.1] * 10)
+            _get_client().post("/api/chat/stream", json={
+                "chatId": "c1",
+                "messages": [{"role": "user", "content": "hi"}],
+                "condition": "loom",
+                "topicStatus": {
+                    "overview": [{"text": "Knows Python"}],
+                    "goals": [{"text": "Master offline evaluation"}],
+                },
+                "allChatSummaries": [{
+                    "id": "c2", "title": "Past", "summary": "old",
+                    "embedding": [0.1] * 10,
+                    "userAsked": "what is backprop",
+                    "aiCovered": "explained backprop",
+                }],
+            })
+            prompt = m.chat_stream.call_args.kwargs.get("system_prompt") or ""
+            profile_at = prompt.find("You also have a profile of this user")
+            respond_at = prompt.find("Now respond to the user's message.")
+            assert profile_at != -1 and respond_at != -1
+            assert profile_at < respond_at
+            assert "Master offline evaluation" in prompt
+
+    def test_ai_edit_returns_overview_only(self):
+        with patch("main.llm") as m:
+            m.chat = AsyncMock(return_value={
+                "overview": ["Knows Python"],
+                "goals": [{"text": "should not leak"}],
+            })
+            data = _get_client().post("/api/topic/status/ai-edit", json={
+                "topicName": "ML",
+                "overview": ["old"],
+                "instruction": "update it",
+            }).json()
+            assert "overview" in data
+            assert "goals" not in data
+
+    def test_canonical_events_round_trip(self):
+        user_id = "r2-canonical-roundtrip"
+        client = _get_client()
+        with patch("main._update_seed_file"), patch("main._backup_events_to_json"):
+            for evt in CANONICAL_EVENT_TYPES:
+                payload = {"topicId": "t1", "surface": "sidebar", "probe": evt}
+                resp = client.post("/api/log", json={
+                    "userId": user_id, "condition": "loom",
+                    "eventType": evt, "data": payload,
+                })
+                assert resp.status_code == 200, evt
+        events = client.get("/api/admin/events", params={"userId": user_id}).json()
+        by_type = {e["eventType"]: e for e in events}
+        for evt in CANONICAL_EVENT_TYPES:
+            assert evt in by_type, evt
+            assert by_type[evt]["data"]["probe"] == evt
+            assert by_type[evt]["data"]["topicId"] == "t1"

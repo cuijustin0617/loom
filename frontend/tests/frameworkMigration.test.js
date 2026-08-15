@@ -171,29 +171,9 @@ test('_migrateTopic seeds statusSummary.goals from legacy topic.goals', () => {
     assert.strictEqual(t.statusSummary.goals.length, 1);
     assert.strictEqual(t.statusSummary.goals[0].id, 'goal_abc');
     assert.strictEqual(t.statusSummary.goals[0].text, 'Compare X and Y');
-    assert.strictEqual(t.statusSummary.goals[0].source, 'inferred');
+    assert.strictEqual(t.statusSummary.goals[0].source, 'user');
     Storage._migrateTopic(t);
     assert.strictEqual(t.statusSummary.goals.length, 1, 'idempotent');
-});
-
-test('_migrateTopic retags Evolve-saved user goals as inferred', () => {
-    const { Storage } = makeEnv();
-    const t = {
-        id: 't1',
-        statusSummary: {
-            overview: [],
-            goals: [
-                { id: 'g1', text: 'Explore generative AI system design', source: 'user', suggestionTitle: 'Explore generative AI system design' },
-                { id: 'g2', text: 'I want to pass MLSD interviews', source: 'user' },
-                { id: 'g3', text: 'Machine Learning System Design', source: 'user' },
-            ],
-        },
-        goals: [{ id: 'g3', title: 'Machine Learning System Design' }],
-    };
-    Storage._migrateTopic(t);
-    assert.strictEqual(t.statusSummary.goals[0].source, 'inferred', 'unedited suggestion');
-    assert.strictEqual(t.statusSummary.goals[1].source, 'user', 'typed goal kept');
-    assert.strictEqual(t.statusSummary.goals[2].source, 'inferred', 'legacy Evolve title');
 });
 
 test('createTopic includes all new schema fields', () => {
@@ -560,15 +540,15 @@ test('add-goal input exists and welcome cards surface saved goals', () => {
         'app.js suggestion cards handle goals');
 });
 
-test('saving an unedited Evolve suggestion is inferred, not user-authored', () => {
+test('saving an Evolve suggestion is tagged source user', () => {
     const start = sidebarSrc.indexOf('_saveSuggestedGoal(dir, opts');
     const block = sidebarSrc.slice(start, start + 800);
-    assert.ok(block.includes("dir.editedByUser ? 'user' : 'inferred'"),
-        'unedited suggestion is inferred; edited text is user');
+    assert.ok(block.includes("source: 'user'"), 'saved suggestion is user-confirmed');
 });
 
 test('Ask this on a suggested goal does not save it as a Construct goal', () => {
-    const start = sidebarSrc.indexOf("el.querySelector('.card-new-chat-btn')");
+    const start = sidebarSrc.indexOf("el.querySelector('.goal-try-asking')");
+    assert.ok(start > -1, 'question row is clickable');
     const block = sidebarSrc.slice(start, sidebarSrc.indexOf('const regenBtn', start));
     assert.ok(block.includes('_startGoalInNewChat'), 'Ask this starts a chat');
     assert.ok(!block.includes('_saveSuggestedGoal'), 'asking does not adopt the goal');
@@ -622,11 +602,13 @@ test('contested marker strike-through is re-applied on reload', () => {
         '_appendMessage re-applies conn-marker-contested from stored message');
 });
 
-test('context_card_shown logs only on the live stream path, not history replay', () => {
+test('context_card_shown history path flags replay: true', () => {
     assert.ok(appContent.includes("{ replay: true }"), 'history re-render marks replay');
     const fnStart = appContent.indexOf('_renderInjectedPastPanel(assistantEl, injectedPastChats');
     const fnBlock = appContent.slice(fnStart, appContent.indexOf('_isUnassignedTopic', fnStart));
-    assert.ok(fnBlock.includes('if (!opts.replay)'), 'replay path skips context_card_shown');
+    assert.ok(fnBlock.includes('replay: true') || fnBlock.includes("replay: true"),
+        'replay payload included on history path');
+    assert.ok(fnBlock.includes('opts.replay'), 'fresh vs replay distinguished');
 });
 
 test('sendMessage filters excluded chats from injected context', () => {
@@ -732,10 +714,18 @@ test('kept construct/apply/evolve events carry stage tags', () => {
      ['context_excluded_for_topic', 'user'],
      ['connection_contested', 'chat'],
      ['goal_question_asked', 'evolve'],
-     ['future_directions_refreshed', 'evolve']].forEach(([evt, stage]) => {
+     ['directions_shuffled', 'evolve']].forEach(([evt, stage]) => {
         const idx = src.indexOf(`'${evt}'`);
         assert.ok(idx > -1, `${evt} exists`);
-        assert.ok(src.slice(idx, idx + 280).includes(`'${stage}'`), `${evt} tagged ${stage}`);
+        let found = false;
+        let search = 0;
+        while (true) {
+            const i = src.indexOf(`'${evt}'`, search);
+            if (i < 0) break;
+            if (src.slice(i, i + 320).includes(`'${stage}'`)) { found = true; break; }
+            search = i + 1;
+        }
+        assert.ok(found, `${evt} tagged ${stage}`);
     });
 });
 
@@ -755,7 +745,7 @@ test('admin category lists contain the new event names', () => {
         assert.ok(mainPy.includes(`'${e}'`), `${e} in admin lists`));
     ['context_card_shown', 'context_excluded_for_topic', 'context_link_opened'].forEach(e =>
         assert.ok(mainPy.includes(`'${e}'`), `${e} in admin lists`));
-    ['goal_saved', 'goal_explored', 'goal_authored'].forEach(e =>
+    ['goal_saved', 'goal_question_asked', 'goal_authored'].forEach(e =>
         assert.ok(mainPy.includes(`'${e}'`), `${e} in admin lists`));
     ['update_undone', 'version_restored'].forEach(e =>
         assert.ok(mainPy.includes(`'${e}'`), `${e} in admin lists`));

@@ -1003,6 +1003,22 @@ async def admin_events_summary():
     return {"total": total, "summary": summary}
 
 
+@app.post("/api/admin/events/reset")
+async def admin_events_reset(confirm: str = Query("")):
+    """Guarded wipe of the events table. Requires confirm=RESET. Also empties seed_events.json."""
+    if confirm != "RESET":
+        return JSONResponse({"ok": False, "error": "pass confirm=RESET"}, status_code=400)
+    conn = _get_db()
+    conn.execute("DELETE FROM events")
+    conn.commit()
+    conn.close()
+    try:
+        SEED_PATH.write_text("[]")
+    except Exception as exc:
+        print(f"[reset] Could not empty seed file: {exc}")
+    return {"ok": True}
+
+
 @app.get("/api/admin/export")
 async def admin_export():
     """Export all events as downloadable JSON."""
@@ -1416,12 +1432,12 @@ function renderHeatmap(events) {
 }
 
 const CONSTRUCT = ['proposal_shown','proposal_accepted','proposal_edited','proposal_dismissed','proposal_superseded',
-  'current_profile_edited','text_label_applied','text_label_removed','text_comment_committed',
+  'proposal_change_accepted','proposal_change_dismissed','current_profile_edited','text_label_applied','text_label_removed',
   'topic_suggestion_accepted','topic_suggestion_dismissed','topic_created','topic_renamed','topic_assigned','topic_merge_confirmed',
-  'construct_included_in_chat','goal_authored'];
-const APPLY = ['context_card_shown','context_excluded_for_topic','context_link_opened','connection_contested'];
-const EVOLVE = ['goal_saved','goal_explored','goal_dismissed','goal_modified',
-  'goal_removed','goal_question_asked','future_directions_refreshed'];
+  'construct_included_in_chat','goal_authored','version_restored','update_undone'];
+const APPLY = ['context_card_shown','context_excluded_for_topic','context_exclusion_reverted','context_link_opened','connection_contested','connection_marker_hovered','connection_marker_clicked'];
+const EVOLVE = ['goal_saved','goal_dismissed','goal_modified',
+  'goal_removed','goal_question_asked','directions_refreshed','directions_shuffled'];
 const SCRUTABILITY = ['update_undone','version_restored','context_excluded_for_topic','connection_contested'];
 const TOPIC = ['topic_created','topic_renamed','topic_assigned','topic_merge_confirmed','topic_merge_drag'];
 
