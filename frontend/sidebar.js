@@ -1327,7 +1327,7 @@ const Sidebar = {
 
     const el = document.createElement('div');
     const typeClass = d.type === 'breadth' ? 'type-breadth' : d.type === 'depth' ? 'type-depth' : '';
-    el.className = `temporal-card direction-card suggested-goal-card${typeClass ? ' ' + typeClass : ''}${isSaved ? ' is-saved' : ''}`;
+    el.className = `temporal-card direction-card suggested-goal-card is-expanded${typeClass ? ' ' + typeClass : ''}${isSaved ? ' is-saved' : ''}`;
     el.draggable = false;
 
     const reasonText = (d.reason || '').trim();
@@ -1357,15 +1357,17 @@ const Sidebar = {
       ${provenance ? `<div class="direction-provenance">${Utils.escapeHtml(provenance)}</div>` : ''}
       <div class="goal-card-body">
         <div class="goal-try-asking">
-          <span class="goal-try-prefix">Try asking:</span>
-          <span class="temporal-card-question goal-example-question">${Utils.escapeHtml(qText)}</span>
+          <span class="goal-try-line">
+            <span class="goal-try-prefix">Try asking:</span>
+            <span class="temporal-card-question goal-example-question">${Utils.escapeHtml(qText)}</span>
+          </span>
           <button class="goal-icon-btn goal-regen-btn" title="Another angle">↻</button>
-        </div>
-        <div class="temporal-card-actions">
-          ${isSaved
-            ? `<button class="goal-icon-btn intention-remove-btn" title="Remove goal">×</button>`
-            : `<button class="probe-btn direction-save-btn" title="Save goal">Save</button>
-               <button class="goal-icon-btn direction-dismiss-btn" title="Dismiss">×</button>`}
+          <span class="temporal-card-actions">
+            ${isSaved
+              ? `<button class="goal-icon-btn intention-remove-btn" title="Remove goal">×</button>`
+              : `<button class="probe-btn direction-save-btn" title="Save goal">Save</button>
+                 <button class="goal-icon-btn direction-dismiss-btn" title="Dismiss">×</button>`}
+          </span>
         </div>
       </div>
     `;
@@ -1401,7 +1403,7 @@ const Sidebar = {
       });
     }
     el.querySelector('.goal-try-asking').addEventListener('click', async (e) => {
-      if (e.target.closest('.goal-regen-btn')) return;
+      if (e.target.closest('button')) return;
       e.stopPropagation();
       let q = (el.querySelector('.goal-example-question')?.textContent || '').trim();
       if (!q) q = await this._ensureCardQuestion(el, d, matchedGoal, isSaved);
@@ -1440,6 +1442,7 @@ const Sidebar = {
       });
     }
 
+    if (!qText) this._ensureCardQuestion(el, d, matchedGoal, isSaved);
     return el;
   },
 

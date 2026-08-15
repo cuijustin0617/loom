@@ -2262,18 +2262,15 @@ body {
 }
 
 .goal-try-asking {
-  margin-top: 4px;
+  margin-top: 0;
 }
 
 .goal-try-prefix {
-  display: block;
   font-size: 10px;
   color: var(--text-muted);
-  margin-bottom: 2px;
 }
 
 .goal-example-question {
-  display: block;
   font-style: normal;
   color: var(--text-secondary);
 }
@@ -3344,7 +3341,8 @@ body {
 .direction-provenance {
   font-size: 10px;
   color: var(--text-muted);
-  margin-top: 3px;
+  margin-top: 1px;
+  line-height: 1.3;
 }
 
 .intention-view-chat {
@@ -3689,21 +3687,53 @@ body {
 .suggested-goal-card.is-expanded .goal-card-chevron {
   transform: rotate(180deg);
 }
+.temporal-card.suggested-goal-card {
+  padding: 6px 10px;
+}
 .goal-card-body {
   display: none;
-  padding-top: 6px;
+  padding-top: 4px;
 }
 .suggested-goal-card.is-expanded .goal-card-body {
   display: block;
 }
 .goal-try-asking {
   display: flex;
-  align-items: flex-start;
+  align-items: baseline;
   gap: 6px;
   cursor: pointer;
+  margin-top: 0;
+}
+.goal-try-line {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.goal-try-prefix {
+  display: inline;
+  margin: 0 4px 0 0;
+}
+.suggested-goal-card .goal-example-question,
+.suggested-goal-card .temporal-card-question {
+  display: inline;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.35;
 }
 .goal-try-asking:hover .goal-example-question {
   text-decoration: underline;
+}
+.suggested-goal-card .goal-regen-btn {
+  flex-shrink: 0;
+  align-self: center;
+}
+.suggested-goal-card .temporal-card-actions {
+  margin-top: 0;
+  margin-left: auto;
+  flex-shrink: 0;
+  align-self: center;
 }
 .goal-card-header-row {
   display: flex;
