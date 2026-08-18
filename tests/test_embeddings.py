@@ -214,7 +214,7 @@ class TestEmbeddingServiceInit:
         import os
         os.environ.pop("EMBEDDING_PROVIDER", None)
         svc = EmbeddingService()
-        assert svc.provider == "openai"
+        assert svc.provider == "openrouter"
 
     def test_custom_provider(self):
         assert EmbeddingService(provider="gemini").provider == "gemini"

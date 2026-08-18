@@ -142,7 +142,7 @@ class TestLLMRouterInit:
     def test_default_provider(self):
         import os
         os.environ.pop("LLM_PROVIDER", None)
-        assert LLMRouter().provider == "gemini"
+        assert LLMRouter().provider == "openrouter"
 
     def test_custom_provider(self):
         assert LLMRouter(provider="gemini").provider == "gemini"
@@ -164,7 +164,7 @@ class TestLLMRouterInit:
         assert router.provider == "openai"
 
     def test_default_model_constant(self):
-        assert DEFAULT_MODEL == "gemini-3-flash-preview"
+        assert DEFAULT_MODEL == "google/gemini-3.5-flash"
 
 
 # ── LLMRouter.chat with mocked OpenAI ─────────────────────────────────────────
@@ -347,7 +347,10 @@ class TestLLMRouterGemini:
         router = LLMRouter(provider="gemini")
         mock_client = _gemini_mock('{"response": "hello from gemini"}')
         with patch("google.genai.Client", return_value=mock_client):
-            result = await router.chat([{"role": "user", "content": "hi"}], "sys", json_mode=True)
+            result = await router.chat(
+                [{"role": "user", "content": "hi"}], "sys",
+                json_mode=True, model="gemini-3-flash-preview",
+            )
             assert result == {"response": "hello from gemini"}
 
     @pytest.mark.asyncio
@@ -355,7 +358,10 @@ class TestLLMRouterGemini:
         router = LLMRouter(provider="gemini")
         mock_client = _gemini_mock("plain gemini text")
         with patch("google.genai.Client", return_value=mock_client):
-            result = await router.chat([{"role": "user", "content": "hi"}], "sys", json_mode=False)
+            result = await router.chat(
+                [{"role": "user", "content": "hi"}], "sys",
+                json_mode=False, model="gemini-3-flash-preview",
+            )
             assert result == {"response": "plain gemini text"}
 
     @pytest.mark.asyncio
@@ -368,7 +374,7 @@ class TestLLMRouterGemini:
                 {"role": "assistant", "content": "a1"},
                 {"role": "user", "content": "q2"},
             ]
-            await router.chat(msgs, "sys")
+            await router.chat(msgs, "sys", model="gemini-3-flash-preview")
             call_kwargs = mock_client.aio.models.generate_content.call_args.kwargs
             contents = call_kwargs.get("contents", [])
             assert len(contents) == 3
@@ -378,7 +384,10 @@ class TestLLMRouterGemini:
         router = LLMRouter(provider="gemini")
         mock_client = _gemini_mock('```json\n{"result": "fenced"}\n```')
         with patch("google.genai.Client", return_value=mock_client):
-            result = await router.chat([{"role": "user", "content": "hi"}], "sys", json_mode=True)
+            result = await router.chat(
+                [{"role": "user", "content": "hi"}], "sys",
+                json_mode=True, model="gemini-3-flash-preview",
+            )
             assert result == {"result": "fenced"}
 
     @pytest.mark.asyncio
@@ -395,7 +404,10 @@ class TestLLMRouterGemini:
         router = LLMRouter(provider="gemini")
         mock_client = _gemini_mock('{"ok": true}')
         with patch("google.genai.Client", return_value=mock_client):
-            await router.chat([{"role": "user", "content": "hi"}], "MY_SYSTEM")
+            await router.chat(
+                [{"role": "user", "content": "hi"}], "MY_SYSTEM",
+                model="gemini-3-flash-preview",
+            )
             call_kwargs = mock_client.aio.models.generate_content.call_args.kwargs
             config = call_kwargs["config"]
             assert config.system_instruction == "MY_SYSTEM"
@@ -405,7 +417,10 @@ class TestLLMRouterGemini:
         router = LLMRouter(provider="gemini")
         mock_client = _gemini_mock('{"ok": true}')
         with patch("google.genai.Client", return_value=mock_client):
-            await router.chat([{"role": "user", "content": "hi"}], "sys", json_mode=True)
+            await router.chat(
+                [{"role": "user", "content": "hi"}], "sys",
+                json_mode=True, model="gemini-3-flash-preview",
+            )
             call_kwargs = mock_client.aio.models.generate_content.call_args.kwargs
             config = call_kwargs["config"]
             assert config.response_mime_type == "application/json"
@@ -415,7 +430,10 @@ class TestLLMRouterGemini:
         router = LLMRouter(provider="gemini")
         mock_client = _gemini_mock("text")
         with patch("google.genai.Client", return_value=mock_client):
-            await router.chat([{"role": "user", "content": "hi"}], "sys", json_mode=False)
+            await router.chat(
+                [{"role": "user", "content": "hi"}], "sys",
+                json_mode=False, model="gemini-3-flash-preview",
+            )
             call_kwargs = mock_client.aio.models.generate_content.call_args.kwargs
             config = call_kwargs["config"]
             assert config.response_mime_type is None
@@ -489,7 +507,10 @@ class TestGeminiSearchGrounding:
         router = LLMRouter(provider="gemini")
         mock_client = _gemini_mock('{"ok": true}')
         with patch("google.genai.Client", return_value=mock_client):
-            await router.chat([{"role": "user", "content": "hi"}], "sys")
+            await router.chat(
+                [{"role": "user", "content": "hi"}], "sys",
+                model="gemini-3-flash-preview",
+            )
             call_kwargs = mock_client.aio.models.generate_content.call_args.kwargs
             config = call_kwargs["config"]
             assert not getattr(config, 'tools', None)
@@ -520,7 +541,10 @@ class TestGeminiAttachments:
         router = LLMRouter(provider="gemini")
         mock_client = _gemini_mock('{"ok": true}')
         with patch("google.genai.Client", return_value=mock_client):
-            await router.chat([{"role": "user", "content": "hi"}], "sys")
+            await router.chat(
+                [{"role": "user", "content": "hi"}], "sys",
+                model="gemini-3-flash-preview",
+            )
             call_kwargs = mock_client.aio.models.generate_content.call_args.kwargs
             contents = call_kwargs["contents"]
             assert len(contents[-1].parts) == 1
@@ -537,6 +561,7 @@ class TestGeminiAttachments:
         with patch("google.genai.Client", return_value=mock_client):
             await router.chat(
                 [{"role": "user", "content": "Describe these."}], "sys",
+                model="gemini-3-flash-preview",
                 attachments=attachments,
             )
             call_kwargs = mock_client.aio.models.generate_content.call_args.kwargs
@@ -558,6 +583,7 @@ class TestGeminiAttachments:
                     {"role": "user", "content": "q2"},
                 ],
                 "sys",
+                model="gemini-3-flash-preview",
                 attachments=[{"mimeType": "image/jpeg", "data": b64}],
             )
             call_kwargs = mock_client.aio.models.generate_content.call_args.kwargs
@@ -587,13 +613,17 @@ class TestModelRouting:
             assert result == {"response": "from gemini"}
 
     @pytest.mark.asyncio
-    async def test_default_model_routes_to_gemini(self):
-        router = LLMRouter(provider="openai")
-        mock_client = _gemini_mock('{"response": "default"}')
-        with patch("google.genai.Client", return_value=mock_client):
+    async def test_default_model_routes_to_openrouter(self):
+        router = LLMRouter()
+        with patch("llm_router._openrouter_client") as mock_client_factory:
+            mock_client = mock_client_factory.return_value
+            mock_client.chat.completions.create = AsyncMock(
+                return_value=_openai_mock('{"response": "default"}')
+            )
             result = await router.chat([{"role": "user", "content": "hi"}], "sys")
-            call_kwargs = mock_client.aio.models.generate_content.call_args.kwargs
-            assert call_kwargs["model"] == "gemini-3-flash-preview"
+            call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+            assert result == {"response": "default"}
+            assert call_kwargs["model"] == DEFAULT_MODEL
 
     @pytest.mark.asyncio
     async def test_gpt5_nano_routes_to_openai(self):
@@ -619,7 +649,7 @@ class TestModelRouting:
 
     @pytest.mark.asyncio
     async def test_gemini_25_flash_lite_routes_to_gemini(self):
-        router = LLMRouter()
+        router = LLMRouter(provider="gemini")
         mock_client = _gemini_mock('{"ok": true}')
         with patch("google.genai.Client", return_value=mock_client):
             await router.chat([{"role": "user", "content": "hi"}], "sys", model="gemini-2.5-flash-lite")
@@ -627,7 +657,7 @@ class TestModelRouting:
 
     @pytest.mark.asyncio
     async def test_gemini_3_flash_preview_model_name(self):
-        router = LLMRouter()
+        router = LLMRouter(provider="gemini")
         mock_client = _gemini_mock('{"ok": true}')
         with patch("google.genai.Client", return_value=mock_client):
             await router.chat([{"role": "user", "content": "hi"}], "sys", model="gemini-3-flash-preview")
@@ -635,7 +665,7 @@ class TestModelRouting:
 
     @pytest.mark.asyncio
     async def test_gemini_31_pro_preview_model_name(self):
-        router = LLMRouter()
+        router = LLMRouter(provider="gemini")
         mock_client = _gemini_mock('{"ok": true}')
         with patch("google.genai.Client", return_value=mock_client):
             await router.chat([{"role": "user", "content": "hi"}], "sys", model="gemini-3.1-pro-preview")
@@ -661,10 +691,14 @@ class TestModelRouting:
     @pytest.mark.asyncio
     async def test_none_model_uses_default(self):
         router = LLMRouter()
-        mock_client = _gemini_mock('{"ok": true}')
-        with patch("google.genai.Client", return_value=mock_client):
+        with patch("llm_router._openrouter_client") as mock_client_factory:
+            mock_client = mock_client_factory.return_value
+            mock_client.chat.completions.create = AsyncMock(
+                return_value=_openai_mock('{"ok": true}')
+            )
             await router.chat([{"role": "user", "content": "hi"}], "sys", model=None)
-            assert mock_client.aio.models.generate_content.call_args.kwargs["model"] == "gemini-3-flash-preview"
+            call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+            assert call_kwargs["model"] == DEFAULT_MODEL
 
 
 # ── New signature: attachments and use_search params ──────────────────────────
@@ -672,17 +706,23 @@ class TestModelRouting:
 class TestChatSignature:
     @pytest.mark.asyncio
     async def test_attachments_default_none(self):
-        router = LLMRouter()
+        router = LLMRouter(provider="gemini")
         mock_client = _gemini_mock('{"ok": true}')
         with patch("google.genai.Client", return_value=mock_client):
-            await router.chat([{"role": "user", "content": "hi"}], "sys")
+            await router.chat(
+                [{"role": "user", "content": "hi"}], "sys",
+                model="gemini-3-flash-preview",
+            )
 
     @pytest.mark.asyncio
     async def test_use_search_default_false(self):
-        router = LLMRouter()
+        router = LLMRouter(provider="gemini")
         mock_client = _gemini_mock('{"ok": true}')
         with patch("google.genai.Client", return_value=mock_client):
-            await router.chat([{"role": "user", "content": "hi"}], "sys")
+            await router.chat(
+                [{"role": "user", "content": "hi"}], "sys",
+                model="gemini-3-flash-preview",
+            )
             call_kwargs = mock_client.aio.models.generate_content.call_args.kwargs
             config = call_kwargs["config"]
             assert not getattr(config, 'tools', None)
@@ -690,7 +730,7 @@ class TestChatSignature:
     @pytest.mark.asyncio
     async def test_all_params_together(self):
         import base64
-        router = LLMRouter()
+        router = LLMRouter(provider="gemini")
         mock_client = _gemini_mock('{"ok": true}')
         b64 = base64.b64encode(b"img").decode()
         with patch("google.genai.Client", return_value=mock_client):
@@ -730,7 +770,8 @@ class TestGeminiStreaming:
         with patch("google.genai.Client", return_value=mock_client):
             chunks = []
             async for text in router.chat_stream(
-                [{"role": "user", "content": "hi"}], "sys"
+                [{"role": "user", "content": "hi"}], "sys",
+                model="gemini-3-flash-preview",
             ):
                 chunks.append(text)
             assert chunks == ["Hello", " world"]
@@ -755,7 +796,8 @@ class TestGeminiStreaming:
         with patch("google.genai.Client", return_value=mock_client):
             chunks = []
             async for text in router.chat_stream(
-                [{"role": "user", "content": "hi"}], "sys"
+                [{"role": "user", "content": "hi"}], "sys",
+                model="gemini-3-flash-preview",
             ):
                 chunks.append(text)
             assert chunks == ["Hello", " end"]
@@ -774,7 +816,8 @@ class TestGeminiStreaming:
 
         with patch("google.genai.Client", return_value=mock_client):
             async for _ in router.chat_stream(
-                [{"role": "user", "content": "hi"}], "sys"
+                [{"role": "user", "content": "hi"}], "sys",
+                model="gemini-3-flash-preview",
             ):
                 pass
             call_kwargs = mock_client.aio.models.generate_content_stream.call_args.kwargs
@@ -815,6 +858,7 @@ class TestGeminiStreaming:
         with patch("google.genai.Client", return_value=mock_client):
             async for _ in router.chat_stream(
                 [{"role": "user", "content": "hi"}], "sys",
+                model="gemini-3-flash-preview",
                 use_search=True,
             ):
                 pass
@@ -949,20 +993,23 @@ class TestStreamRouting:
             assert chunks == ["from gemini"]
 
     @pytest.mark.asyncio
-    async def test_default_model_uses_gemini_stream(self):
+    async def test_default_model_uses_openrouter_stream(self):
         router = LLMRouter()
 
-        async def fake_async_iter(*args, **kwargs):
-            c = MagicMock(); c.text = "default"
+        async def fake_async_iter():
+            c = MagicMock()
+            c.choices = [MagicMock()]
+            c.choices[0].delta.content = "default"
             yield c
 
-        mock_client = MagicMock()
-        mock_client.aio.models.generate_content_stream = AsyncMock(return_value=fake_async_iter())
-
-        with patch("google.genai.Client", return_value=mock_client):
+        with patch("llm_router._openrouter_client") as mock_client_factory:
+            mock_client = mock_client_factory.return_value
+            mock_client.chat.completions.create = AsyncMock(return_value=fake_async_iter())
             chunks = []
             async for text in router.chat_stream(
                 [{"role": "user", "content": "hi"}], "sys"
             ):
                 chunks.append(text)
             assert chunks == ["default"]
+            call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+            assert call_kwargs["model"] == DEFAULT_MODEL
