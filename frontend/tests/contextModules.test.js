@@ -845,12 +845,12 @@ test('chat from 1 hour ago is Today', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// UNASSIGNED TOPIC TESTS
+// ONE-TIME TOPIC TESTS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-console.log('\n─── Unassigned Topic Tests ───');
+console.log('\n─── One-time Topic Tests ───');
 
-test('isOneOff flag causes assignment to Unassigned topic', () => {
+test('isOneOff flag causes assignment to one-time bucket', () => {
   // Simulate the logic from _handleTopicDetection
   const topicData = { name: 'Email', confidence: 0.8, isOneOff: true };
   assert.strictEqual(topicData.isOneOff, true);
@@ -862,55 +862,54 @@ test('non-oneoff topic gets normal assignment', () => {
   assert.strictEqual(topicData.name, 'Machine Learning');
 });
 
-test('topic selector excludes Unassigned topic entirely', () => {
+test('topic selector excludes one-time bucket entirely', () => {
   const topics = [
     { id: 't1', name: 'Machine Learning' },
-    { id: 't2', name: 'Unassigned' },
+    { id: 't2', name: 'One-time questions', oneTimeBucket: true },
     { id: 't3', name: 'Physics' },
   ];
-  const filtered = topics.filter(t => t.name !== 'Unassigned');
+  const filtered = topics.filter(t => !t.oneTimeBucket);
   assert.strictEqual(filtered.length, 2);
   assert.strictEqual(filtered[0].name, 'Machine Learning');
   assert.strictEqual(filtered[1].name, 'Physics');
-  assert.ok(!filtered.find(t => t.name === 'Unassigned'));
+  assert.ok(!filtered.find(t => t.oneTimeBucket));
 });
 
-test('auto-detect includes Unassigned topic chats for reclassification', () => {
-  const unassignedTopicId = 't_unassigned';
+test('auto-detect excludes one-time bucket chats', () => {
+  const bucketId = 't_one_time';
   const chats = [
     { id: 'c1', topicId: null, summary: 'random email' },
-    { id: 'c2', topicId: unassignedTopicId, summary: 'ML question' },
+    { id: 'c2', topicId: bucketId, summary: 'ML question' },
     { id: 'c3', topicId: 't_ml', summary: 'deep learning' },
   ];
   const candidates = chats.filter(c =>
-    c.summary && (!c.topicId || c.topicId === unassignedTopicId)
+    c.summary && !c.topicId
   );
-  assert.strictEqual(candidates.length, 2);
+  assert.strictEqual(candidates.length, 1);
   assert.strictEqual(candidates[0].id, 'c1');
-  assert.strictEqual(candidates[1].id, 'c2');
 });
 
-test('sidebar skipped for Unassigned topic chats', () => {
+test('sidebar skipped for one-time topic chats', () => {
   const topics = [
     { id: 't1', name: 'Machine Learning' },
-    { id: 't_un', name: 'Unassigned' },
+    { id: 't_one', name: 'One-time questions', oneTimeBucket: true },
   ];
-  const isUnassigned = (topicId) => {
+  const isOneTime = (topicId) => {
     const topic = topics.find(t => t.id === topicId);
-    return topic?.name === 'Unassigned';
+    return !!topic?.oneTimeBucket;
   };
-  assert.strictEqual(isUnassigned('t1'), false);
-  assert.strictEqual(isUnassigned('t_un'), true);
-  assert.strictEqual(isUnassigned(null), false);
-  assert.strictEqual(isUnassigned('nonexistent'), false);
+  assert.strictEqual(isOneTime('t1'), false);
+  assert.strictEqual(isOneTime('t_one'), true);
+  assert.strictEqual(isOneTime(null), false);
+  assert.strictEqual(isOneTime('nonexistent'), false);
 });
 
-test('concepts skipped for Unassigned topic chats', () => {
-  const chat = { topicId: 't_un' };
-  const topics = [{ id: 't_un', name: 'Unassigned' }];
-  const isUnassigned = (topicId) => topics.find(t => t.id === topicId)?.name === 'Unassigned';
-  const shouldHandleConcepts = chat.topicId && !isUnassigned(chat.topicId);
-  assert.strictEqual(shouldHandleConcepts, false);
+test('personal context is skipped for one-time topic chats', () => {
+  const chat = { topicId: 't_one', oneTime: true };
+  const topics = [{ id: 't_one', name: 'One-time questions', oneTimeBucket: true }];
+  const isOneTime = topicId => !!topics.find(t => t.id === topicId)?.oneTimeBucket;
+  const shouldUseContext = chat.topicId && !isOneTime(chat.topicId);
+  assert.strictEqual(shouldUseContext, false);
 });
 
 test('chat item actions wrapper groups buttons', () => {

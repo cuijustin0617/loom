@@ -33,6 +33,14 @@ CHAT_STREAM_PROFILE_BLOCK = """You also have a profile of this user: what they'v
 User profile:
 {profile}"""
 
+CHAT_STREAM_HIGHLIGHT_BLOCK = """
+HIGHLIGHTING: In your response, wrap 1–2 short spans (at most 12 words each) that the user
+would most likely want to react to — a key fact, a recommendation, a claim they might
+question or care about — using exactly these markers: {~HL~}span text{~/HL~}
+Rules: at most 2 highlights; only complete sentences/fragments from your own text; never
+inside code blocks, URLs, or markdown headers; never nest markers; if nothing is
+highlight-worthy, use none."""
+
 CHAT_STREAM_BASELINE_PROMPT = """You are a helpful AI assistant. Respond naturally and helpfully to the user's message. Prefer concise, clear responses — no fluff or unnecessary preamble.
 
 Here is what you know about this user from previous conversations. Use this context when it's genuinely relevant to give a more personalized and helpful answer — but do NOT mention the profile explicitly or say things like "based on your profile". Just let it naturally inform your response when appropriate.
@@ -108,6 +116,18 @@ Rules:
 - "topic.confidence": 0-1. If matched to an existing topic, confidence should be at least 0.5.
 - "isOneOff": true ONLY for trivial one-off requests unlikely to be followed up — formatting an email, quick factual lookups, translations. When in doubt, set false."""
 
+# ── Pre-Reply Topic Classification ───────────────────────────────────────────
+CLASSIFY_FIRST_PROMPT = """Classify the user's message into a topic BEFORE answering it.
+Existing topics (id — name):
+{topics_list}
+Reply with EXACTLY ONE of these, nothing else:
+- An existing topic id from the list above, if the message clearly belongs to it
+- NEW: <2-5 word topic name>, if it starts a genuinely new topic
+- ONEOFF, if it is a trivial one-time request (formatting, quick lookup, translation) unlikely to be followed up
+Rules:
+- Prefer an existing topic whenever the message fits its domain, even loosely.
+- Your entire reply must be a single short line. No explanation, no punctuation around it, no quotes."""
+
 # ── Current Profile (Status) Update ──────────────────────────────────────────
 
 STATUS_UPDATE_PROMPT = """You maintain a structured summary of a user's current state in a topic for a personal context probe.
@@ -139,7 +159,7 @@ Evidence, in order of authority:
 1. Comments the user wrote (comment annotations) — explicit statements; almost
    always produce an ADD or EDIT. Phrase as a fact about the user, never as a
    quote of the comment.
-2. Labels on specific spans (♥ interested / ✓ clear / ? unsure / ✗ not relevant)
+2. Labels on specific spans (★ important / ✓ clear / ? unsure / ✗ not relevant)
    — direct reactions; update the profile to reflect them.
 3. The user's own messages — what they explicitly stated or asked.
 
@@ -148,7 +168,7 @@ learning. Never turn assistant suggestions, recommendations, or explanations
 into profile bullets about the user — the user discussing a topic is not the
 user adopting it.
 
-- ♥ Interested (interested): prioritize adding/updating overview bullets about that span
+- ★ Important (important): prioritize adding/updating overview bullets about that span. Legacy data may say interested with the same meaning.
 - ✓ Got it (clear): the user already understands that material — don't over-explain it later; you may note familiarity briefly
 - ? Unsure (unsure): note topics that need clarification in future responses
 - ✗ Not relevant (not_relevant): do NOT add that content to the overview
@@ -176,6 +196,11 @@ Rules (apply to both overview and goals):
 - Seed candidates: saved/confirmed goals already in the current profile MUST
   be preserved unless directly contradicted. Treat them as authoritative,
   like steering notes.
+- Volume cap: at most 2 changes TOTAL per update (across overview and goals combined).
+  Pick only the single most important new fact(s). If everything is marginal, return
+  everything unchanged — a missed minor fact is acceptable, a noisy profile is not.
+- Never tweak wording, reorder, merge, split, or restyle existing items unless the
+  current text is factually wrong. Small improvements are NOT a valid reason to change.
 
 Return JSON:
 {{

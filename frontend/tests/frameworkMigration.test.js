@@ -276,9 +276,10 @@ test('section titles renamed to Construct / Evolve', () => {
     assert.ok(!indexHtml.includes('data-phase="apply"'), 'Apply crumb removed');
 });
 
-test('breadcrumb uses data-phase construct|evolve', () => {
-    assert.ok(indexHtml.includes('data-phase="construct"'));
-    assert.ok(indexHtml.includes('data-phase="evolve"'));
+test('sidebar header has no Construct/Evolve breadcrumb', () => {
+    assert.ok(!indexHtml.includes('temporal-breadcrumb'), 'header crumbs removed');
+    assert.ok(!indexHtml.includes('data-phase="construct"'));
+    assert.ok(!indexHtml.includes('data-phase="evolve"'));
     assert.ok(!indexHtml.includes('data-phase="apply"'), 'apply crumb gone');
     assert.ok(!indexHtml.includes('data-phase="past"'), 'old data-phase="past" removed');
     assert.ok(!indexHtml.includes('data-phase="future"'), 'old data-phase="future" removed');
@@ -482,8 +483,10 @@ test('_dismissProposal clears proposal without touching status, logs proposal_di
     assert.ok(loggedEvents.some(e => e.type === 'proposal_dismissed'));
 });
 
-test('all three merge sites route through _stageProposal (new_messages / manual / labels)', () => {
-    ["'new_messages'", "'manual'", "'labels'"].forEach(trigger => {
+test('status refresh paths preserve interval/chat-exit/manual/labels triggers', () => {
+    assert.ok(sidebarSrc.includes('_stageProposal(freshTopic, data.statusUpdate, trigger)'),
+        'refresh threads its trigger into proposal staging');
+    ["'manual'", "'labels'"].forEach(trigger => {
         assert.ok(new RegExp(`_stageProposal\\([^)]*${trigger}`).test(sidebarSrc),
             `sidebar.js stages proposal with trigger ${trigger}`);
     });
@@ -546,12 +549,18 @@ test('saving an Evolve suggestion is tagged source user', () => {
     assert.ok(block.includes("source: 'user'"), 'saved suggestion is user-confirmed');
 });
 
-test('Ask this on a suggested goal does not save it as a Construct goal', () => {
-    const start = sidebarSrc.indexOf("el.querySelector('.goal-try-asking')");
-    assert.ok(start > -1, 'question row is clickable');
+test('Evolve offers two no-auto-send ask actions without saving', () => {
+    const start = sidebarSrc.indexOf("el.querySelector('.goal-ask-here-btn')");
+    assert.ok(start > -1, 'Ask here button is wired');
     const block = sidebarSrc.slice(start, sidebarSrc.indexOf('const regenBtn', start));
-    assert.ok(block.includes('_startGoalInNewChat'), 'Ask this starts a chat');
+    assert.ok(block.includes("el.querySelector('.goal-ask-new-btn')"), 'Ask in new chat is wired');
+    assert.ok(block.includes('_startGoalInNewChat'), 'new-chat action starts a chat');
+    assert.ok(block.includes('_fillQuestionInput'), 'current-chat action fills input');
+    assert.ok(block.includes('autoSend: false'), 'logging records no auto-send');
     assert.ok(!block.includes('_saveSuggestedGoal'), 'asking does not adopt the goal');
+    const startNew = sidebarSrc.indexOf('_startGoalInNewChat(dir)');
+    const newBlock = sidebarSrc.slice(startNew, sidebarSrc.indexOf('// ── Loading State', startNew));
+    assert.ok(!newBlock.includes('App.sendMessage'), 'new-chat action never auto-sends');
 });
 
 test('add-goal input does not silently truncate to 8 words', () => {
@@ -584,9 +593,10 @@ test('concept helpers and Concepts Traversed UI are gone', () => {
     assert.ok(!sidebarSrc.includes('concept-drop-tray'), 'drop tray gone');
 });
 
-test('source badges rendered for label-derived and user items', () => {
-    assert.ok(sidebarSrc.includes('from your labels'), 'label-derived badge copy');
-    assert.ok(sidebarSrc.includes('you wrote this'), 'user badge copy');
+test('source attribution badges are removed', () => {
+    assert.ok(!sidebarSrc.includes('status-item-source'), 'source badge markup removed');
+    assert.ok(!sidebarSrc.includes('you wrote this'), 'user badge copy removed');
+    assert.ok(!stylesCss.includes('.status-item-source'), 'badge styles removed');
 });
 
 test('connection contest writes excludedChatIds + connContested and logs', () => {
@@ -605,7 +615,7 @@ test('contested marker strike-through is re-applied on reload', () => {
 test('context_card_shown history path flags replay: true', () => {
     assert.ok(appContent.includes("{ replay: true }"), 'history re-render marks replay');
     const fnStart = appContent.indexOf('_renderInjectedPastPanel(assistantEl, injectedPastChats');
-    const fnBlock = appContent.slice(fnStart, appContent.indexOf('_isUnassignedTopic', fnStart));
+    const fnBlock = appContent.slice(fnStart, appContent.indexOf('_isOneTimeTopic', fnStart));
     assert.ok(fnBlock.includes('replay: true') || fnBlock.includes("replay: true"),
         'replay payload included on history path');
     assert.ok(fnBlock.includes('opts.replay'), 'fresh vs replay distinguished');
@@ -629,7 +639,8 @@ test('topic-scoped serialization enforced on cross-topic sends in app.js', () =>
 
 test('rename updates the existing #currentTopicName element (regression)', () => {
     assert.ok(!appContent.includes('statusTopicName'), 'stale #statusTopicName reference removed');
-    assert.ok(appContent.includes("getElementById('currentTopicName')"), 'rename targets #currentTopicName');
+    assert.ok(appContent.includes('_applyTopicColor'), 'rename updates topic color via Sidebar._applyTopicColor');
+    assert.ok(sidebarSrc.includes("getElementById('currentTopicName')"), 'topic name element still targeted');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════

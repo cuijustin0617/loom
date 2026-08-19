@@ -53,11 +53,18 @@ test('app.js defines annotation popover + apply/remove', () => {
 });
 
 test('quick labels cover four types plus comment', () => {
-  for (const label of ['clear', 'unsure', 'interested', 'not_relevant', 'comment']) {
+  for (const label of ['important', 'clear', 'unsure', 'not_relevant', 'comment']) {
     assert.ok(appSrc.includes(`data-label="${label}"`) || appSrc.includes(`'${label}'`),
       `should support label ${label}`);
   }
   assert.ok(appSrc.includes('data-action="comment"'), 'Comment… action');
+});
+
+test('Important is first and visually selected by default', () => {
+  const importantAt = appSrc.indexOf('data-label="important"');
+  const clearAt = appSrc.indexOf('data-label="clear"');
+  assert.ok(importantAt >= 0 && importantAt < clearAt, 'Important appears first');
+  assert.ok(appSrc.includes("existingAnno?.label || 'important'"), 'Important is default active label');
 });
 
 test('annotations stored on message.annotations', () => {
@@ -121,7 +128,7 @@ console.log('\n─── Styles ───');
 
 test('anno + label-popover styles present', () => {
   assert.ok(stylesSrc.includes('mark.anno'), 'anno mark');
-  assert.ok(stylesSrc.includes('anno-interested'), 'interested style');
+  assert.ok(stylesSrc.includes('anno-important'), 'important style');
   assert.ok(stylesSrc.includes('anno-not_relevant'), 'not_relevant style');
   assert.ok(stylesSrc.includes('.label-popover'), 'popover');
 });

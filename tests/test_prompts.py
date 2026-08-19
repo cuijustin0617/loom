@@ -8,7 +8,9 @@ import pytest
 from prompts import (
     CHAT_RESPONSE_PROMPT,
     CHAT_STREAM_SYSTEM_PROMPT,
+    CHAT_STREAM_HIGHLIGHT_BLOCK,
     CHAT_METADATA_PROMPT,
+    CLASSIFY_FIRST_PROMPT,
     SIDEBAR_NEW_DIRECTIONS_PROMPT,
     STATUS_UPDATE_PROMPT,
     CHAT_SUMMARIZE_PROMPT,
@@ -254,6 +256,34 @@ class TestStreamPrompts:
     def test_metadata_prompt_requests_json(self):
         assert "JSON" in CHAT_METADATA_PROMPT or "json" in CHAT_METADATA_PROMPT
 
+    def test_loom_highlight_block_contract(self):
+        assert "{~HL~}" in CHAT_STREAM_HIGHLIGHT_BLOCK
+        assert "{~/HL~}" in CHAT_STREAM_HIGHLIGHT_BLOCK
+        assert "at most 2" in CHAT_STREAM_HIGHLIGHT_BLOCK
+
+    def test_baseline_prompts_do_not_contain_highlights(self):
+        from prompts import CHAT_STREAM_BASELINE_PROMPT
+        assert CHAT_STREAM_HIGHLIGHT_BLOCK not in CHAT_STREAM_BASELINE_PROMPT
+        assert "{~HL~}" not in CHAT_STREAM_BASELINE_PROMPT
+
+    def test_stream_assembly_adds_highlights_only_after_baseline_branches(self):
+        main_source = (Path(__file__).parent.parent / "backend" / "main.py").read_text()
+        start = main_source.index('if req.condition == "baseline" and req.personalDetails:')
+        loom_start = main_source.index(
+            "    else:\n        if isinstance(req.topicStatus, dict):",
+            start,
+        )
+        baseline_branch = main_source[start:loom_start]
+        loom_branch = main_source[loom_start:main_source.index("    async def event_generator()", loom_start)]
+        assert "CHAT_STREAM_HIGHLIGHT_BLOCK" not in baseline_branch
+        assert "CHAT_STREAM_HIGHLIGHT_BLOCK" in loom_branch
+
+    def test_classify_first_contract(self):
+        assert "existing topic id" in CLASSIFY_FIRST_PROMPT.lower()
+        assert "NEW:" in CLASSIFY_FIRST_PROMPT
+        assert "ONEOFF" in CLASSIFY_FIRST_PROMPT
+        assert "No explanation" in CLASSIFY_FIRST_PROMPT
+
 
 class TestStatusUpdatePromptOverview:
     """STATUS_UPDATE_PROMPT returns overview bullets only."""
@@ -313,3 +343,13 @@ class TestDesignProbeRound2Prompts:
 
     def test_directions_prompt_has_annotations_placeholder(self):
         assert "{annotations}" in SIDEBAR_NEW_DIRECTIONS_PROMPT
+
+
+class TestRound3StatusPrompt:
+    def test_volume_cap_and_conservative_wording(self):
+        assert "at most 2 changes TOTAL" in STATUS_UPDATE_PROMPT
+        assert "Small improvements are NOT a valid reason" in STATUS_UPDATE_PROMPT
+
+    def test_important_label_and_legacy_meaning(self):
+        assert "Important (important)" in STATUS_UPDATE_PROMPT
+        assert "Legacy data may say interested" in STATUS_UPDATE_PROMPT

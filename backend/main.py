@@ -25,7 +25,9 @@ from prompts import (
     CHAT_STREAM_BASELINE_PROMPT,
     CHAT_STREAM_MEMORY_PROMPT,
     CHAT_STREAM_PROFILE_BLOCK,
+    CHAT_STREAM_HIGHLIGHT_BLOCK,
     CHAT_METADATA_PROMPT,
+    CLASSIFY_FIRST_PROMPT,
     SIDEBAR_NEW_DIRECTIONS_PROMPT,
     SIDEBAR_GOAL_QUESTION_PROMPT,
     STATUS_UPDATE_PROMPT,
@@ -59,6 +61,7 @@ SEED_PATH = Path(__file__).parent / "seed_events.json"
 
 llm = LLMRouter()
 embedder = EmbeddingService()
+CLASSIFY_MODEL = "google/gemini-3.5-flash"
 
 
 # ── SQLite Setup ──────────────────────────────────────────────────────────────
@@ -218,6 +221,11 @@ class TopicDetectRequest(BaseModel):
     existingTopics: list[TopicItem] = []
 
 
+class ClassifyFirstRequest(BaseModel):
+    message: str
+    existingTopics: list = []
+
+
 class DirectionsRequest(BaseModel):
     topicName: str
     topicStatus: Union[str, dict] = ""
@@ -355,7 +363,8 @@ def _serialize_annotations(annotations) -> str:
     label_names = {
         "clear": "got it",
         "unsure": "unsure",
-        "interested": "interested",
+        "important": "important",
+        "interested": "important",
         "not_relevant": "not relevant",
         "comment": "comment",
     }
@@ -485,10 +494,10 @@ async def chat_stream_endpoint(req: ChatRequest):
             system_prompt = CHAT_STREAM_MEMORY_PROMPT.format(
                 past_chats_json=json.dumps(past_chats_for_prompt, indent=2),
                 profile_block=profile_block,
-            )
+            ) + CHAT_STREAM_HIGHLIGHT_BLOCK
         else:
             prompt_mode = "SYSTEM prompt"
-            system_prompt = CHAT_STREAM_SYSTEM_PROMPT + profile_block
+            system_prompt = CHAT_STREAM_SYSTEM_PROMPT + profile_block + CHAT_STREAM_HIGHLIGHT_BLOCK
 
     async def event_generator():
         full_response_parts = []
@@ -727,6 +736,126 @@ async def topic_rename_check(req: TopicRenameCheckRequest):
         "needsUpdate": result.get("needsUpdate", False),
         "overview": result.get("overview", req.overview),
     }
+
+
+def _parse_classification(raw: str, existing_topics: list) -> dict:
+    """Map raw LLM output onto the classification contract. Never raises."""
+    fallback = {
+        "topicId": None,
+        "newTopicName": None,
+        "isOneOff": False,
+        "parsePath": "fallback_none",
+    }
+    try:
+        text = (raw or "").strip().splitlines()[0].strip()
+        text = text.strip("`'\". \t")
+        if not text:
+            return fallback
+
+        compact_upper = re.sub(r"[\s_-]+", "", text).upper()
+        if compact_upper.startswith("ONEOFF"):
+            return {
+                "topicId": None,
+                "newTopicName": None,
+                "isOneOff": True,
+                "parsePath": "oneoff",
+            }
+
+        topics = [t for t in (existing_topics or []) if isinstance(t, dict)]
+        if re.match(r"^NEW\s*:", text, flags=re.IGNORECASE):
+            name = re.sub(r"^NEW\s*:\s*", "", text, flags=re.IGNORECASE)
+            name = " ".join(name.strip("`'\" \t").split())[:40].strip()
+            if not name:
+                return fallback
+            for topic in topics:
+                if name.casefold() == str(topic.get("name") or "").strip().casefold():
+                    return {
+                        "topicId": topic.get("id"),
+                        "newTopicName": None,
+                        "isOneOff": False,
+                        "parsePath": "fuzzy_name",
+                    }
+            return {
+                "topicId": None,
+                "newTopicName": name,
+                "isOneOff": False,
+                "parsePath": "new",
+            }
+
+        for topic in topics:
+            if text == str(topic.get("id") or ""):
+                return {
+                    "topicId": topic.get("id"),
+                    "newTopicName": None,
+                    "isOneOff": False,
+                    "parsePath": "exact_id",
+                }
+        for topic in topics:
+            if text.casefold() == str(topic.get("id") or "").casefold():
+                return {
+                    "topicId": topic.get("id"),
+                    "newTopicName": None,
+                    "isOneOff": False,
+                    "parsePath": "ci_id",
+                }
+
+        normalize = lambda value: re.sub(r"[^a-z0-9]", "", str(value or "").lower())
+        normalized_text = normalize(text)
+        if normalized_text:
+            for topic in topics:
+                if normalized_text == normalize(topic.get("name")):
+                    return {
+                        "topicId": topic.get("id"),
+                        "newTopicName": None,
+                        "isOneOff": False,
+                        "parsePath": "fuzzy_name",
+                    }
+
+        text_folded = text.casefold()
+        substring_matches = []
+        for topic in topics:
+            topic_name = str(topic.get("name") or "").strip().casefold()
+            if topic_name and (text_folded in topic_name or topic_name in text_folded):
+                substring_matches.append(topic)
+        if len(substring_matches) == 1:
+            return {
+                "topicId": substring_matches[0].get("id"),
+                "newTopicName": None,
+                "isOneOff": False,
+                "parsePath": "substring",
+            }
+    except Exception:
+        return fallback
+    return fallback
+
+
+@app.post("/api/topic/classify")
+async def classify_first(req: ClassifyFirstRequest):
+    """Lightweight best-effort pre-reply topic classification."""
+    topics_list = "\n".join(
+        f"- {t.get('id')} — {t.get('name')}"
+        for t in req.existingTopics
+        if isinstance(t, dict)
+    ) or "(none)"
+    try:
+        result = await asyncio.wait_for(
+            llm.chat(
+                [{"role": "user", "content": req.message}],
+                CLASSIFY_FIRST_PROMPT.format(topics_list=topics_list),
+                json_mode=False,
+                model=CLASSIFY_MODEL,
+            ),
+            timeout=7.5,
+        )
+        raw = result if isinstance(result, str) else (
+            result.get("response", "") if isinstance(result, dict) else ""
+        )
+    except Exception:
+        raw = ""
+    return _parse_classification(
+        raw,
+        req.existingTopics,
+    )
 
 
 @app.post("/api/topic/detect")
@@ -1434,12 +1563,15 @@ function renderHeatmap(events) {
 const CONSTRUCT = ['proposal_shown','proposal_accepted','proposal_edited','proposal_dismissed','proposal_superseded',
   'proposal_change_accepted','proposal_change_dismissed','current_profile_edited','text_label_applied','text_label_removed',
   'topic_suggestion_accepted','topic_suggestion_dismissed','topic_created','topic_renamed','topic_assigned','topic_merge_confirmed',
-  'construct_included_in_chat','goal_authored','version_restored','update_undone'];
+  'construct_included_in_chat','goal_authored','version_restored','update_undone','label_highlight_shown',
+  'label_highlight_confirmed','label_highlight_changed','label_highlight_dismissed','proposal_truncated',
+  'status_refresh_triggered'];
 const APPLY = ['context_card_shown','context_excluded_for_topic','context_exclusion_reverted','context_link_opened','connection_contested','connection_marker_hovered','connection_marker_clicked'];
 const EVOLVE = ['goal_saved','goal_dismissed','goal_modified',
-  'goal_removed','goal_question_asked','directions_refreshed','directions_shuffled'];
+  'goal_removed','goal_question_asked','directions_refreshed','directions_shuffled','question_saved'];
 const SCRUTABILITY = ['update_undone','version_restored','context_excluded_for_topic','connection_contested'];
-const TOPIC = ['topic_created','topic_renamed','topic_assigned','topic_merge_confirmed','topic_merge_drag'];
+const TOPIC = ['topic_created','topic_renamed','topic_assigned','topic_merge_confirmed','topic_merge_drag',
+  'topic_classified_first','one_time_chat_started'];
 
 function renderSummaryTable(events) {
   const users = [...new Set(events.map(e => e.userId))].sort();

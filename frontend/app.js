@@ -85,7 +85,7 @@ const TopicSuggester = {
   // ── Keyword Index ──────────────────────────────────────────────────────
 
   rebuildKeywordIndex() {
-    const topics = Storage.getTopics().filter(t => t.name !== 'Unassigned');
+    const topics = Storage.getTopics().filter(t => !App._isOneTimeTopic(t.id));
     this._keywordIndex = {};
     const docFreq = {};
 
@@ -157,7 +157,7 @@ const TopicSuggester = {
   // ── Embedding Cache ────────────────────────────────────────────────────
 
   async refreshTopicEmbeddings() {
-    const topics = Storage.getTopics().filter(t => t.name !== 'Unassigned');
+    const topics = Storage.getTopics().filter(t => !App._isOneTimeTopic(t.id));
     if (topics.length === 0) return;
 
     const toEmbed = [];
@@ -359,7 +359,7 @@ const TopicSuggester = {
     if (this._suggestionDismissed) return;
     if (App.selectedTopicId) return;
 
-    const topics = Storage.getTopics().filter(t => t.name !== 'Unassigned');
+    const topics = Storage.getTopics().filter(t => !App._isOneTimeTopic(t.id));
     if (topics.length === 0) return;
 
     this._debounceTimer = setTimeout(async () => {
@@ -478,7 +478,7 @@ const TopicSuggester = {
     const dropdown = document.getElementById('topicPickerDropdown');
     if (!dropdown) return;
 
-    const topics = Storage.getTopics().filter(t => t.name !== 'Unassigned');
+    const topics = Storage.getTopics().filter(t => !App._isOneTimeTopic(t.id));
     const currentVal = App.selectedTopicId || '';
 
     let html = `<div class="topic-picker-option${!currentVal ? ' selected' : ''}" data-value="">
@@ -642,6 +642,7 @@ const App = {
     });
 
     document.getElementById('newChatBtn').addEventListener('click', () => this.newChat());
+    document.getElementById('oneTimeChatBtn').addEventListener('click', () => this.newOneTimeChat());
     document.getElementById('newTopicBtn').addEventListener('click', () => this._showTopicDialog());
     document.getElementById('topicCancelBtn').addEventListener('click', () => this._hideTopicDialog());
     document.getElementById('topicCreateBtn').addEventListener('click', () => this._createTopic());
@@ -840,7 +841,7 @@ const App = {
     if (!sel) return;
     const prev = sel.value;
     sel.innerHTML = '<option value="">Auto-detect</option>';
-    const topics = Storage.getTopics().filter(t => t.name !== 'Unassigned');
+    const topics = Storage.getTopics().filter(t => !this._isOneTimeTopic(t.id));
     topics.forEach(t => {
       const opt = document.createElement('option');
       opt.value = t.id;
@@ -885,6 +886,8 @@ const App = {
   // ── Chat Operations ───────────────────────────────────────────────────
 
   newChat() {
+    const prevChatId = this.currentChatId;
+    this._onExitChat(prevChatId);
     try { Sidebar._flushDirtyLabels(); } catch (e) { console.warn('flushDirtyLabels failed:', e); }
     try { this._summarizeCurrentChat(); } catch (e) { console.warn('summarizeCurrentChat failed:', e); }
     const chat = Storage.createChat();
@@ -909,6 +912,53 @@ const App = {
     StudyLog.event('chat_created', { chatId: chat.id });
   },
 
+  newOneTimeChat() {
+    const prevChatId = this.currentChatId;
+    this._onExitChat(prevChatId);
+    try { Sidebar._flushDirtyLabels(); } catch (e) { console.warn('flushDirtyLabels failed:', e); }
+    try { this._summarizeCurrentChat(); } catch (e) { console.warn('summarizeCurrentChat failed:', e); }
+    const bucket = this._getOrCreateOneTimeTopic();
+    const chat = Storage.createChat({ oneTime: true });
+    chat.topicId = bucket.id;
+    chat.oneTime = true;
+    Storage.saveChat(chat);
+    bucket.lastActive = Utils.timestamp();
+    Storage.saveTopic(bucket);
+    this.currentChatId = chat.id;
+    this.msgCountSinceRefresh = 0;
+    this.pendingSummarize = false;
+    this.selectedTopicId = null;
+    const topicSel = document.getElementById('topicSelect');
+    if (topicSel) topicSel.value = '';
+    this._updateTopicPickerDisplay(null);
+    TopicSuggester.reset();
+    TopicSuggester._suggestionDismissed = true;
+    this.useSearch = true;
+    const searchBtn = document.getElementById('searchToggleBtn');
+    if (searchBtn) {
+      searchBtn.classList.add('active');
+      searchBtn.title = 'Google Search ON';
+    }
+    Sidebar.hide();
+    try { this._renderChat(chat.id); } catch (e) { console.warn('renderChat failed:', e); }
+    TopicSuggester._suggestionDismissed = true;
+    try { this._renderChatList(); } catch (e) { console.warn('renderChatList failed:', e); }
+    document.getElementById('chatInput').focus();
+    StudyLog.event('chat_created', { chatId: chat.id });
+    StudyLog.event('one_time_chat_started', { chatId: chat.id, source: 'button' });
+  },
+
+  _onExitChat(prevChatId) {
+    const chat = Storage.getChat(prevChatId);
+    const canRefresh = STUDY_CONDITION === 'loom' && chat && chat.topicId
+      && !this._isOneTimeTopic(chat.topicId);
+    if (canRefresh && (this.msgCountSinceRefresh > 0 || Sidebar._labelsDirty)) {
+      Sidebar.currentTopicId = chat.topicId;
+      Sidebar.refresh('chat_exit');
+    }
+    this.msgCountSinceRefresh = 0;
+  },
+
   async sendMessage() {
     const input = document.getElementById('chatInput');
     let content = input.value.trim();
@@ -924,26 +974,30 @@ const App = {
       const chat = Storage.createChat();
       this.currentChatId = chat.id;
     }
+    const sendChatId = this.currentChatId;
+    const sendSelectedTopicId = this.selectedTopicId;
+    const sendUseSearch = this.useSearch;
+    const sendChatModel = Storage.getChatModel();
 
     // Pre-assign topic and inject status as context if a topic is selected
-    if (this.selectedTopicId) {
-      const chat = Storage.getChat(this.currentChatId);
-      const msgs = Storage.getMessages(this.currentChatId);
+    if (sendSelectedTopicId) {
+      const chat = Storage.getChat(sendChatId);
+      const msgs = Storage.getMessages(sendChatId);
       if (chat && !chat.topicId && msgs.length === 0) {
-        chat.topicId = this.selectedTopicId;
+        chat.topicId = sendSelectedTopicId;
         chat.lastActive = Utils.timestamp();
         Storage.saveChat(chat);
-        StudyLog.event('topic_assigned', { chatId: this.currentChatId, topicId: this.selectedTopicId, assignMethod: 'manual' });
-        const topic = Storage.getTopic(this.selectedTopicId);
+        StudyLog.event('topic_assigned', { chatId: sendChatId, topicId: sendSelectedTopicId, assignMethod: 'manual' });
+        const topic = Storage.getTopic(sendSelectedTopicId);
         if (topic) {
           topic.lastActive = Utils.timestamp();
           Storage.saveTopic(topic);
-          if (topic.name !== 'Unassigned') {
+          if (!this._isOneTimeTopic(topic.id)) {
             if (topic.statusSummary) {
               const statusStr = Sidebar._serializeStatus(topic.statusSummary);
               content = `[My current status in "${topic.name}": ${statusStr}]\n\n${content}`;
             }
-            Sidebar.show(this.selectedTopicId);
+            Sidebar.show(sendSelectedTopicId);
           }
         }
       }
@@ -952,7 +1006,7 @@ const App = {
     // Add user message (attachments stored without base64 data to avoid localStorage quota issues)
     const userMsg = {
       id: 'msg_' + Utils.generateId(),
-      chatId: this.currentChatId,
+      chatId: sendChatId,
       role: 'user',
       content: content,
       contextBlock: null,
@@ -962,7 +1016,7 @@ const App = {
         : null,
       timestamp: Utils.timestamp(),
     };
-    const saved = Storage.addMessage(this.currentChatId, userMsg);
+    const saved = Storage.addMessage(sendChatId, userMsg);
     if (!saved) {
       Utils.showToast('Storage full — could not save message. Try clearing old chats.', 'error');
       input.value = savedInput;
@@ -974,10 +1028,10 @@ const App = {
 
     this._appendMessage(userMsg);
     this.pendingSummarize = true;
-    const currentChat = Storage.getChat(this.currentChatId);
+    const currentChat = Storage.getChat(sendChatId);
     StudyLog.event('query_sent', {
-      chatId: this.currentChatId,
-      topicId: currentChat?.topicId || this.selectedTopicId || null,
+      chatId: sendChatId,
+      topicId: currentChat?.topicId || sendSelectedTopicId || null,
       hasContext: false,
     });
 
@@ -1006,19 +1060,70 @@ const App = {
       this._renderAttachments();
     }
 
-    const messages = Storage.getMessages(this.currentChatId).map(m => ({
+    this._dismissPendingHighlights('batch');
+
+    const messages = Storage.getMessages(sendChatId).map(m => ({
       role: m.role, content: m.content,
     }));
-    const topics = Storage.getTopics().map(t => ({ id: t.id, name: t.name }));
+    const topics = Storage.getTopics()
+      .filter(t => !this._isOneTimeTopic(t.id))
+      .map(t => ({ id: t.id, name: t.name }));
+
+    // Two-stage classification: classify BEFORE the reply so topic context shapes it.
+    const chatPre = Storage.getChat(sendChatId);
+    if (STUDY_CONDITION === 'loom' && chatPre && !chatPre.topicId && !chatPre.oneTime
+        && !sendSelectedTopicId) {
+      const firstUserMsg = messages.find(m => m.role === 'user');
+      if (firstUserMsg) {
+        const t0 = performance.now();
+        try {
+          const resp = await fetch(`${API_BASE}/api/topic/classify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              message: firstUserMsg.content.slice(0, 2000),
+              existingTopics: topics,
+            }),
+          });
+          const cls = await resp.json();
+          StudyLog.event('topic_classified_first', {
+            chatId: sendChatId,
+            topicId: cls.topicId || null,
+            newTopicName: cls.newTopicName || null,
+            isOneOff: !!cls.isOneOff,
+            parsePath: cls.parsePath || 'fallback_none',
+            latencyMs: Math.round(performance.now() - t0),
+            source: 'pre_reply',
+          });
+          if (cls.isOneOff || cls.topicId || cls.newTopicName) {
+            await this._assignTopicToChat(sendChatId, {
+              ...cls,
+              assignMethod: 'pre_reply_classify',
+            });
+          }
+        } catch (e) {
+          console.warn('Pre-reply classification failed (continuing without topic):', e);
+          StudyLog.event('topic_classified_first', {
+            chatId: sendChatId,
+            topicId: null,
+            newTopicName: null,
+            isOneOff: false,
+            parsePath: 'fallback_none',
+            latencyMs: Math.round(performance.now() - t0),
+            source: 'pre_reply',
+          });
+        }
+      }
+    }
 
     // Only send same-topic past chats for connections in ChatWeave mode
     let sameTopicSummaries = [];
-    const currentChat2 = Storage.getChat(this.currentChatId);
+    const currentChat2 = Storage.getChat(sendChatId);
     if (STUDY_CONDITION === 'loom') {
-      const currentTopicId = currentChat2?.topicId || this.selectedTopicId;
-      sameTopicSummaries = currentTopicId
+      const currentTopicId = currentChat2?.topicId || sendSelectedTopicId;
+      sameTopicSummaries = currentTopicId && !this._isOneTimeTopic(currentTopicId)
         ? Storage.getChats()
-          .filter(c => c.id !== this.currentChatId && c.summary && c.topicId === currentTopicId)
+          .filter(c => c.id !== sendChatId && c.summary && c.topicId === currentTopicId)
           .map(c => ({
             id: c.id, title: c.title, summary: c.summary,
             userAsked: c.userAsked || '', aiCovered: c.aiCovered || '',
@@ -1033,19 +1138,20 @@ const App = {
       }
     }
 
-    const currentTopic = this.selectedTopicId ? Storage.getTopic(this.selectedTopicId) : null;
+    const currentTopicId = currentChat2?.topicId || sendSelectedTopicId;
+    const currentTopic = currentTopicId ? Storage.getTopic(currentTopicId) : null;
     const chatTopicId = currentChat2?.topicId || null;
     const reqBody = {
-      chatId: this.currentChatId,
+      chatId: sendChatId,
       messages,
       existingTopics: STUDY_CONDITION === 'loom' ? topics : [],
       existingConcepts: [],
-      model: Storage.getChatModel(),
-      useSearch: this.useSearch,
+      model: sendChatModel,
+      useSearch: sendUseSearch,
       allChatSummaries: sameTopicSummaries,
       condition: STUDY_CONDITION,
       personalDetails: STUDY_CONDITION === 'baseline' ? Storage.getPersonalDetails() : [],
-      topicStatus: (currentTopic && STUDY_CONDITION === 'loom')
+      topicStatus: (currentTopic && STUDY_CONDITION === 'loom' && !this._isOneTimeTopic(currentTopic.id))
         ? Sidebar._serializeStatus(currentTopic.statusSummary)
         : '',
     };
@@ -1064,7 +1170,11 @@ const App = {
     }
 
     // Create a live assistant message element for streaming
-    const assistantEl = this._createStreamingMessage();
+    const assistantEl = this._createStreamingMessage(sendChatId);
+    const ensureAssistantVisible = () => {
+      if (this.currentChatId !== sendChatId || assistantEl.isConnected) return;
+      document.getElementById('chatMessages')?.appendChild(assistantEl);
+    };
 
     try {
       const resp = await fetch(`${API_BASE}/api/chat/stream`, {
@@ -1085,38 +1195,51 @@ const App = {
         try {
           const evt = JSON.parse(line.slice(6));
           if (evt.type === 'chunk') {
+            ensureAssistantVisible();
             fullResponse += evt.text;
             this._updateStreamingMessage(assistantEl, fullResponse);
           } else if (evt.type === 'done') {
+            ensureAssistantVisible();
             fullResponse = evt.response || fullResponse;
 
             const assistantMsgId = 'msg_' + Utils.generateId();
-            this._finalizeStreamingMessage(assistantEl, fullResponse, assistantMsgId);
+            const finalHighlightData = this._finalizeStreamingMessage(assistantEl, fullResponse, assistantMsgId);
 
             const { mainText: strippedMain } = this._stripConnectionBlock(this._stripSearchArtifacts(fullResponse));
+            const { cleanText, highlights } = this._extractHighlights(strippedMain);
             const assistantMsg = {
               id: assistantMsgId,
-              chatId: this.currentChatId,
+              chatId: sendChatId,
               role: 'assistant',
-              content: this._stripConnectionResidue(strippedMain),
-              rawContent: this._stripConnectionResidue(strippedMain),
+              content: this._stripConnectionResidue(cleanText),
+              rawContent: this._stripConnectionResidue(cleanText),
+              suggestedHighlights: finalHighlightData?.highlights || highlights,
               injectedPastChats: evt.injectedPastChats || null,
               contextBlock: null,
               timestamp: Utils.timestamp(),
             };
-            Storage.addMessage(this.currentChatId, assistantMsg);
+            Storage.addMessage(sendChatId, assistantMsg);
+            if (assistantMsg.suggestedHighlights.length > 0) {
+              StudyLog.event('label_highlight_shown', {
+                msgId: assistantMsgId,
+                count: assistantMsg.suggestedHighlights.length,
+                origin: 'ai-suggested',
+              });
+            }
 
             // Render injected past context panel above assistant response
-            if (evt.injectedPastChats && evt.injectedPastChats.length > 0) {
+            if (this.currentChatId === sendChatId
+                && evt.injectedPastChats && evt.injectedPastChats.length > 0) {
               this._renderInjectedPastPanel(assistantEl, evt.injectedPastChats);
             }
 
             if (STUDY_CONDITION === 'loom') {
               if (evt.topic && evt.topic.confidence > 0.35) {
-                await this._handleTopicDetection(evt.topic);
+                await this._handleTopicDetection(evt.topic, sendChatId);
               }
             }
           } else if (evt.type === 'error') {
+            ensureAssistantVisible();
             this._finalizeStreamingMessage(assistantEl, evt.message || 'Error from server.');
           }
         } catch (parseErr) {
@@ -1146,29 +1269,34 @@ const App = {
       }
 
       // Update chat title from first exchange, stripping any injected status prefix
-      const chat = Storage.getChat(this.currentChatId);
+      const chat = Storage.getChat(sendChatId);
       if (chat && chat.title === 'New Chat') {
         const rawTitle = messages[0]?.content || 'Chat';
         const cleanTitle = rawTitle.replace(/^\[My current status in "[^"]*":[^\]]*\]\s*/s, '').trim();
         chat.title = Utils.truncate(cleanTitle || rawTitle, 40);
         chat.lastActive = Utils.timestamp();
         Storage.saveChat(chat);
-        document.getElementById('chatTitle').textContent = chat.title;
+        if (this.currentChatId === sendChatId) {
+          document.getElementById('chatTitle').textContent = chat.title;
+        }
         this._renderChatList();
       }
 
-      this.msgCountSinceRefresh++;
-      const currentChat = Storage.getChat(this.currentChatId);
-      if (STUDY_CONDITION === 'loom' && !this._isUnassignedTopic(currentChat?.topicId)) {
-        if (this.msgCountSinceRefresh === 1 || this.msgCountSinceRefresh % 3 === 0) {
-          Sidebar.refresh();
+      if (this.currentChatId === sendChatId) {
+        this.msgCountSinceRefresh++;
+        const completedChat = Storage.getChat(sendChatId);
+        if (STUDY_CONDITION === 'loom' && !this._isOneTimeTopic(completedChat?.topicId)) {
+          if (this.msgCountSinceRefresh > 0 && this.msgCountSinceRefresh % 3 === 0) {
+            Sidebar.refresh('interval');
+          }
+        } else if (STUDY_CONDITION !== 'loom') {
+          this._extractBaselineDetails();
         }
-      } else if (STUDY_CONDITION !== 'loom') {
-        this._extractBaselineDetails();
       }
 
     } catch (err) {
       console.error('Chat error:', err);
+      ensureAssistantVisible();
       this._finalizeStreamingMessage(assistantEl, 'Failed to get response. Check your connection.');
       Utils.showToast('Failed to get response. Check your connection.', 'error');
     } finally {
@@ -1179,9 +1307,9 @@ const App = {
   // ── Free-text selection annotations ─────────────────────────────────────
 
   _LABEL_META: {
+    important: { symbol: '★', title: 'Important' },
     clear: { symbol: '✓', title: 'Got it' },
     unsure: { symbol: '?', title: 'Unsure' },
-    interested: { symbol: '♥', title: 'Interested' },
     not_relevant: { symbol: '✗', title: 'Not relevant' },
     comment: { symbol: '💬', title: 'Comment' },
   },
@@ -1196,12 +1324,14 @@ const App = {
     el.id = 'labelPopover';
     el.className = 'label-popover';
     el.innerHTML = `
+      <div class="label-popover-header" style="display:none"></div>
       <div class="label-popover-actions">
+        <button type="button" class="label-popover-btn" data-label="important" title="Important">★ Important</button>
         <button type="button" class="label-popover-btn" data-label="clear" title="Got it">✓ Got it</button>
         <button type="button" class="label-popover-btn" data-label="unsure" title="Unsure">? Unsure</button>
-        <button type="button" class="label-popover-btn" data-label="interested" title="Interested">♥ Interested</button>
         <button type="button" class="label-popover-btn" data-label="not_relevant" title="Not relevant">✗ Not relevant</button>
         <button type="button" class="label-popover-btn" data-action="comment" title="Add a comment">Comment…</button>
+        <button type="button" class="label-popover-btn danger" data-action="dismiss-suggestion" style="display:none">Dismiss</button>
         <button type="button" class="label-popover-btn danger" data-action="remove" title="Remove label" style="display:none">Remove</button>
       </div>
       <div class="label-popover-comment">
@@ -1241,6 +1371,7 @@ const App = {
         this._applyAnnotation('comment', comment);
         return;
       }
+      if (action === 'dismiss-suggestion') this._dismissPendingHighlight('click');
       if (action === 'remove') this._removeAnnotation();
     });
     el.addEventListener('mousedown', (e) => {
@@ -1269,6 +1400,13 @@ const App = {
       if (e.key === 'Escape') this._hideAnnoPopover();
     });
     document.addEventListener('click', (e) => {
+      const pending = e.target.closest('.hl-pending');
+      if (pending) {
+        e.preventDefault();
+        e.stopPropagation();
+        this._openAnnoPopoverForPending(pending);
+        return;
+      }
       const mark = e.target.closest('mark.anno');
       if (!mark) return;
       e.preventDefault();
@@ -1399,13 +1537,32 @@ const App = {
     this._showAnnoPopover(mark.getBoundingClientRect(), anno);
   },
 
-  _showAnnoPopover(rect, existingAnno = null) {
+  _openAnnoPopoverForPending(span) {
+    const content = span.closest('.message-content');
+    if (!content) return;
+    this._annoState = {
+      msgId: content.dataset.msgId,
+      spanText: span.dataset.spanText || span.textContent || '',
+      occurrence: Number(span.dataset.occurrence || 0),
+      existingId: null,
+      pending: true,
+    };
+    this._showAnnoPopover(span.getBoundingClientRect(), null, { pending: true });
+  },
+
+  _showAnnoPopover(rect, existingAnno = null, opts = {}) {
     const el = this._ensureAnnoPopover();
     el.querySelectorAll('[data-label]').forEach(btn => {
-      btn.classList.toggle('active', !!(existingAnno && existingAnno.label === btn.dataset.label));
+      const activeLabel = existingAnno?.label || 'important';
+      btn.classList.toggle('active', activeLabel === btn.dataset.label);
     });
     const removeBtn = el.querySelector('[data-action="remove"]');
     removeBtn.style.display = existingAnno ? '' : 'none';
+    const pending = !!opts.pending;
+    const header = el.querySelector('.label-popover-header');
+    header.textContent = pending ? 'AI suggested — confirm or change' : '';
+    header.style.display = pending ? '' : 'none';
+    el.querySelector('[data-action="dismiss-suggestion"]').style.display = pending ? '' : 'none';
     const commentBox = el.querySelector('.label-popover-comment');
     const ta = commentBox.querySelector('textarea');
     if (existingAnno && existingAnno.label === 'comment') {
@@ -1443,6 +1600,7 @@ const App = {
     const msgs = Storage.getMessages(chatId);
     const msg = msgs.find(m => m.id === state.msgId);
     if (!msg) return;
+    const wasPending = !!state.pending;
     if (!Array.isArray(msg.annotations)) msg.annotations = [];
 
     const spanText = this._normalizeAnnoSpan(state.spanText);
@@ -1456,7 +1614,7 @@ const App = {
 
     // Toggle-off: re-clicking an already-active quick label removes the annotation
     // (comment uses Save with new text — don't treat that as cancel)
-    if (existing && existing.label === label && label !== 'comment') {
+    if (!wasPending && existing && existing.label === label && label !== 'comment') {
       state.existingId = existing.id;
       this._removeAnnotation();
       return;
@@ -1496,11 +1654,24 @@ const App = {
       return seen.get(key) === a;
     });
     Storage.saveMessages(chatId, msgs);
+    if (wasPending) {
+      msg.suggestedHighlights = (msg.suggestedHighlights || []).filter(h =>
+        !(this._highlightDisplayText(h.spanText) === spanText && (h.occurrence || 0) === occ)
+      );
+      Storage.saveMessages(chatId, msgs);
+      this._applyPendingHighlightsToDom(state.msgId, msg.suggestedHighlights);
+      StudyLog.event('label_highlight_confirmed', { msgId: state.msgId, spanText, label });
+      if (label !== 'important') {
+        StudyLog.event('label_highlight_changed', {
+          msgId: state.msgId, spanText, from: 'important', to: label,
+        });
+      }
+    }
     this._applyAnnotationsToDom(state.msgId, msg.annotations);
     StudyLog.event('text_label_applied', {
       stage: 'construct',
       initiative: 'mixed',
-      origin: 'user',
+      origin: wasPending ? 'ai-suggested' : 'user',
       surface: 'chat',
       label,
       hasComment: label === 'comment',
@@ -1538,6 +1709,70 @@ const App = {
     this._hideAnnoPopover();
   },
 
+  _dismissPendingHighlight(reason = 'click') {
+    const state = this._annoState;
+    if (!state || !state.pending) return;
+    const chatId = Storage.getCurrentChatId();
+    const msgs = Storage.getMessages(chatId);
+    const msg = msgs.find(m => m.id === state.msgId);
+    if (!msg) return;
+    const spanText = this._normalizeAnnoSpan(state.spanText);
+    const occurrence = state.occurrence || 0;
+    msg.suggestedHighlights = (msg.suggestedHighlights || []).filter(h =>
+      !(this._highlightDisplayText(h.spanText) === spanText && (h.occurrence || 0) === occurrence)
+    );
+    Storage.saveMessages(chatId, msgs);
+    this._applyPendingHighlightsToDom(msg.id, msg.suggestedHighlights);
+    StudyLog.event('label_highlight_dismissed', {
+      msgId: msg.id, spanText, reason,
+    });
+    this._hideAnnoPopover();
+  },
+
+  _dismissPendingHighlights(reason = 'batch') {
+    const chatId = this.currentChatId;
+    if (!chatId) return;
+    const msgs = Storage.getMessages(chatId);
+    let count = 0;
+    msgs.forEach(msg => {
+      if (!Array.isArray(msg.suggestedHighlights) || msg.suggestedHighlights.length === 0) return;
+      count += msg.suggestedHighlights.length;
+      msg.suggestedHighlights = [];
+      this._applyPendingHighlightsToDom(msg.id, []);
+    });
+    if (!count) return;
+    Storage.saveMessages(chatId, msgs);
+    StudyLog.event('label_highlight_dismissed', {
+      msgId: null, spanText: null, reason, count,
+    });
+  },
+
+  _applyPendingHighlightsToDom(msgId, highlights) {
+    const content = document.querySelector(`.message-content[data-msg-id="${msgId}"]`);
+    if (!content) return;
+    content.querySelectorAll('.hl-pending').forEach(span => {
+      const parent = span.parentNode;
+      while (span.firstChild) parent.insertBefore(span.firstChild, span);
+      parent.removeChild(span);
+      parent.normalize();
+    });
+    (Array.isArray(highlights) ? highlights : []).forEach((highlight, index) => {
+      if (!highlight || !highlight.spanText) return;
+      this._wrapAnnotationOccurrence(content, {
+        id: `pending_${index}`,
+        spanText: highlight.spanText,
+        occurrence: highlight.occurrence || 0,
+      }, {
+        tagName: 'span',
+        className: 'hl-pending',
+        dataset: {
+          spanText: highlight.spanText,
+          occurrence: String(highlight.occurrence || 0),
+        },
+      });
+    });
+  },
+
   _applyAnnotationsToDom(msgId, annotations) {
     const content = document.querySelector(`.message-content[data-msg-id="${msgId}"]`);
     if (!content) return;
@@ -1568,7 +1803,7 @@ const App = {
     });
   },
 
-  _wrapAnnotationOccurrence(root, anno) {
+  _wrapAnnotationOccurrence(root, anno, opts = {}) {
     const target = this._normalizeAnnoSpan(anno.spanText);
     if (!target) return false;
     const occurrence = anno.occurrence || 0;
@@ -1626,23 +1861,29 @@ const App = {
       if (seg.sliceStart > 0) {
         middle = middle.splitText(seg.sliceStart);
       }
-      const mark = document.createElement('mark');
-      mark.className = `anno anno-${anno.label}`;
-      mark.dataset.annoId = anno.id;
-      mark.title = (this._LABEL_META[anno.label] || {}).title || anno.label;
+      const mark = document.createElement(opts.tagName || 'mark');
+      mark.className = opts.className || `anno anno-${anno.label}`;
+      if (opts.dataset) {
+        Object.entries(opts.dataset).forEach(([key, value]) => { mark.dataset[key] = value; });
+      } else {
+        mark.dataset.annoId = anno.id;
+        mark.title = (this._LABEL_META[anno.label] || {}).title || anno.label;
+      }
       middle.parentNode.replaceChild(mark, middle);
       mark.appendChild(middle);
     }
     return true;
   },
 
-    _createStreamingMessage() {
-    const container = document.getElementById('chatMessages');
+  _createStreamingMessage(chatId = this.currentChatId) {
     const el = document.createElement('div');
     el.className = 'message assistant';
     el.innerHTML = `<div class="message-content"><span class="streaming-cursor"></span></div>`;
-    container.appendChild(el);
-    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (this.currentChatId === chatId) {
+      const container = document.getElementById('chatMessages');
+      container.appendChild(el);
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
     return el;
   },
 
@@ -1675,6 +1916,87 @@ const App = {
       .replace(/\{~END~\}/g, '')
       .replace(/\n{3,}/g, '\n\n')
       .trimEnd();
+  },
+
+  _extractHighlights(text) {
+    const source = text == null ? '' : String(text);
+    const highlights = [];
+    let cleanText = '';
+    let lastIndex = 0;
+    const pairPattern = /\{~HL~\}([\s\S]*?)\{~\/HL~\}/g;
+    let match;
+    while ((match = pairPattern.exec(source)) !== null) {
+      cleanText += source.slice(lastIndex, match.index);
+      const inner = match[1] || '';
+      cleanText += inner;
+      const spanText = inner.trim();
+      if (spanText && spanText.length <= 200) {
+        let occurrence = 0;
+        let from = 0;
+        const before = cleanText.slice(0, Math.max(0, cleanText.length - inner.length));
+        while (from <= before.length) {
+          const found = before.indexOf(spanText, from);
+          if (found === -1) break;
+          occurrence += 1;
+          from = found + Math.max(spanText.length, 1);
+        }
+        highlights.push({ spanText, occurrence });
+      }
+      lastIndex = pairPattern.lastIndex;
+    }
+    cleanText += source.slice(lastIndex);
+    cleanText = cleanText
+      .replace(/\{~HL~\}/g, '')
+      .replace(/\{~\/HL~\}/g, '')
+      .replace(/\{~\/?HL/g, '');
+    return { cleanText, highlights };
+  },
+
+  _highlightDisplayText(spanText) {
+    const raw = spanText == null ? '' : String(spanText);
+    try {
+      if (typeof document !== 'undefined' && document.createElement && Utils?.renderMarkdown) {
+        const scratch = document.createElement('div');
+        scratch.innerHTML = Utils.renderMarkdown(raw);
+        return this._normalizeAnnoSpan(scratch.textContent || '');
+      }
+    } catch (_) {}
+    const codeSpans = [];
+    const withoutCode = raw.replace(/(`{1,3})(.*?)\1/g, (_match, _ticks, code) => {
+      const token = `\uE000${codeSpans.length}\uE001`;
+      codeSpans.push(code);
+      return token;
+    });
+    const plain = withoutCode
+      .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+      .replace(/[*_~]/g, '')
+      .replace(/\uE000(\d+)\uE001/g, (_match, index) => codeSpans[Number(index)] || '');
+    return this._normalizeAnnoSpan(plain);
+  },
+
+  _renderPendingHighlights(contentEl, highlights) {
+    const normalized = (Array.isArray(highlights) ? highlights : [])
+      .map(highlight => ({
+        ...highlight,
+        spanText: this._highlightDisplayText(highlight?.spanText),
+      }))
+      .filter(highlight => highlight.spanText);
+    normalized.forEach((highlight, index) => {
+      this._wrapAnnotationOccurrence(contentEl, {
+        id: `pending_${index}`,
+        spanText: highlight.spanText,
+        occurrence: highlight.occurrence || 0,
+      }, {
+        tagName: 'span',
+        className: 'hl-pending',
+        dataset: {
+          spanText: highlight.spanText,
+          occurrence: String(highlight.occurrence || 0),
+        },
+      });
+    });
+    return normalized;
   },
 
   _stripConnectionBlock(text) {
@@ -1783,9 +2105,10 @@ const App = {
           this._hideConnCard();
           const chat = Storage.getChat(chatId);
           if (chat) {
+            const prevChatId = this.currentChatId;
+            this._onExitChat(prevChatId);
             Sidebar._flushDirtyLabels();
             this._summarizeCurrentChat();
-            this.msgCountSinceRefresh = 0;
             this._renderChat(chatId);
             this._renderChatList();
           }
@@ -1914,16 +2237,24 @@ const App = {
   _updateStreamingMessage(el, text) {
     const contentEl = el.querySelector('.message-content');
     const { mainText } = this._stripConnectionBlock(this._stripSearchArtifacts(text));
+    const { cleanText, highlights } = this._extractHighlights(mainText);
     // Mid-stream: hide incomplete trailer / raw markers; show loading markers only for complete {~N}
-    const safe = mainText.replace(/\{~CONNECTIONS~\}[\s\S]*$/g, '').replace(/\{~\d*$/g, '');
+    const safe = cleanText
+      .replace(/\{~CONNECTIONS~\}[\s\S]*$/g, '')
+      .replace(/\{~\d*$/g, '')
+      .replace(/\{~\/?H?L?~?$/g, '');
     const rendered = Utils.renderMarkdown(safe);
-    contentEl.innerHTML = this._parseConnectionMarkers(rendered) + '<span class="streaming-cursor"></span>';
+    contentEl.innerHTML = this._parseConnectionMarkers(rendered);
+    this._renderPendingHighlights(contentEl, highlights);
+    contentEl.insertAdjacentHTML('beforeend', '<span class="streaming-cursor"></span>');
   },
 
   _finalizeStreamingMessage(el, text, msgId) {
     const contentEl = el.querySelector('.message-content');
     const { mainText, connectionsJson } = this._stripConnectionBlock(this._stripSearchArtifacts(text));
-    contentEl.innerHTML = this._parseConnectionMarkers(Utils.renderMarkdown(mainText));
+    const { cleanText, highlights } = this._extractHighlights(mainText);
+    contentEl.innerHTML = this._parseConnectionMarkers(Utils.renderMarkdown(cleanText));
+    const renderedHighlights = this._renderPendingHighlights(contentEl, highlights);
     // Strip any leftover raw marker tokens that weren't turned into spans
     contentEl.querySelectorAll('*').forEach(() => {});
     if (msgId) contentEl.dataset.msgId = msgId;
@@ -1947,6 +2278,7 @@ const App = {
         .replace(/\{~\d+\}/g, '')
         .replace(/\{~END~\}/g, '');
     }
+    return { cleanText, highlights: renderedHighlights };
   },
 
   // ── Injected Past Context Panel ────────────────────────────────────────
@@ -2017,9 +2349,10 @@ const App = {
         e.stopPropagation();
         const chatId = chat.chatId;
         if (!chatId || !Storage.getChat(chatId)) return;
+        const prevChatId = this.currentChatId;
+        this._onExitChat(prevChatId);
         Sidebar._flushDirtyLabels();
         this._summarizeCurrentChat();
-        this.msgCountSinceRefresh = 0;
         this._renderChat(chatId);
         this._renderChatList();
         StudyLog.event('context_link_opened', {
@@ -2038,61 +2371,72 @@ const App = {
     });
   },
 
-  _isUnassignedTopic(topicId) {
+  _isOneTimeTopic(topicId) {
     if (!topicId) return false;
     const topic = Storage.getTopic(topicId);
-    return topic?.name === 'Unassigned';
+    return !!(topic && (
+      topic.oneTimeBucket
+      || topic.name === 'Unassigned'
+      || topic.name === 'One-time questions'
+    ));
   },
 
-  _getOrCreateUnassignedTopic() {
-    const existing = Storage.getTopics().find(t => t.name === 'Unassigned');
+  _getOrCreateOneTimeTopic() {
+    const existing = Storage.getTopics().find(t =>
+      t.oneTimeBucket || t.name === 'Unassigned' || t.name === 'One-time questions'
+    );
     if (existing) return existing;
-    const topic = Storage.createTopic('Unassigned');
+    const topic = Storage.createTopic('One-time questions');
     topic.userCreated = false;
+    topic.oneTimeBucket = true;
     Storage.saveTopic(topic);
     return topic;
   },
 
-  async _handleTopicDetection(topicData) {
-    // One-off questions go to the "Unassigned" topic
-    if (topicData.isOneOff) {
-      const unassigned = this._getOrCreateUnassignedTopic();
-      const chat = Storage.getChat(this.currentChatId);
-      if (chat && !chat.topicId) {
-        chat.topicId = unassigned.id;
-        chat.lastActive = Utils.timestamp();
-        Storage.saveChat(chat);
-        StudyLog.event('topic_assigned', { chatId: this.currentChatId, topicId: unassigned.id, assignMethod: 'auto', isOneOff: true });
-      }
+  async _assignTopicToChat(chatId, {
+    topicId = null,
+    newTopicName = '',
+    isOneOff = false,
+    assignMethod = 'auto',
+  } = {}) {
+    const chat = Storage.getChat(chatId);
+    if (!chat || chat.topicId) return;
+
+    if (isOneOff) {
+      const bucket = this._getOrCreateOneTimeTopic();
+      chat.topicId = bucket.id;
+      chat.oneTime = true;
+      chat.lastActive = Utils.timestamp();
+      Storage.saveChat(chat);
+      bucket.lastActive = Utils.timestamp();
+      Storage.saveTopic(bucket);
+      StudyLog.event('one_time_chat_started', { chatId, source: 'classified' });
+      StudyLog.event('topic_assigned', {
+        chatId, topicId: bucket.id, assignMethod, isOneOff: true,
+      });
+      if (this.currentChatId === chatId) Sidebar.hide();
       this._renderChatList();
       return;
     }
 
-    let topicId = topicData.matchedExistingId;
-    let isNew = false;
-
-    if (!topicId && topicData.name) {
+    if (!topicId && newTopicName) {
       const existing = Storage.getTopics().find(
-        t => t.name.toLowerCase() === topicData.name.toLowerCase()
+        t => t.name.toLowerCase() === newTopicName.toLowerCase()
       );
       if (existing) {
         topicId = existing.id;
       } else {
-        const topic = Storage.createTopic(topicData.name);
+        const topic = Storage.createTopic(newTopicName);
         topicId = topic.id;
-        isNew = true;
         StudyLog.event('topic_created', { topicId, isAutoDetected: true });
       }
     }
 
     if (topicId) {
-      const chat = Storage.getChat(this.currentChatId);
-      if (chat && !chat.topicId) {
-        chat.topicId = topicId;
-        chat.lastActive = Utils.timestamp();
-        Storage.saveChat(chat);
-        StudyLog.event('topic_assigned', { chatId: this.currentChatId, topicId, assignMethod: 'auto' });
-      }
+      chat.topicId = topicId;
+      chat.lastActive = Utils.timestamp();
+      Storage.saveChat(chat);
+      StudyLog.event('topic_assigned', { chatId, topicId, assignMethod });
 
       const topic = Storage.getTopic(topicId);
       if (topic) {
@@ -2100,11 +2444,20 @@ const App = {
         Storage.saveTopic(topic);
       }
 
-      if (!this._isUnassignedTopic(topicId)) {
+      if (this.currentChatId === chatId && !this._isOneTimeTopic(topicId)) {
         Sidebar.show(topicId);
       }
       this._renderChatList();
     }
+  },
+
+  async _handleTopicDetection(topicData, chatId = this.currentChatId) {
+    return this._assignTopicToChat(chatId, {
+      topicId: topicData.matchedExistingId || null,
+      newTopicName: topicData.name || '',
+      isOneOff: !!topicData.isOneOff,
+      assignMethod: 'auto',
+    });
   },
 
   // ── Chat Summarization ────────────────────────────────────────────────
@@ -2198,7 +2551,7 @@ const App = {
 
   async _migrateStatusToThreads() {
     const topics = Storage.getTopics().filter(t => {
-      if (t.name === 'Unassigned') return false;
+      if (this._isOneTimeTopic(t.id)) return false;
       const s = t.statusSummary;
       if (!s || typeof s !== 'object') return false;
       // Has old specifics but no threads yet
@@ -2239,11 +2592,8 @@ const App = {
   },
 
   async _autoDetectTopics() {
-    // Include chats from "Unassigned" topic in reclassification
-    const unassignedTopic = Storage.getTopics().find(t => t.name === 'Unassigned');
-    const unassignedTopicId = unassignedTopic?.id;
     const candidateChats = Storage.getChats().filter(c =>
-      c.summary && (!c.topicId || c.topicId === unassignedTopicId)
+      c.summary && !c.topicId
     );
     if (candidateChats.length < 2) return;
 
@@ -2254,7 +2604,7 @@ const App = {
         body: JSON.stringify({
           chatSummaries: candidateChats.map(c => ({ id: c.id, summary: c.summary })),
           existingTopics: Storage.getTopics()
-            .filter(t => t.name !== 'Unassigned')
+            .filter(t => !this._isOneTimeTopic(t.id))
             .map(t => ({ id: t.id, name: t.name })),
         }),
       });
@@ -2270,7 +2620,7 @@ const App = {
 
           for (const chatId of topicData.chatIds) {
             const chat = Storage.getChat(chatId);
-            if (chat && (!chat.topicId || chat.topicId === unassignedTopicId)) {
+            if (chat && !chat.topicId) {
               chat.topicId = topic.id;
               Storage.saveChat(chat);
             }
@@ -2288,7 +2638,7 @@ const App = {
           if (!topic) continue;
           for (const chatId of assignment.chatIds) {
             const chat = Storage.getChat(chatId);
-            if (chat && (!chat.topicId || chat.topicId === unassignedTopicId)) {
+            if (chat && !chat.topicId) {
               chat.topicId = assignment.topicId;
               Storage.saveChat(chat);
               changed = true;
@@ -2375,12 +2725,14 @@ const App = {
 
     const topicSel = document.getElementById('topicSelect');
     const topicPickerEl = document.getElementById('topicPicker');
+    const isOneTime = !!(chat?.oneTime || this._isOneTimeTopic(chat?.topicId));
     if (messages.length === 0) {
       mainContent.classList.add('welcome-mode');
-      this._renderWelcome(msgContainer);
-      if (topicSel) topicSel.style.display = '';
-      if (topicPickerEl) topicPickerEl.style.display = '';
+      this._renderWelcome(msgContainer, { suppressSuggestions: isOneTime });
+      if (topicSel) topicSel.style.display = isOneTime ? 'none' : '';
+      if (topicPickerEl) topicPickerEl.style.display = isOneTime ? 'none' : '';
       TopicSuggester.reset();
+      if (isOneTime) TopicSuggester._suggestionDismissed = true;
     } else {
       mainContent.classList.remove('welcome-mode');
       messages.forEach(m => this._appendMessage(m));
@@ -2390,7 +2742,7 @@ const App = {
 
     if (STUDY_CONDITION === 'baseline') {
       Sidebar.showBaseline();
-    } else if (chat?.topicId && !this._isUnassignedTopic(chat.topicId)) {
+    } else if (chat?.topicId && !this._isOneTimeTopic(chat.topicId)) {
       Sidebar.show(chat.topicId);
       this.msgCountSinceRefresh = 0;
     } else {
@@ -2400,8 +2752,8 @@ const App = {
     this._highlightActiveChat(chatId);
   },
 
-  _renderWelcome(container) {
-    const suggestions = this._getSuggestionCards();
+  _renderWelcome(container, opts = {}) {
+    const suggestions = opts.suppressSuggestions ? [] : this._getSuggestionCards();
     let suggestionsHtml = '';
     if (suggestions.length > 0 && STUDY_CONDITION === 'loom') {
       const cardsHtml = suggestions.map((s, i) => {
@@ -2560,7 +2912,7 @@ const App = {
     if (topic) {
       topic.lastActive = Utils.timestamp();
       Storage.saveTopic(topic);
-      if (topic.name !== 'Unassigned') {
+      if (!this._isOneTimeTopic(topic.id)) {
         Sidebar.show(suggestion.topicId);
       }
     }
@@ -2799,6 +3151,12 @@ const App = {
       this._renderInjectedPastPanel(el, msg.injectedPastChats, { replay: true });
     }
 
+    if (msg.role === 'assistant' && msg.id && Array.isArray(msg.suggestedHighlights)
+        && msg.suggestedHighlights.length > 0) {
+      const content = el.querySelector('.message-content');
+      if (content) this._renderPendingHighlights(content, msg.suggestedHighlights);
+    }
+
     if (msg.role === 'assistant' && msg.id && Array.isArray(msg.annotations) && msg.annotations.length > 0) {
       this._applyAnnotationsToDom(msg.id, msg.annotations);
     }
@@ -2865,10 +3223,10 @@ const App = {
         container.appendChild(this._createChatItem(chat));
       });
     } else {
-      // Group by topic: show real topics first, "Unassigned" at the end
+      // Group by topic: show real topics first, then one-time and unclassified chats.
       const allTopics = Storage.getTopics().sort((a, b) => new Date(b.lastActive) - new Date(a.lastActive));
-      const realTopics = allTopics.filter(t => t.name !== 'Unassigned');
-      const unassignedTopic = allTopics.find(t => t.name === 'Unassigned');
+      const realTopics = allTopics.filter(t => !this._isOneTimeTopic(t.id));
+      const oneTimeTopic = allTopics.find(t => this._isOneTimeTopic(t.id));
       const noTopicChats = chats.filter(c => !c.topicId);
 
       realTopics.forEach(topic => {
@@ -2930,18 +3288,25 @@ const App = {
         topicChats.forEach(chat => container.appendChild(this._createChatItem(chat)));
       });
 
-      // Combine "Unassigned" topic chats + truly unassigned (no topicId) under one label
-      const unassignedChats = [
-        ...(unassignedTopic ? chats.filter(c => c.topicId === unassignedTopic.id) : []),
-        ...noTopicChats,
-      ].sort((a, b) => new Date(b.lastActive) - new Date(a.lastActive));
-
-      if (unassignedChats.length > 0) {
+      const oneTimeChats = oneTimeTopic
+        ? chats.filter(c => c.topicId === oneTimeTopic.id)
+          .sort((a, b) => new Date(b.lastActive) - new Date(a.lastActive))
+        : [];
+      if (oneTimeChats.length > 0) {
         const title = document.createElement('div');
         title.className = 'chat-list-group-title unassigned-group';
-        title.textContent = 'Unassigned';
+        title.textContent = 'One-time questions';
         container.appendChild(title);
-        unassignedChats.forEach(chat => container.appendChild(this._createChatItem(chat)));
+        oneTimeChats.forEach(chat => container.appendChild(this._createChatItem(chat)));
+      }
+      if (noTopicChats.length > 0) {
+        const title = document.createElement('div');
+        title.className = 'chat-list-group-title unassigned-group';
+        title.textContent = 'No topic yet';
+        container.appendChild(title);
+        noTopicChats
+          .sort((a, b) => new Date(b.lastActive) - new Date(a.lastActive))
+          .forEach(chat => container.appendChild(this._createChatItem(chat)));
       }
     }
   },
@@ -2951,7 +3316,7 @@ const App = {
     el.className = 'chat-item' + (chat.id === this.currentChatId ? ' active' : '');
 
     const topic = chat.topicId ? Storage.getTopic(chat.topicId) : null;
-    const tc = (topic && topic.name !== 'Unassigned') ? Utils.getTopicColor(topic) : { color: '#ccc' };
+    const tc = (topic && !this._isOneTimeTopic(topic.id)) ? Utils.getTopicColor(topic) : { color: '#ccc' };
 
     const moveBtn = STUDY_CONDITION === 'loom'
       ? `<button class="chat-move-btn" title="Move to topic">
@@ -3012,9 +3377,10 @@ const App = {
     el.addEventListener('click', () => {
       const currentView = document.querySelector('.toggle-btn.active')?.dataset?.view || 'recent';
       StudyLog.event('chat_selected', { chatId: chat.id, topicId: chat.topicId || null, view: currentView });
+      const prevChatId = this.currentChatId;
+      this._onExitChat(prevChatId);
       Sidebar._flushDirtyLabels();
       this._summarizeCurrentChat();
-      this.msgCountSinceRefresh = 0;
       this._renderChat(chat.id);
       this._renderChatList();
     });
@@ -3048,7 +3414,7 @@ const App = {
     if (!chat) return;
 
     const topics = Storage.getTopics().filter(t =>
-      t.id !== currentTopicId && t.name !== 'Unassigned'
+      t.id !== currentTopicId && !this._isOneTimeTopic(t.id)
     );
     if (topics.length === 0) {
       Utils.showToast('No other topics to move to', 'info');
@@ -3107,7 +3473,7 @@ const App = {
       }
     }
 
-    if (chatId === this.currentChatId && newTopic && newTopic.name !== 'Unassigned') {
+    if (chatId === this.currentChatId && newTopic && !this._isOneTimeTopic(newTopic.id)) {
       Sidebar.show(newTopicId);
     }
 
@@ -3186,8 +3552,7 @@ const App = {
     this._renderChatList();
     this._populateTopicSelector();
     if (Sidebar.currentTopicId === topicId) {
-      const nameEl = document.getElementById('currentTopicName');
-      if (nameEl) nameEl.textContent = newName;
+      Sidebar._applyTopicColor(topic);
       const badge = document.getElementById('topicBadge');
       if (badge) badge.textContent = newName;
     }
@@ -3293,7 +3658,7 @@ const App = {
       console.warn('Post-merge status update failed:', err);
     }
 
-    if (!this._isUnassignedTopic(keepTopicId)) {
+    if (!this._isOneTimeTopic(keepTopicId)) {
       Sidebar.show(keepTopicId);
       Sidebar.refresh();
     }

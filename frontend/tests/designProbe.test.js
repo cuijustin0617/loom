@@ -238,8 +238,10 @@ function makeEnv(opts = {}) {
                 .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
             showToast() {},
             renderMarkdown: s => String(s ?? ''),
+            truncate: (s, n) => String(s ?? '').slice(0, n),
             wordDiff: (a, b) => [{ type: 'same', text: b || a || '' }],
             TOPIC_COLORS: [{ hue: 210 }],
+            getTopicColor: () => ({ color: '#456', light: '#eef' }),
             findDistantHue: () => 210,
             _BLUE_FAMILY_MIN: 180,
             _BLUE_FAMILY_MAX: 260,
@@ -303,6 +305,49 @@ await test('createTopic initializes statusSummary overview/goals empty arrays', 
     const { Storage } = makeEnv();
     const t = Storage.createTopic('New');
     assert.deepStrictEqual(plain(t.statusSummary), { overview: [], goals: [] });
+});
+
+await test('one-time annotations clear dirty state without profile refresh', () => {
+    const { Storage, Sidebar, App, fetchCalls } = makeEnv();
+    Storage.refreshTopicEmbeddings = async () => {};
+    const bucket = Storage.createTopic('One-time questions');
+    bucket.oneTimeBucket = true;
+    Storage.saveTopic(bucket);
+    const chat = Storage.createChat({ oneTime: true });
+    chat.topicId = bucket.id;
+    Storage.saveChat(chat);
+    Storage.setCurrentChatId(chat.id);
+    App.currentChatId = chat.id;
+    Sidebar.currentTopicId = null;
+    Sidebar._labelsDirty = true;
+
+    Sidebar._flushDirtyLabels();
+
+    assert.strictEqual(Sidebar._labelsDirty, false);
+    assert.ok(!fetchCalls.some(call => String(call.url).includes('/api/topic/status/update')));
+});
+
+await test('background topic assignment does not replace visible sidebar', async () => {
+    const { Storage, Sidebar, App } = makeEnv();
+    Storage.refreshTopicEmbeddings = async () => {};
+    const visibleTopic = Storage.createTopic('Visible');
+    const backgroundTopic = Storage.createTopic('Background');
+    const visibleChat = Storage.createChat();
+    visibleChat.topicId = visibleTopic.id;
+    Storage.saveChat(visibleChat);
+    const backgroundChat = Storage.createChat();
+    App.currentChatId = visibleChat.id;
+    App._renderChatList = () => {};
+    let shown = 0;
+    let hidden = 0;
+    Sidebar.show = () => { shown += 1; };
+    Sidebar.hide = () => { hidden += 1; };
+
+    await App._assignTopicToChat(backgroundChat.id, { topicId: backgroundTopic.id });
+
+    assert.strictEqual(Storage.getChat(backgroundChat.id).topicId, backgroundTopic.id);
+    assert.strictEqual(shown, 0);
+    assert.strictEqual(hidden, 0);
 });
 
 await test('_ensureStatusShape repairs string/null/legacy without losing overview', () => {
@@ -402,6 +447,22 @@ await test('_stageProposal with goals: [] does not wipe existing user goals', ()
     assert.strictEqual(topic.statusSummary.goals.length, 1);
 });
 
+await test('_stageProposal caps oversized proposals and logs truncation', () => {
+    const { Storage, Sidebar, loggedEvents } = makeEnv();
+    const topic = seedTopic(Storage, { overview: [], goals: [] });
+    const staged = Sidebar._stageProposal(topic, {
+        overview: Array.from({ length: 9 }, (_, i) => ({ text: `New fact ${i}` })),
+        goals: [],
+    }, 'interval');
+    assert.strictEqual(staged, true);
+    assert.strictEqual(topic.pendingProposal.changes.length, 6);
+    const event = lastOf(loggedEvents, 'proposal_truncated');
+    assert.ok(event);
+    assert.strictEqual(event.data.originalCount, 9);
+    assert.strictEqual(event.data.keptCount, 6);
+    assert.strictEqual(event.data.trigger, 'interval');
+});
+
 await test('per-line accept updates summary, shrinks changes; last accept clears proposal', () => {
     const { Storage, Sidebar, loggedEvents } = makeEnv();
     const topic = seedTopic(Storage, { goals: [] });
@@ -431,7 +492,12 @@ await test('_saveSuggestedGoal pushes once; second save is a no-op', () => {
     const { Storage, Sidebar, loggedEvents } = makeEnv();
     const topic = seedTopic(Storage, { goals: [] });
     Sidebar.currentTopicId = topic.id;
-    const dir = { title: 'Explore generative AI system design', anchor: 'coverage', type: 'depth' };
+    const dir = {
+        title: 'Explore generative AI system design',
+        anchor: 'coverage',
+        type: 'depth',
+        exampleQuestion: 'How should I evaluate a generative AI system?',
+    };
     Sidebar._saveSuggestedGoal(dir);
     const g = Storage.getTopic(topic.id).statusSummary.goals;
     assert.strictEqual(g.length, 1);
@@ -439,19 +505,45 @@ await test('_saveSuggestedGoal pushes once; second save is a no-op', () => {
     assert.strictEqual(g[0].source, 'user');
     assert.strictEqual(g[0].suggestionTitle, dir.title);
     assert.ok(g[0].id);
+    assert.strictEqual(g[0].savedQuestions.length, 1);
+    assert.strictEqual(g[0].savedQuestions[0].text, dir.exampleQuestion);
     Sidebar._saveSuggestedGoal(dir);
     assert.strictEqual(Storage.getTopic(topic.id).statusSummary.goals.length, 1);
+    assert.strictEqual(Storage.getTopic(topic.id).statusSummary.goals[0].savedQuestions.length, 1);
 
     const saved = lastOf(loggedEvents, 'goal_saved');
     assert.ok(saved);
     assert.deepStrictEqual(plain(saved.data), {
         stage: 'evolve',
-        initiative: 'system',
+        initiative: 'user',
         surface: 'sidebar',
         topicId: topic.id,
         suggestionTitle: dir.title,
         anchor: 'coverage',
     });
+    const questionSaved = lastOf(loggedEvents, 'question_saved');
+    assert.ok(questionSaved);
+    assert.strictEqual(questionSaved.data.goalId, g[0].id);
+});
+
+await test('Evolve Save waits for and retains its generated question', async () => {
+    const { Storage, Sidebar } = makeEnv();
+    const topic = seedTopic(Storage, { goals: [] });
+    Sidebar.currentTopicId = topic.id;
+    Sidebar._ensureCardQuestion = async () => 'What evidence would validate this direction?';
+    let savedDirection = null;
+    Sidebar._saveSuggestedGoal = dir => { savedDirection = { ...dir }; };
+    const card = Sidebar._createSuggestedGoalCard({
+        title: 'Validate the direction',
+        type: 'depth',
+        exampleQuestion: '',
+    }, 0);
+
+    card.querySelector('.direction-save-btn').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    assert.ok(savedDirection);
+    assert.strictEqual(savedDirection.exampleQuestion, 'What evidence would validate this direction?');
 });
 
 await test('_removeGoal removes from statusSummary.goals not legacy topic.goals', () => {
@@ -613,6 +705,8 @@ await test('mock session emits canonical event sequence', () => {
             goalId: savedGoal.id,
             goalSource: savedGoal.source || 'user',
             suggestionId: dir.title,
+            askMode: 'new_chat',
+            autoSend: false,
         },
     });
     Sidebar._startGoalInNewChat({ title: dir.title, question: dir.exampleQuestion });
@@ -622,7 +716,7 @@ await test('mock session emits canonical event sequence', () => {
         'query_sent', 'construct_included_in_chat', 'context_card_shown',
         'context_excluded_for_topic', 'context_exclusion_reverted',
         'proposal_shown', 'proposal_change_accepted', 'proposal_accepted',
-        'goal_saved', 'goal_question_asked',
+        'goal_saved', 'question_saved', 'goal_question_asked',
     ];
     let from = 0;
     expected.forEach(name => {
@@ -643,7 +737,7 @@ await test('mock session emits canonical event sequence', () => {
     assert.ok(asked.data.goalSource);
     assert.strictEqual(asked.data.suggestionId, dir.title);
     const saved = lastOf(loggedEvents, 'goal_saved');
-    assert.strictEqual(saved.data.initiative, 'system');
+    assert.strictEqual(saved.data.initiative, 'user');
     assert.strictEqual(saved.data.surface, 'sidebar');
 });
 

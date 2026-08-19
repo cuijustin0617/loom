@@ -197,7 +197,7 @@ class TestSerializeAnnotations:
             {"spanText": "dropout", "label": "comment", "comment": "I use this at work"},
             {"spanText": "GAN intro", "label": "not_relevant"},
         ])
-        assert '"backprop" → interested' in text
+        assert '"backprop" → important' in text
         assert 'comment: "I use this at work"' in text
         assert '"GAN intro" → not relevant' in text
 

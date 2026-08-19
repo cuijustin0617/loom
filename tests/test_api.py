@@ -2081,8 +2081,8 @@ class TestTopicSelectorInInputBar:
         js = _get_client().get("/static/app.js").text
         # In the messages.length === 0 branch, display is reset to show the selector
         idx = js.index("messages.length === 0")
-        block = js[idx:idx+300]
-        assert "style.display = ''" in block or 'style.display = ""' in block
+        block = js[idx:idx+500]
+        assert "isOneTime ? 'none' : ''" in block
 
     def test_send_message_hides_selector(self):
         """Topic selector should be hidden when a message is sent."""

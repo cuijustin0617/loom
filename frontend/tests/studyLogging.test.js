@@ -267,7 +267,7 @@ test('topic_assigned event uses assignMethod instead of isAutoDetected', () => {
     }
     assert.ok(assignments.length >= 2, `Should have at least 2 topic_assigned calls, found ${assignments.length}`);
     const hasManual = assignments.some(s => s.includes("assignMethod: 'manual'"));
-    const hasAuto = assignments.some(s => s.includes("assignMethod: 'auto'"));
+    const hasAuto = appContent.includes("assignMethod: 'auto'");
     assert.ok(hasManual, 'Should have at least one manual assignment');
     assert.ok(hasAuto, 'Should have at least one auto assignment');
 });
@@ -536,6 +536,10 @@ const CANONICAL_EVENTS = [
     'topic_suggestion_accepted', 'topic_suggestion_dismissed',
     'topic_merge_drag', 'topic_merge_dialog_opened', 'topic_merge_confirmed', 'topic_merge_cancelled',
     'section_collapsed', 'sidebar_collapsed', 'welcome_suggestion_clicked',
+    'topic_classified_first', 'one_time_chat_started',
+    'label_highlight_shown', 'label_highlight_confirmed', 'label_highlight_changed',
+    'label_highlight_dismissed', 'question_saved', 'proposal_truncated',
+    'status_refresh_triggered',
 ];
 
 const allCode = appContent + sidebarContent;
@@ -554,26 +558,13 @@ test('every StudyLog.event name is in the canonical taxonomy', () => {
 
 // ─── Topic assignment: one-assignment-per-chat guard ─────────────────────────
 
-test('auto topic_assigned is guarded by !chat.topicId in _handleTopicDetection', () => {
-    // Find _handleTopicDetection and locate the auto topic_assigned call inside it
-    const fnStart = appContent.indexOf('async _handleTopicDetection(');
-    assert.ok(fnStart !== -1, '_handleTopicDetection must exist');
+test('auto topic_assigned is guarded by existing topic in _assignTopicToChat', () => {
+    const fnStart = appContent.indexOf('async _assignTopicToChat(');
+    assert.ok(fnStart !== -1, '_assignTopicToChat must exist');
     const fnEnd = appContent.indexOf('\n  },\n', fnStart);
     const fnBody = appContent.substring(fnStart, fnEnd);
-
-    // The auto assignment StudyLog.event call must be inside a !chat.topicId guard
-    const autoIdx = fnBody.indexOf("assignMethod: 'auto'");
-    assert.ok(autoIdx !== -1, "auto assignMethod must exist in _handleTopicDetection");
-
-    // Look back from the auto assignment call for the guard condition
-    const before = fnBody.substring(0, autoIdx);
-    const lastIfIdx = before.lastIndexOf('if (');
-    assert.ok(lastIfIdx !== -1, 'There must be an if-guard before the auto assignment');
-    const guardExpr = before.substring(lastIfIdx, before.length);
-    assert.ok(
-        guardExpr.includes('!chat.topicId'),
-        `auto topic_assigned must be guarded by !chat.topicId, found: "${guardExpr.trim().slice(0, 100)}"`
-    );
+    assert.ok(fnBody.includes('if (!chat || chat.topicId) return'),
+        'assignment helper exits when the chat already has a topic');
 });
 
 test('manual topic_assigned is also guarded by !chat.topicId', () => {
@@ -589,33 +580,18 @@ test('topic_assigned auto and manual never share the same if-block in _handleTop
     const fnBody = appContent.substring(fnStart, fnEnd);
 
     // Count auto topic_assigned calls (excluding isOneOff)
-    const autoMatches = [...fnBody.matchAll(/assignMethod: 'auto'/g)];
-    // There should be exactly 2: one for isOneOff path, one for normal path
-    assert.ok(autoMatches.length >= 1, 'Should have at least one auto assignment in _handleTopicDetection');
+    assert.ok(fnBody.includes("assignMethod: 'auto'"), 'wrapper requests automatic assignment');
 
     // Confirm there is NO manual assignment inside _handleTopicDetection (manual is in sendMessage)
     assert.ok(!fnBody.includes("assignMethod: 'manual'"), '_handleTopicDetection should not contain manual assignment');
 });
 
 test('topic_assigned is only fired when chat has no existing topicId (one-per-chat guarantee)', () => {
-    // All three auto-assignment sites in _handleTopicDetection must be inside !chat.topicId guards
-    const fnStart = appContent.indexOf('async _handleTopicDetection(');
+    const fnStart = appContent.indexOf('async _assignTopicToChat(');
     const fnEnd = appContent.indexOf('\n  },\n', fnStart);
     const fnBody = appContent.substring(fnStart, fnEnd);
-
-    let searchIdx = 0;
-    while (true) {
-        const evtIdx = fnBody.indexOf("'topic_assigned'", searchIdx);
-        if (evtIdx === -1) break;
-        const before = fnBody.substring(0, evtIdx);
-        const lastIf = before.lastIndexOf('if (');
-        const guardSnippet = before.substring(lastIf);
-        assert.ok(
-            guardSnippet.includes('!chat.topicId'),
-            `topic_assigned at offset ${evtIdx} in _handleTopicDetection must be inside !chat.topicId guard`
-        );
-        searchIdx = evtIdx + 1;
-    }
+    assert.ok(fnBody.includes('if (!chat || chat.topicId) return'));
+    assert.ok(fnBody.includes("'topic_assigned'"), 'helper owns topic assignment logging');
 });
 
 // ─── Privacy: no user content in logs ────────────────────────────────────────
@@ -663,15 +639,16 @@ test('goal_saved logs stage evolve', () => {
         'Should include stage evolve');
 });
 
-test('goal_saved logs initiative system', () => {
+test('goal_saved logs initiative user', () => {
     const ctx = getEventContext(sidebarContent, 'goal_saved');
-    assert.ok(ctx.includes("initiative: 'system'"), 'goal_saved should include initiative system');
+    assert.ok(ctx.includes("initiative: 'user'"), 'goal_saved should include initiative user');
 });
 
 test('goal_question_asked uses stage evolve or construct by surface', () => {
     const evolve = sidebarContent.includes("stage: 'evolve'") && sidebarContent.includes("'goal_question_asked'");
     assert.ok(evolve, 'Should include stage evolve');
-    assert.ok(sidebarContent.includes("stage: 'construct'"), 'Construct Ask uses stage construct');
+    assert.ok(sidebarContent.includes("askMode: 'fill_input'"), 'Ask here logs fill_input');
+    assert.ok(sidebarContent.includes("askMode: 'new_chat'"), 'Ask in new chat logs new_chat');
 });
 
 test('current_profile_edited does not log content values', () => {
@@ -750,7 +727,7 @@ test('renames: old evolve events gone, new names present', () => {
 
 test('payload spot-assertions: goal_saved initiative, label origin, nGoals, replay', () => {
     const saved = getEventContext(sidebarContent, 'goal_saved');
-    assert.ok(saved.includes("initiative: 'system'"), 'goal_saved includes initiative: system');
+    assert.ok(saved.includes("initiative: 'user'"), 'goal_saved includes initiative: user');
     const applied = getEventContext(appContent, 'text_label_applied');
     assert.ok(/origin\s*:/.test(applied), 'text_label_applied includes origin:');
     const included = getEventContext(appContent, 'construct_included_in_chat');
@@ -777,7 +754,7 @@ test('UI structure: Apply remnants gone; Construct owns goals; Evolve fold gone'
 test('mark.anno highlight has no underline and lowered alpha', () => {
     const start = stylesCss.indexOf('mark.anno {');
     assert.ok(start !== -1, 'mark.anno rule exists');
-    const end = stylesCss.indexOf('/* ── Label popover', start);
+    const end = stylesCss.indexOf('.hl-pending', start);
     const block = stylesCss.slice(start, end > start ? end : start + 400);
     assert.ok(!/text-decoration\s*:\s*underline/.test(block), 'no text-decoration underline');
     assert.ok(!/border-bottom\s*:\s*(?!none)/.test(block.replace(/border-bottom:\s*none;?/g, '')),

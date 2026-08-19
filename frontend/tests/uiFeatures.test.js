@@ -97,13 +97,19 @@ test('HTML has section-future with directionCards', () => {
     assert.ok(!htmlContent.includes('id="goalsList"'), 'Evolve goals fold removed');
     assert.ok(htmlContent.includes('id="addGoalInput"') && htmlContent.includes('constructGoals'),
         'Add-goal input lives in Construct');
+    assert.ok(htmlContent.includes('status-section-hint') && htmlContent.includes('what you want to work toward'),
+        'Goals section has a one-line usage hint');
+    assert.ok(htmlContent.includes('temporal-topic-name') && htmlContent.includes('id="currentTopicName"'),
+        'Topic name uses the emphasized topic-name class');
 });
 
-test('HTML has temporal breadcrumb with Construct/Evolve crumbs', () => {
-    assert.ok(htmlContent.includes('data-phase="construct"'),
-        'index.html should have construct temporal crumb');
-    assert.ok(htmlContent.includes('data-phase="evolve"'),
-        'index.html should have evolve temporal crumb');
+test('sidebar header omits Construct/Evolve crumbs', () => {
+    assert.ok(!htmlContent.includes('temporal-breadcrumb'),
+        'Construct · Evolve crumbs should be removed from the Personal Context header');
+    assert.ok(!htmlContent.includes('data-phase="construct"'),
+        'construct crumb should be removed');
+    assert.ok(!htmlContent.includes('data-phase="evolve"'),
+        'evolve crumb should be removed');
     assert.ok(!htmlContent.includes('data-phase="apply"'),
         'Apply crumb should be removed');
 });
@@ -348,11 +354,13 @@ test('suggested goal cards are not draggable', () => {
         'Suggested goal cards should not be draggable');
 });
 
-test('evolve cards tag saved vs suggested; expandable question on every card', () => {
-    assert.ok(sidebarContent.includes('goal-status-tag') && sidebarContent.includes('tag-saved'),
-        'Cards should show a Saved tag when already saved');
+test('evolve cards show only unsaved suggestions with two ask actions', () => {
+    assert.ok(!sidebarContent.includes('tag-saved'),
+        'Saved duplicate cards are removed from Evolve');
     assert.ok(sidebarContent.includes('tag-suggested'),
         'Cards should show a Suggested tag when not saved');
+    assert.ok(sidebarContent.includes('goal-ask-here-btn') && sidebarContent.includes('goal-ask-new-btn'),
+        'Suggested cards expose both ask actions');
     assert.ok(sidebarContent.includes('goal-card-body') && sidebarContent.includes('is-expanded'),
         'Cards expand to reveal a question');
     assert.ok(!sidebarContent.includes('saved-goals-fold'),
@@ -570,15 +578,15 @@ test('_moveChat updates topicId and cleans up empty topics', () => {
         '_moveChat should log chat_moved event');
 });
 
-test('move dropdown excludes current topic and Unassigned', () => {
+test('move dropdown excludes current topic and one-time bucket', () => {
     const dropdownFn = appContent.substring(
         appContent.indexOf('_showMoveDropdown('),
         appContent.indexOf('_moveChat(chatId,')
     );
     assert.ok(dropdownFn.includes("t.id !== currentTopicId"),
         'Dropdown should filter out current topic');
-    assert.ok(dropdownFn.includes("t.name !== 'Unassigned'"),
-        'Dropdown should filter out Unassigned');
+    assert.ok(dropdownFn.includes('!this._isOneTimeTopic(t.id)'),
+        'Dropdown should filter out the one-time bucket');
 });
 
 test('_showMoveDropdown references moveChatPopover (not moveChatDialog)', () => {
@@ -1066,6 +1074,49 @@ test('newChat resets TopicSuggester', () => {
         'newChat should reset picker display');
 });
 
+test('all chat exit paths route through conservative refresh helper', () => {
+    const calls = appContent.match(/this\._onExitChat\(prevChatId\)/g) || [];
+    assert.ok(calls.length >= 5,
+        'new chat, one-time chat, both context links, and chat-list switching call _onExitChat');
+    assert.ok(appContent.includes("Sidebar.refresh('chat_exit')"),
+        'exit helper records the chat_exit refresh trigger');
+});
+
+test('sendMessage pins async work to its originating chat', () => {
+    const start = appContent.indexOf('async sendMessage()');
+    const end = appContent.indexOf('// ── Free-text selection annotations', start);
+    const block = appContent.slice(start, end);
+    assert.ok(block.includes('const sendChatId = this.currentChatId'));
+    assert.ok(block.includes('Storage.addMessage(sendChatId, assistantMsg)'));
+    assert.ok(block.includes('_handleTopicDetection(evt.topic, sendChatId)'));
+    assert.ok(block.includes('this.currentChatId === sendChatId'));
+});
+
+test('background topic assignment does not replace the visible sidebar', () => {
+    const start = appContent.indexOf('async _assignTopicToChat(');
+    const end = appContent.indexOf('async _handleTopicDetection(', start);
+    const block = appContent.slice(start, end);
+    assert.ok(block.includes('this.currentChatId === chatId'));
+});
+
+test('Evolve Save waits for a generated question', () => {
+    const start = sidebarContent.indexOf('_createSuggestedGoalCard(');
+    const end = sidebarContent.indexOf('_renderSuggestedGoals(', start);
+    const block = sidebarContent.slice(start, end);
+    assert.ok(block.includes('const q = await getQuestion()'));
+    assert.ok(block.includes('d.exampleQuestion = q'));
+    assert.ok(block.indexOf('d.exampleQuestion = q') < block.indexOf('this._saveSuggestedGoal(d)'));
+});
+
+test('one-time label flush resolves and clears the active chat bucket', () => {
+    const start = sidebarContent.indexOf('_flushDirtyLabels() {');
+    const end = sidebarContent.indexOf('/** Collect annotations', start);
+    const block = sidebarContent.slice(start, end);
+    assert.ok(block.includes('Storage.getCurrentChatId()'));
+    assert.ok(block.includes('activeChat?.topicId || this.currentTopicId'));
+    assert.ok(block.includes('App._isOneTimeTopic(topicId)'));
+});
+
 test('sendMessage hides topic suggestion and picker', () => {
     const startIdx = appContent.indexOf('async sendMessage()');
     const sendFn = appContent.substring(startIdx, startIdx + 5000);
@@ -1256,7 +1307,7 @@ test('_initStatusUpdate clears _labelsDirty', () => {
 // -- refresh() clears _labelsDirty --
 
 test('refresh() clears _labelsDirty before fetch', () => {
-    const fnStart = sidebarContent.indexOf('async refresh() {');
+    const fnStart = sidebarContent.indexOf("async refresh(trigger = 'manual') {");
     assert.ok(fnStart >= 0, 'Should find refresh() definition');
     const fnBlock = sidebarContent.substring(fnStart, fnStart + 1600);
     assert.ok(fnBlock.includes('this._labelsDirty = false'),
@@ -1517,7 +1568,7 @@ test('storage.js has _stripAttachmentBase64 migration method', () => {
 test('_stripAttachmentBase64 is called from _getAll on first load', () => {
     const getAllStart = storageContent.indexOf('_getAll()');
     assert.ok(getAllStart >= 0, 'Should find _getAll definition');
-    const getAllBlock = storageContent.substring(getAllStart, getAllStart + 600);
+    const getAllBlock = storageContent.substring(getAllStart, getAllStart + 1000);
     assert.ok(getAllBlock.includes('_stripAttachmentBase64'),
         '_getAll should call _stripAttachmentBase64 migration');
 });

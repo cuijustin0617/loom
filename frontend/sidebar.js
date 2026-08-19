@@ -43,14 +43,17 @@ const Sidebar = {
       badge.style.background = tc.light;
       badge.style.color = tc.color;
 
-      const currentName = document.getElementById('currentTopicName');
-      if (currentName) currentName.textContent = topic.name;
+      this._applyTopicColor(topic);
 
       this._activateListTab();
 
       if (topic.sidebarCache) {
         this.currentData = topic.sidebarCache;
         this.render(topic.sidebarCache, topic);
+        return;
+      }
+      if (topic.pendingProposal) {
+        this._renderStatus(topic.statusSummary || null);
         return;
       }
     }
@@ -65,11 +68,24 @@ const Sidebar = {
     if (details.length > 0) App._renderBaselineDetails(details);
   },
 
+  _applyTopicColor(topic) {
+    const el = document.getElementById('currentTopicName');
+    const color = topic ? Utils.getTopicColor(topic).color : '';
+    if (el) {
+      el.textContent = topic ? topic.name : '';
+      el.style.color = color;
+    }
+    document.querySelectorAll('.temporal-phase-dot').forEach(dot => {
+      dot.style.background = color;
+    });
+  },
+
   hide() {
     this.currentTopicId = null;
     document.getElementById('sectionCurrent').style.display = 'none';
     document.getElementById('sectionFuture').style.display = 'none';
     document.getElementById('topicBadge').style.display = 'none';
+    this._applyTopicColor(null);
 
     if (STUDY_CONDITION === 'baseline') {
       document.getElementById('sidebarEmpty').style.display = 'none';
@@ -81,10 +97,11 @@ const Sidebar = {
     }
   },
 
-  async refresh() {
+  async refresh(trigger = 'manual') {
     if (!this.currentTopicId) return;
     const topic = Storage.getTopic(this.currentTopicId);
     if (!topic) return;
+    StudyLog.event('status_refresh_triggered', { topicId: topic.id, trigger });
 
     const chatId = Storage.getCurrentChatId();
     const messages = Storage.getMessages(chatId).map(m => ({
@@ -123,12 +140,16 @@ const Sidebar = {
           count: data.newDirections.length,
         });
       }
-      this.currentData = data;
-      this.render(data, topic);
-
       const freshTopic = Storage.getTopic(topic.id);
       if (freshTopic) {
         this._markAnnotationsFlushed(freshTopic, pendingAnnos);
+        if (this.currentTopicId === topic.id) {
+          this.currentData = data;
+          this.render(data, freshTopic, trigger);
+        } else if (data.statusUpdate) {
+          this._stageProposal(freshTopic, data.statusUpdate, trigger);
+          delete data.statusUpdate;
+        }
         freshTopic.sidebarCache = data;
         Storage.saveTopic(freshTopic);
       }
@@ -138,13 +159,13 @@ const Sidebar = {
     }
   },
 
-  render(data, topic) {
+  render(data, topic, trigger = 'new_messages') {
     if (!topic) topic = Storage.getTopic(this.currentTopicId);
     if (!topic) return;
 
     // Current: stage system status updates as a proposal — never silently rewrite
     if (data.statusUpdate) {
-      this._stageProposal(topic, data.statusUpdate, 'new_messages');
+      this._stageProposal(topic, data.statusUpdate, trigger);
       delete data.statusUpdate; // consumed — don't re-stage from sidebarCache on next show()
       Storage.saveTopic(topic);
     }
@@ -235,11 +256,8 @@ const Sidebar = {
           <button class="status-item-btn status-item-del" title="Remove">×</button>
         </span></div>`;
     }
-    const src = item.source || null;
-    const srcBadge = src === 'label-derived' ? '<span class="status-item-source">from your labels</span>'
-      : src === 'user' ? '<span class="status-item-source">you wrote this</span>' : '';
     return `<div class="status-item status-bullet" data-section="overview" data-idx="${i}" data-item-type="bullet">
-      <span class="status-item-text">${Utils.escapeHtml(item.text)}${srcBadge}</span>
+      <span class="status-item-text">${Utils.escapeHtml(item.text)}</span>
       <span class="status-item-actions">
         <button class="status-item-btn status-item-del" title="Remove">×</button>
       </span></div>`;
@@ -285,6 +303,7 @@ const Sidebar = {
     if (it.id) item.id = it.id;
     if (it.suggestionTitle) item.suggestionTitle = it.suggestionTitle;
     if (it.suggestionType) item.suggestionType = it.suggestionType;
+    if (it.savedQuestions) item.savedQuestions = it.savedQuestions;
     return item;
   },
 
@@ -296,15 +315,23 @@ const Sidebar = {
 
   _renderNormalGoalItem(g, i) {
     const item = this._normalizeGoalItem(g) || { text: '' };
-    const src = item.source || null;
-    const srcBadge = src === 'label-derived' ? '<span class="status-item-source">from your labels</span>'
-      : src === 'user' ? '<span class="status-item-source">you wrote this</span>' : '';
-    return `<div class="status-item status-bullet" data-section="goals" data-idx="${i}" data-goal-id="${Utils.escapeHtml(item.id || '')}">
-      <span class="status-item-text">${Utils.escapeHtml(item.text)}${srcBadge}</span>
-      <span class="status-item-actions">
-        <button class="status-item-btn status-item-ask" title="Ask">Ask</button>
-        <button class="status-item-btn status-item-del" title="Remove">×</button>
-      </span></div>`;
+    const questions = Array.isArray(item.savedQuestions) ? item.savedQuestions : [];
+    const questionRows = questions.map(q => `
+      <div class="goal-saved-question-row">
+        <span>${Utils.escapeHtml(q.text || '')}</span>
+        <button class="status-item-btn saved-question-ask" type="button">Ask</button>
+      </div>`).join('');
+    const details = questions.length
+      ? `<details class="goal-saved-questions"><summary>${questions.length} saved question${questions.length === 1 ? '' : 's'}</summary>${questionRows}</details>`
+      : '';
+    return `<div class="status-goal-wrap">
+      <div class="status-item status-goal" data-section="goals" data-idx="${i}" data-goal-id="${Utils.escapeHtml(item.id || '')}">
+        <span class="status-item-text">${Utils.escapeHtml(item.text)}</span>
+        <span class="status-item-actions">
+          <button class="status-item-btn status-item-del" title="Remove">×</button>
+        </span>
+      </div>${details}
+    </div>`;
   },
 
   _renderSuggestionGoals(goals, proposal, editMode) {
@@ -327,12 +354,12 @@ const Sidebar = {
       if (removeSet.has(key)) {
         const chIdx = changes.findIndex(c => c.kind === 'goal_remove' && keyOf(c, 'text') === key);
         if (editMode) {
-          html += `<div class="status-item status-bullet suggestion-edit-row" data-change-idx="${chIdx}" data-field="goals">
+          html += `<div class="status-item status-goal suggestion-edit-row" data-change-idx="${chIdx}" data-field="goals">
             <textarea class="status-inline-edit proposal-edit-input" rows="1" disabled>${Utils.escapeHtml(text)}</textarea>
             <button class="status-item-btn proposal-drop-change" data-change-idx="${chIdx}" title="Remove this change">×</button>
           </div>`;
         } else {
-          html += `<div class="status-item status-bullet suggestion-item" data-change-idx="${chIdx}">
+          html += `<div class="status-item status-goal suggestion-item" data-change-idx="${chIdx}">
             <span class="status-item-text"><span class="diff-del">${Utils.escapeHtml(text)}</span></span>
             ${this._proposalLineActionsHtml(chIdx)}
           </div>`;
@@ -340,12 +367,12 @@ const Sidebar = {
       } else if (edit) {
         const chIdx = changes.findIndex(c => c.kind === 'goal_edit' && keyOf(c, 'oldText') === key);
         if (editMode) {
-          html += `<div class="status-item status-bullet suggestion-edit-row" data-change-idx="${chIdx}" data-field="goals">
+          html += `<div class="status-item status-goal suggestion-edit-row" data-change-idx="${chIdx}" data-field="goals">
             <textarea class="status-inline-edit proposal-edit-input" rows="1">${Utils.escapeHtml(edit.text || '')}</textarea>
             <button class="status-item-btn proposal-drop-change" data-change-idx="${chIdx}" title="Remove this change">×</button>
           </div>`;
         } else {
-          html += `<div class="status-item status-bullet suggestion-item" data-change-idx="${chIdx}">
+          html += `<div class="status-item status-goal suggestion-item" data-change-idx="${chIdx}">
             <span class="status-item-text">${this._renderWordDiffHtml(edit.oldText, edit.text)}</span>
             ${this._proposalLineActionsHtml(chIdx)}
           </div>`;
@@ -357,12 +384,12 @@ const Sidebar = {
 
     addChanges.forEach(({ c, i }) => {
       if (editMode) {
-        html += `<div class="status-item status-bullet suggestion-edit-row" data-change-idx="${i}" data-field="goals">
+        html += `<div class="status-item status-goal suggestion-edit-row" data-change-idx="${i}" data-field="goals">
           <textarea class="status-inline-edit proposal-edit-input" rows="1">${Utils.escapeHtml(c.text || '')}</textarea>
           <button class="status-item-btn proposal-drop-change" data-change-idx="${i}" title="Remove this change">×</button>
         </div>`;
       } else {
-        html += `<div class="status-item status-bullet suggestion-item" data-change-idx="${i}">
+        html += `<div class="status-item status-goal suggestion-item" data-change-idx="${i}">
           <span class="status-item-text"><span class="diff-add">${Utils.escapeHtml(c.text || '')}</span></span>
           ${this._proposalLineActionsHtml(i)}
         </div>`;
@@ -493,7 +520,7 @@ const Sidebar = {
     if (e.label === 'comment') {
       return ` · from your comment on "${snippet}"`;
     }
-    const labelSymbols = { clear: '✓', unsure: '?', interested: '♥', not_relevant: '✗' };
+    const labelSymbols = { important: '★', clear: '✓', unsure: '?', not_relevant: '✗' };
     const sym = labelSymbols[e.label] || '';
     return ` · from your ${sym} on "${snippet}"`;
   },
@@ -710,10 +737,23 @@ const Sidebar = {
         effective.goals = proposedGoals;
       }
     }
-    const changes = this._diffStatus(topic.statusSummary || { overview: [], goals: [] }, effective);
+    let changes = this._diffStatus(topic.statusSummary || { overview: [], goals: [] }, effective);
     if (changes.length === 0) {
       StudyLog.event('proposal_empty', { stage: 'construct', initiative: 'mixed', surface: 'sidebar', topicId: topic.id, trigger, ...this._proposalLogPayload(changes) });
       return false;
+    }
+    const MAX_PROPOSAL_CHANGES = 6;
+    if (changes.length > MAX_PROPOSAL_CHANGES) {
+      const originalCount = changes.length;
+      changes = changes.slice(0, MAX_PROPOSAL_CHANGES);
+      StudyLog.event('proposal_truncated', {
+        stage: 'construct',
+        surface: 'sidebar',
+        topicId: topic.id,
+        trigger,
+        originalCount,
+        keptCount: MAX_PROPOSAL_CHANGES,
+      });
     }
     if (topic.pendingProposal) {
       StudyLog.event('proposal_superseded', { stage: 'construct', initiative: 'mixed', surface: 'sidebar', topicId: topic.id, trigger, ...this._proposalLogPayload(topic.pendingProposal.changes) });
@@ -1045,37 +1085,10 @@ const Sidebar = {
     const containers = [this._getStatusContainer(), document.getElementById('constructGoalsList')].filter(Boolean);
 
     containers.forEach(container => {
-      container.querySelectorAll('.status-item .status-item-ask').forEach(btn => {
-        btn.addEventListener('click', async (e) => {
+      container.querySelectorAll('.saved-question-ask').forEach(btn => {
+        btn.addEventListener('click', (e) => {
           e.stopPropagation();
-          const item = btn.closest('.status-item');
-          const idx = parseInt(item.dataset.idx, 10);
-          const topic = this.currentTopicId ? Storage.getTopic(this.currentTopicId) : null;
-          const goal = topic && topic.statusSummary && topic.statusSummary.goals
-            ? topic.statusSummary.goals[idx] : null;
-          if (!goal) return;
-          btn.disabled = true;
-          try {
-            const title = this._goalText(goal);
-            const question = await this._fetchGoalQuestion(title, goal.exampleQuestion || '');
-            if (!question) {
-              Utils.showToast('Could not generate a question', 'error');
-              return;
-            }
-            goal.exampleQuestion = question;
-            Storage.saveTopic(topic);
-            StudyLog.event('goal_question_asked', {
-              stage: 'construct', initiative: 'user', surface: 'sidebar',
-              topicId: this.currentTopicId, goalId: goal.id,
-              goalSource: goal.source || 'user',
-              ...(goal.suggestionTitle ? { suggestionId: goal.suggestionTitle } : {}),
-            });
-            this._startGoalInNewChat({ title, question });
-          } catch (err) {
-            console.error('Goal question failed:', err);
-            Utils.showToast('Could not generate a question', 'error');
-          }
-          btn.disabled = false;
+          this._fillQuestionInput(btn.closest('.goal-saved-question-row')?.querySelector('span')?.textContent || '');
         });
       });
 
@@ -1144,6 +1157,16 @@ const Sidebar = {
       if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); input.blur(); }
       if (ev.key === 'Escape') { input.value = original; input.blur(); }
     });
+  },
+
+  _fillQuestionInput(question) {
+    const input = document.getElementById('chatInput');
+    if (!input) return;
+    input.value = (question || '').trim();
+    if (typeof Event !== 'undefined' && input.dispatchEvent) {
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    input.focus();
   },
 
   _getCurrentStatus() {
@@ -1319,15 +1342,14 @@ const Sidebar = {
     return { ...dir, exampleQuestion };
   },
 
-  _createSuggestedGoalCard(dir, directionIdx, opts = {}) {
+  _createSuggestedGoalCard(dir, directionIdx) {
     const d = this._normalizeDirection(dir);
     const topic = this.currentTopicId ? Storage.getTopic(this.currentTopicId) : null;
-    const matchedGoal = opts.goal || (topic ? this._findGoal(topic, d.title) : null);
-    const isSaved = opts.isSaved != null ? opts.isSaved : !!matchedGoal;
+    const matchedGoal = topic ? this._findGoal(topic, d.title) : null;
 
     const el = document.createElement('div');
     const typeClass = d.type === 'breadth' ? 'type-breadth' : d.type === 'depth' ? 'type-depth' : '';
-    el.className = `temporal-card direction-card suggested-goal-card is-expanded${typeClass ? ' ' + typeClass : ''}${isSaved ? ' is-saved' : ''}`;
+    el.className = `temporal-card direction-card suggested-goal-card is-expanded${typeClass ? ' ' + typeClass : ''}`;
     el.draggable = false;
 
     const reasonText = (d.reason || '').trim();
@@ -1342,32 +1364,34 @@ const Sidebar = {
     const provenance = provenanceParts.join(' · ');
     const qText = (matchedGoal && matchedGoal.exampleQuestion) || d.exampleQuestion || '';
 
-    const tagHtml = isSaved
-      ? `<span class="goal-status-tag tag-saved">Saved</span>`
-      : `<span class="goal-status-tag tag-suggested">Suggested</span>`;
-
     el.innerHTML = `
       <div class="goal-card-header-row">
         <svg class="goal-card-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="10" height="10">
           <polyline points="6 9 12 15 18 9"/>
         </svg>
-        ${tagHtml}
+        <span class="goal-status-tag tag-suggested">Suggested</span>
         <span class="temporal-card-title">${Utils.escapeHtml(d.title || '')}</span>
       </div>
       ${provenance ? `<div class="direction-provenance">${Utils.escapeHtml(provenance)}</div>` : ''}
       <div class="goal-card-body">
         <div class="goal-try-asking">
-          <span class="goal-try-line">
-            <span class="goal-try-prefix">Try asking:</span>
-            <span class="temporal-card-question goal-example-question">${Utils.escapeHtml(qText)}</span>
-          </span>
-          <button class="goal-icon-btn goal-regen-btn" title="Another angle">↻</button>
-          <span class="temporal-card-actions">
-            ${isSaved
-              ? `<button class="goal-icon-btn intention-remove-btn" title="Remove goal">×</button>`
-              : `<button class="probe-btn direction-save-btn" title="Save goal">Save</button>
-                 <button class="goal-icon-btn direction-dismiss-btn" title="Dismiss">×</button>`}
-          </span>
+          <div class="goal-question-row">
+            <span class="goal-try-line">
+              <span class="goal-try-prefix">Try asking:</span>
+              <span class="temporal-card-question goal-example-question">${Utils.escapeHtml(qText)}</span>
+            </span>
+            <button class="goal-icon-btn goal-regen-btn" title="Another angle">↻</button>
+          </div>
+          <div class="goal-card-footer">
+            <div class="goal-ask-actions">
+              <button class="probe-btn goal-ask-here-btn" type="button">Ask here</button>
+              <button class="probe-btn goal-ask-new-btn" type="button">Ask in new chat</button>
+            </div>
+            <span class="temporal-card-actions">
+              <button class="probe-btn direction-save-btn" title="Save question">Save</button>
+              <button class="goal-icon-btn direction-dismiss-btn" title="Dismiss">×</button>
+            </span>
+          </div>
         </div>
       </div>
     `;
@@ -1377,17 +1401,11 @@ const Sidebar = {
       e.stopPropagation();
       const opening = !el.classList.contains('is-expanded');
       el.classList.toggle('is-expanded', opening);
-      if (opening) await this._ensureCardQuestion(el, d, matchedGoal, isSaved);
+      if (opening) await this._ensureCardQuestion(el, d, matchedGoal);
     };
     el.querySelector('.goal-card-header-row').addEventListener('click', toggleExpand);
 
     const saveBtn = el.querySelector('.direction-save-btn');
-    if (saveBtn) {
-      saveBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this._saveSuggestedGoal(d);
-      });
-    }
     const dismissBtn = el.querySelector('.direction-dismiss-btn');
     if (dismissBtn) {
       dismissBtn.addEventListener('click', (e) => {
@@ -1395,28 +1413,53 @@ const Sidebar = {
         this._dismissSuggestedGoal(d, el);
       });
     }
-    const removeBtn = el.querySelector('.intention-remove-btn');
-    if (removeBtn && matchedGoal) {
-      removeBtn.addEventListener('click', (e) => {
+    const getQuestion = async () => {
+      let q = (el.querySelector('.goal-example-question')?.textContent || '').trim();
+      if (!q) q = await this._ensureCardQuestion(el, d, matchedGoal);
+      if (!q) Utils.showToast('Could not generate a question', 'error');
+      return q;
+    };
+    if (saveBtn) {
+      saveBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        this._removeGoal(matchedGoal.id);
+        saveBtn.disabled = true;
+        try {
+          const q = await getQuestion();
+          if (!q) return;
+          d.exampleQuestion = q;
+          this._saveSuggestedGoal(d);
+        } finally {
+          if (el.isConnected) saveBtn.disabled = false;
+        }
       });
     }
-    el.querySelector('.goal-try-asking').addEventListener('click', async (e) => {
-      if (e.target.closest('button')) return;
+    el.querySelector('.goal-ask-here-btn').addEventListener('click', async (e) => {
       e.stopPropagation();
-      let q = (el.querySelector('.goal-example-question')?.textContent || '').trim();
-      if (!q) q = await this._ensureCardQuestion(el, d, matchedGoal, isSaved);
-      if (!q) {
-        Utils.showToast('Could not generate a question', 'error');
-        return;
-      }
+      const q = await getQuestion();
+      if (!q) return;
       StudyLog.event('goal_question_asked', {
         stage: 'evolve', initiative: 'user', surface: 'sidebar',
         topicId: this.currentTopicId, directionIdx,
         goalId: matchedGoal ? matchedGoal.id : null,
         goalSource: matchedGoal ? (matchedGoal.source || 'user') : 'inferred',
         suggestionId: d.title || null,
+        askMode: 'fill_input',
+        autoSend: false,
+      });
+      this._fillQuestionInput(q);
+    });
+    el.querySelector('.goal-ask-new-btn').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const q = await getQuestion();
+      if (!q) return;
+      StudyLog.event('goal_question_asked', {
+        stage: 'evolve', initiative: 'user', surface: 'sidebar',
+        topicId: this.currentTopicId, directionIdx,
+        goalId: matchedGoal ? matchedGoal.id : null,
+        goalSource: matchedGoal ? (matchedGoal.source || 'user') : 'inferred',
+        suggestionId: d.title || null,
+        askMode: 'new_chat',
+        autoSend: false,
       });
       this._startGoalInNewChat({ title: d.title, question: q });
     });
@@ -1442,15 +1485,15 @@ const Sidebar = {
       });
     }
 
-    if (!qText) this._ensureCardQuestion(el, d, matchedGoal, isSaved);
+    if (!qText) this._ensureCardQuestion(el, d, matchedGoal);
     return el;
   },
 
-  async _ensureCardQuestion(el, d, goal, isSaved) {
+  async _ensureCardQuestion(el, d, goal) {
     const qEl = el.querySelector('.goal-example-question');
     let q = (qEl && qEl.textContent || '').trim() || d.exampleQuestion || (goal && goal.exampleQuestion) || '';
     if (q) return q;
-    q = await this._fetchGoalQuestion(d.title, isSaved ? (goal && goal.exampleQuestion) : '');
+    q = await this._fetchGoalQuestion(d.title, goal && goal.exampleQuestion);
     if (q) {
       d.exampleQuestion = q;
       if (qEl) qEl.textContent = q;
@@ -1506,23 +1549,12 @@ const Sidebar = {
       .sort((a, b) => (order[a.type] ?? 2) - (order[b.type] ?? 2));
 
     dirContainer.innerHTML = '';
-    if (savedGoals.length === 0 && unsaved.length === 0) {
+    if (unsaved.length === 0) {
       dirContainer.innerHTML = `<p class="temporal-empty-hint">${emptyHint}</p>`;
       return;
     }
-    savedGoals.forEach((goal, idx) => {
-      const title = this._goalText(goal);
-      const match = normalized.find(d => (d.title || '').toLowerCase() === title.toLowerCase());
-      const dir = match || {
-        title,
-        exampleQuestion: goal.exampleQuestion || '',
-        type: goal.suggestionType || null,
-      };
-      const card = this._createSuggestedGoalCard(dir, idx, { isSaved: true, goal });
-      if (card && card.nodeType) dirContainer.appendChild(card);
-    });
     unsaved.forEach((dir, idx) => {
-      const card = this._createSuggestedGoalCard(dir, savedGoals.length + idx);
+      const card = this._createSuggestedGoalCard(dir, idx);
       if (card && card.nodeType) dirContainer.appendChild(card);
     });
   },
@@ -1554,25 +1586,44 @@ const Sidebar = {
 
   _saveSuggestedGoal(dir, opts = {}) {
     const topic = this.currentTopicId ? Storage.getTopic(this.currentTopicId) : null;
-    if (!topic || this._findGoal(topic, dir.title)) {
-      if (!opts.silent) this._renderEvolveSection(topic);
-      return;
-    }
+    if (!topic) return;
     this._ensureStatusShape(topic);
-    topic.statusSummary.goals.push({
-      id: 'goal_' + Utils.generateId(),
-      text: dir.title || '',
-      source: 'user',
-      suggestionTitle: dir.title || '',
-      suggestionType: dir.type || null,
-    });
+    let goal = this._findGoal(topic, dir.title);
+    if (!goal) {
+      goal = {
+        id: 'goal_' + Utils.generateId(),
+        text: dir.title,
+        source: 'user',
+        suggestionTitle: dir.title,
+        suggestionType: dir.type || null,
+        savedQuestions: [],
+      };
+      topic.statusSummary.goals.push(goal);
+      StudyLog.event('goal_saved', {
+        stage: 'evolve', initiative: 'user', surface: 'sidebar',
+        topicId: topic.id, suggestionTitle: dir.title, anchor: dir.anchor || null,
+      });
+    }
+    const q = (dir.exampleQuestion || '').trim();
+    if (q && !(goal.savedQuestions || []).some(saved => saved.text === q)) {
+      if (!Array.isArray(goal.savedQuestions)) goal.savedQuestions = [];
+      goal.savedQuestions.push({
+        id: 'q_' + Utils.generateId(),
+        text: q,
+        ts: Utils.timestamp(),
+      });
+      StudyLog.event('question_saved', {
+        stage: 'evolve',
+        initiative: 'user',
+        surface: 'sidebar',
+        topicId: topic.id,
+        goalId: goal.id,
+        suggestionId: dir.title || null,
+      });
+    }
     Storage.saveTopic(topic);
     this._renderStatus(topic.statusSummary);
-    this._renderEvolveSection(topic);
-    StudyLog.event('goal_saved', {
-      stage: 'evolve', initiative: 'system', surface: 'sidebar',
-      topicId: topic.id, suggestionTitle: dir.title, anchor: dir.anchor || null,
-    });
+    if (!opts.silent) this._renderEvolveSection(topic);
   },
 
   _dismissSuggestedGoal(dir, el) {
@@ -1706,11 +1757,19 @@ const Sidebar = {
     App.newChat();
     if (topicId) {
       App.selectedTopicId = topicId;
+      const chat = Storage.getChat(App.currentChatId);
+      if (chat) {
+        chat.topicId = topicId;
+        chat.lastActive = Utils.timestamp();
+        Storage.saveChat(chat);
+      }
       const topicSel = document.getElementById('topicSelect');
       if (topicSel) topicSel.value = topicId;
+      App._updateTopicPickerDisplay(topicId);
+      Sidebar.show(topicId);
     }
-    document.getElementById('chatInput').value = dir.question || dir.exampleQuestion || '';
-    App.sendMessage();
+    this._fillQuestionInput(dir.question || dir.exampleQuestion || '');
+    App._renderChatList();
     return App.currentChatId;
   },
 
@@ -1753,6 +1812,7 @@ const Sidebar = {
         }));
         const pendingAnnos = this._collectPendingAnnotations(topic);
         this._labelsDirty = false;
+      StudyLog.event('status_refresh_triggered', { topicId: topic.id, trigger: 'manual' });
         const resp = await fetch('/api/topic/status/update', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1998,11 +2058,18 @@ const Sidebar = {
   },
 
   _flushDirtyLabels() {
-    if (!this._labelsDirty || !this.currentTopicId) return;
-    const topic = Storage.getTopic(this.currentTopicId);
+    if (!this._labelsDirty) return;
+    const chatId = Storage.getCurrentChatId();
+    const activeChat = chatId ? Storage.getChat(chatId) : null;
+    const topicId = activeChat?.topicId || this.currentTopicId;
+    if (topicId && typeof App !== 'undefined' && App._isOneTimeTopic(topicId)) {
+      this._labelsDirty = false;
+      return;
+    }
+    if (!topicId) return;
+    const topic = Storage.getTopic(topicId);
     if (!topic) return;
 
-    const chatId = Storage.getCurrentChatId();
     const messages = Storage.getMessages(chatId).map(m => ({
       role: m.role, content: m.content,
     }));
@@ -2016,7 +2083,7 @@ const Sidebar = {
 
     this._labelsDirty = false;
     const summaries = Storage.getAllChatSummariesForTopic(topic.id);
-    const topicId = this.currentTopicId;
+    StudyLog.event('status_refresh_triggered', { topicId, trigger: 'labels' });
 
     fetch('/api/topic/status/update', {
       method: 'POST',

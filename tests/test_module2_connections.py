@@ -1117,7 +1117,8 @@ class TestEdgeCases:
             assert resp.status_code == 200
             stream_call = m.chat_stream.call_args
             system_prompt = stream_call.kwargs.get("system_prompt", "")
-            assert "{~" not in system_prompt
+            assert "{~CONNECTIONS~}" not in system_prompt
+            assert "{~HL~}" in system_prompt
 
     def test_summaries_with_extra_unknown_fields(self):
         """Extra fields in summaries should be ignored."""
@@ -1177,7 +1178,7 @@ class TestSameTopicFilteringJS:
         js = self._get_js()
         send_start = js.index('sameTopicSummaries')
         send_section = js[send_start:send_start + 400]
-        assert 'this.currentChatId' in send_section
+        assert 'sendChatId' in send_section
 
     def test_requires_summary_for_inclusion(self):
         js = self._get_js()

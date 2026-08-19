@@ -53,8 +53,15 @@ const Storage = {
       for (const key of Object.keys(defaults)) {
         if (!(key in parsed)) parsed[key] = defaults[key];
       }
-      if (Array.isArray(parsed.topics)) parsed.topics.forEach(t => this._migrateTopic(t));
-      if (this._stripAttachmentBase64(parsed)) {
+      let migrated = false;
+      if (Array.isArray(parsed.topics)) {
+        parsed.topics.forEach(t => {
+          if (t && t.name === 'Unassigned') migrated = true;
+          this._migrateTopic(t);
+        });
+      }
+      if (this._migrateAnnotations(parsed)) migrated = true;
+      if (this._stripAttachmentBase64(parsed) || migrated) {
         try { localStorage.setItem(this._KEY, JSON.stringify(parsed)); } catch { /* quota */ }
       }
       return parsed;
@@ -85,9 +92,32 @@ const Storage = {
     return changed;
   },
 
+  _migrateAnnotations(data) {
+    let changed = false;
+    const messages = data && data.messages && typeof data.messages === 'object'
+      ? data.messages : {};
+    Object.values(messages).forEach(chatMessages => {
+      if (!Array.isArray(chatMessages)) return;
+      chatMessages.forEach(msg => {
+        if (!msg || !Array.isArray(msg.annotations)) return;
+        msg.annotations.forEach(annotation => {
+          if (annotation && annotation.label === 'interested') {
+            annotation.label = 'important';
+            changed = true;
+          }
+        });
+      });
+    });
+    return changed;
+  },
+
   // Normalize a topic to the current schema. Idempotent; runs on every _getAll().
   _migrateTopic(topic) {
     if (!topic || typeof topic !== 'object') return topic;
+    if (topic.name === 'Unassigned') {
+      topic.name = 'One-time questions';
+      topic.oneTimeBucket = true;
+    }
     if (!Array.isArray(topic.statusHistory)) topic.statusHistory = [];
     if (topic.pendingProposal === undefined) topic.pendingProposal = null;
     if (!Array.isArray(topic.excludedChatIds)) topic.excludedChatIds = [];
@@ -436,7 +466,7 @@ const Storage = {
     return chat;
   },
 
-  createChat() {
+  createChat(opts = {}) {
     const chat = {
       id: 'chat_' + Utils.generateId(),
       topicId: null,
@@ -448,6 +478,7 @@ const Storage = {
       lastActive: Utils.timestamp(),
       summarized: false,
     };
+    if (opts.oneTime !== undefined) chat.oneTime = opts.oneTime;
     const data = this._getAll();
     data.chats.push(chat);
     data.currentChatId = chat.id;
