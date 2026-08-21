@@ -156,7 +156,10 @@ class TestStatusUpdatePrompt:
             annotations='- "backprop" → unsure',
         )
         assert "highlights" in result.lower() or "interested" in result.lower()
-        assert "not_relevant" in result or "Not relevant" in result
+        assert "Important" in result
+        assert "Unsure" in result
+        assert "not_relevant" not in result
+        assert "Not relevant" not in result
         assert "backprop" in result
 
 

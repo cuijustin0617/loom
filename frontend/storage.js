@@ -100,12 +100,19 @@ const Storage = {
       if (!Array.isArray(chatMessages)) return;
       chatMessages.forEach(msg => {
         if (!msg || !Array.isArray(msg.annotations)) return;
+        const next = [];
         msg.annotations.forEach(annotation => {
           if (annotation && annotation.label === 'interested') {
             annotation.label = 'important';
             changed = true;
           }
+          if (annotation && (annotation.label === 'clear' || annotation.label === 'not_relevant')) {
+            changed = true;
+            return;
+          }
+          next.push(annotation);
         });
+        if (next.length !== msg.annotations.length) msg.annotations = next;
       });
     });
     return changed;
@@ -120,6 +127,18 @@ const Storage = {
     }
     if (!Array.isArray(topic.statusHistory)) topic.statusHistory = [];
     if (topic.pendingProposal === undefined) topic.pendingProposal = null;
+    if (typeof topic.needsInitialUpdate !== 'boolean') {
+      const status = topic.statusSummary;
+      const overview = status && typeof status === 'object' && Array.isArray(status.overview)
+        ? status.overview : [];
+      const goals = status && typeof status === 'object' && Array.isArray(status.goals)
+        ? status.goals : [];
+      topic.needsInitialUpdate = !topic.sidebarCache
+        && topic.statusHistory.length === 0
+        && !(typeof status === 'string' && status.trim())
+        && overview.length === 0
+        && goals.length === 0;
+    }
     if (!Array.isArray(topic.excludedChatIds)) topic.excludedChatIds = [];
     if (typeof topic.statusVersionCounter !== 'number') {
       topic.statusHistory.forEach((snap, i) => {
@@ -395,6 +414,7 @@ const Storage = {
       statusVersionCounter: 0,
       currentVersion: 0,
       pendingProposal: null,
+      needsInitialUpdate: true,
       goals: [],
       excludedChatIds: [],
       dismissedGoals: [],
@@ -513,7 +533,39 @@ const Storage = {
   saveMessages(chatId, messages) {
     const data = this._getAll();
     data.messages[chatId] = messages;
-    this._saveAll(data);
+    return this._saveAll(data);
+  },
+
+  updateMessage(chatId, messageId, patch) {
+    const data = this._getAll();
+    const messages = data.messages[chatId] || [];
+    const idx = messages.findIndex(m => m && m.id === messageId);
+    if (idx < 0) return null;
+    messages[idx] = { ...messages[idx], ...(patch || {}) };
+    if (!this._saveAll(data)) return null;
+    return messages[idx];
+  },
+
+  truncateBeforeMessage(chatId, messageId) {
+    const data = this._getAll();
+    const messages = data.messages[chatId] || [];
+    const idx = messages.findIndex(m => m && m.id === messageId);
+    if (idx < 0) return null;
+    const target = JSON.parse(JSON.stringify(messages[idx]));
+    const removed = messages.slice(idx);
+    data.messages[chatId] = messages.slice(0, idx);
+    const chat = data.chats.find(c => c.id === chatId);
+    if (chat) {
+      chat.summary = '';
+      chat.userAsked = '';
+      chat.aiCovered = '';
+      chat.embedding = null;
+      chat.summarized = false;
+      chat.lastActive = Utils.timestamp();
+      if (!data.messages[chatId].some(m => m.role === 'user')) chat.title = 'New Chat';
+    }
+    if (!this._saveAll(data)) return null;
+    return { target, removed, index: idx };
   },
 
   // ── Current Chat ────────────────────────────────────────────────────────

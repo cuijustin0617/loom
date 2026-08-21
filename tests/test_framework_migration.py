@@ -199,7 +199,23 @@ class TestSerializeAnnotations:
         ])
         assert '"backprop" → important' in text
         assert 'comment: "I use this at work"' in text
-        assert '"GAN intro" → not relevant' in text
+        assert "GAN intro" not in text
+
+    def test_supported_labels_and_malformed_entries(self):
+        text = backend_main._serialize_annotations([
+            None,
+            "not a mapping",
+            {"spanText": "key detail", "label": "important"},
+            {"spanText": "unclear part", "label": "unsure"},
+            {"spanText": "", "label": "comment", "comment": "Unicode 日本語"},
+            {"spanText": "deprecated", "label": "clear"},
+            {"spanText": "unknown", "label": "made_up"},
+        ])
+        assert '"key detail" → important' in text
+        assert '"unclear part" → unsure' in text
+        assert 'comment: "Unicode 日本語"' in text
+        assert "deprecated" not in text
+        assert "unknown" not in text
 
 
 # ── Seed file isolation ───────────────────────────────────────────────────────

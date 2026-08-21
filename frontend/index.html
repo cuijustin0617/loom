@@ -101,7 +101,7 @@
     <main class="main-content" id="mainContent">
       <header class="chat-header" id="chatHeader">
         <span class="chat-title" id="chatTitle">New Chat</span>
-        <span class="topic-badge" id="topicBadge" style="display:none;"></span>
+        <button class="topic-badge" id="topicBadge" type="button" style="display:none;" aria-haspopup="menu"></button>
       </header>
 
       <div class="chat-messages" id="chatMessages"></div>
@@ -203,12 +203,12 @@
               <div class="status-section status-section-goals" id="constructGoalsSection">
                 <div class="status-section-label collapsible" data-section-toggle="goals">
                   <span class="section-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="8" height="8"><polyline points="6 9 12 15 18 9"/></svg></span>
-                  Goals
+                  User goals
                 </div>
-                <div class="status-section-hint">what you want to work toward</div>
+                <div class="status-section-hint">goals you set for this topic</div>
                 <div class="status-section-items" id="constructGoalsList" data-section-items="goals"></div>
                 <div class="add-intention-row add-goal-row">
-                  <input type="text" id="addGoalInput" class="add-intention-input" placeholder="Add a goal…" />
+                  <input type="text" id="addGoalInput" class="add-intention-input" placeholder="Add a user goal…" />
                   <button id="addGoalBtn" class="add-intention-btn" title="Add goal">+</button>
                 </div>
               </div>

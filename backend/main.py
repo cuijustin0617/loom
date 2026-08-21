@@ -361,11 +361,9 @@ def _serialize_annotations(annotations) -> str:
     if not annotations:
         return "(none)"
     label_names = {
-        "clear": "got it",
         "unsure": "unsure",
         "important": "important",
         "interested": "important",
-        "not_relevant": "not relevant",
         "comment": "comment",
     }
     lines = []
@@ -374,6 +372,8 @@ def _serialize_annotations(annotations) -> str:
             continue
         span = (a.get("spanText") or "").strip()
         label = a.get("label") or ""
+        if label not in label_names:
+            continue
         comment = (a.get("comment") or "").strip()
         if not span and not comment:
             continue
@@ -1565,13 +1565,13 @@ const CONSTRUCT = ['proposal_shown','proposal_accepted','proposal_edited','propo
   'topic_suggestion_accepted','topic_suggestion_dismissed','topic_created','topic_renamed','topic_assigned','topic_merge_confirmed',
   'construct_included_in_chat','goal_authored','version_restored','update_undone','label_highlight_shown',
   'label_highlight_confirmed','label_highlight_changed','label_highlight_dismissed','proposal_truncated',
-  'status_refresh_triggered'];
+  'status_refresh_triggered','message_edited'];
 const APPLY = ['context_card_shown','context_excluded_for_topic','context_exclusion_reverted','context_link_opened','connection_contested','connection_marker_hovered','connection_marker_clicked'];
 const EVOLVE = ['goal_saved','goal_dismissed','goal_modified',
   'goal_removed','goal_question_asked','directions_refreshed','directions_shuffled','question_saved'];
 const SCRUTABILITY = ['update_undone','version_restored','context_excluded_for_topic','connection_contested'];
 const TOPIC = ['topic_created','topic_renamed','topic_assigned','topic_merge_confirmed','topic_merge_drag',
-  'topic_classified_first','one_time_chat_started'];
+  'topic_classified_first','one_time_chat_started','topic_badge_reassigned'];
 
 function renderSummaryTable(events) {
   const users = [...new Set(events.map(e => e.userId))].sort();

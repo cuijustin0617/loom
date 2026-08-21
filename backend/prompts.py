@@ -159,7 +159,7 @@ Evidence, in order of authority:
 1. Comments the user wrote (comment annotations) — explicit statements; almost
    always produce an ADD or EDIT. Phrase as a fact about the user, never as a
    quote of the comment.
-2. Labels on specific spans (★ important / ✓ clear / ? unsure / ✗ not relevant)
+2. Labels on specific spans (★ important / ? unsure)
    — direct reactions; update the profile to reflect them.
 3. The user's own messages — what they explicitly stated or asked.
 
@@ -169,9 +169,7 @@ into profile bullets about the user — the user discussing a topic is not the
 user adopting it.
 
 - ★ Important (important): prioritize adding/updating overview bullets about that span. Legacy data may say interested with the same meaning.
-- ✓ Got it (clear): the user already understands that material — don't over-explain it later; you may note familiarity briefly
 - ? Unsure (unsure): note topics that need clarification in future responses
-- ✗ Not relevant (not_relevant): do NOT add that content to the overview
 - Comments (comment): these are explicit user statements about the quoted span. They should usually produce an overview ADD or EDIT grounded in the comment's content — phrase it as a profile fact about the user, not as a quote of the comment itself.
 
 Organize the overview as an ordered mix of short subtitle headers and bullets.
@@ -225,8 +223,8 @@ User's current profile:
 User highlights / labels on assistant responses:
 {annotations}
 
-Labels are direct evidence of interest/disinterest — suggestions should build on
-comment-labeled material and avoid ✗-labeled (not relevant) material.
+Labels are direct evidence from the user — suggestions should prioritize important
+material, respond to uncertainty, and build on comment-labeled material.
 What's already been covered (overview + past chats):
 {coverage}
 Recent conversation context:

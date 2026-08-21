@@ -305,6 +305,317 @@ await test('createTopic initializes statusSummary overview/goals empty arrays', 
     const { Storage } = makeEnv();
     const t = Storage.createTopic('New');
     assert.deepStrictEqual(plain(t.statusSummary), { overview: [], goals: [] });
+    assert.strictEqual(t.needsInitialUpdate, true);
+});
+
+await test('topic migration only marks truly empty uncached topics for an initial update', () => {
+    const { Storage } = makeEnv();
+    const empty = { id: 'empty', statusSummary: { overview: [], goals: [] } };
+    const populated = { id: 'populated', statusSummary: { overview: [{ text: 'Known' }], goals: [] } };
+    const cached = {
+        id: 'cached',
+        statusSummary: { overview: [], goals: [] },
+        sidebarCache: { statusUpdate: { overview: [], goals: [] } },
+    };
+    Storage._migrateTopic(empty);
+    Storage._migrateTopic(populated);
+    Storage._migrateTopic(cached);
+    assert.strictEqual(empty.needsInitialUpdate, true);
+    assert.strictEqual(populated.needsInitialUpdate, false);
+    assert.strictEqual(cached.needsInitialUpdate, false);
+});
+
+await test('initial topic update clears its marker on success and restores it on failure', async () => {
+    const { Storage, Sidebar, App } = makeEnv();
+    const topic = Storage.createTopic('Fresh');
+    App._isOneTimeTopic = () => false;
+    Sidebar.refresh = async trigger => {
+        assert.strictEqual(trigger, 'initial');
+        return true;
+    };
+    assert.strictEqual(await App._triggerInitialTopicUpdate(topic.id), true);
+    assert.strictEqual(Storage.getTopic(topic.id).needsInitialUpdate, false);
+
+    const failed = Storage.createTopic('Retry');
+    Sidebar.refresh = async () => false;
+    assert.strictEqual(await App._triggerInitialTopicUpdate(failed.id), false);
+    assert.strictEqual(Storage.getTopic(failed.id).needsInitialUpdate, true);
+});
+
+await test('Overview Markdown round-trips headers, bullets, Unicode, and punctuation', () => {
+    const { Sidebar } = makeEnv();
+    const overview = [
+        { type: 'header', text: 'Background' },
+        { type: 'bullet', text: 'Uses **Markdown** & 日本語', source: 'inferred' },
+    ];
+    const markdown = Sidebar._overviewToMarkdown(overview);
+    assert.strictEqual(markdown, '## Background\n- Uses **Markdown** & 日本語');
+    assert.deepStrictEqual(plain(Sidebar._parseOverviewMarkdown(markdown, overview)), overview);
+});
+
+await test('Overview Markdown parser drops blank lines and supports reordered plain bullets', () => {
+    const { Sidebar } = makeEnv();
+    const previous = [
+        { type: 'bullet', text: 'First', source: 'inferred' },
+        { type: 'bullet', text: 'Second', source: 'user' },
+    ];
+    const parsed = Sidebar._parseOverviewMarkdown('\n- Second\n\nFirst\n\n', previous);
+    assert.deepStrictEqual(plain(parsed), [
+        { type: 'bullet', text: 'Second', source: 'user' },
+        { type: 'bullet', text: 'First', source: 'inferred' },
+    ]);
+});
+
+await test('Overview Markdown parser preserves duplicate metadata in encounter order', () => {
+    const { Sidebar } = makeEnv();
+    const previous = [
+        { type: 'bullet', text: 'Same', source: 'inferred' },
+        { type: 'bullet', text: 'Same', source: 'user' },
+    ];
+    const parsed = Sidebar._parseOverviewMarkdown('- Same\n- Same', previous);
+    assert.deepStrictEqual(plain(parsed), previous);
+});
+
+await test('saving Overview Markdown snapshots exactly once and unchanged save is a no-op', () => {
+    const { Storage, Sidebar, loggedEvents } = makeEnv();
+    const topic = Storage.createTopic('ML');
+    topic.statusSummary.overview = [{ type: 'bullet', text: 'Old', source: 'inferred' }];
+    Storage.saveTopic(topic);
+    Sidebar.currentTopicId = topic.id;
+    Sidebar._renderStatus = () => {};
+
+    assert.strictEqual(Sidebar._saveOverviewMarkdown('- New'), true);
+    let saved = Storage.getTopic(topic.id);
+    assert.strictEqual(saved.statusHistory.length, 1);
+    assert.strictEqual(saved.statusHistory[0].trigger, 'overview_markdown_edit');
+    assert.deepStrictEqual(plain(saved.statusSummary.overview), [
+        { type: 'bullet', text: 'New', source: 'user' },
+    ]);
+    assert.strictEqual(Sidebar._saveOverviewMarkdown('- New'), false);
+    saved = Storage.getTopic(topic.id);
+    assert.strictEqual(saved.statusHistory.length, 1);
+    assert.strictEqual(lastOf(loggedEvents, 'current_profile_edited').data.editType, 'markdown');
+});
+
+await test('saving whitespace-only Overview Markdown deletes all items with one snapshot', () => {
+    const { Storage, Sidebar } = makeEnv();
+    const topic = Storage.createTopic('ML');
+    topic.statusSummary.overview = [{ type: 'bullet', text: '<script>alert(1)</script>', source: 'user' }];
+    Storage.saveTopic(topic);
+    Sidebar.currentTopicId = topic.id;
+    Sidebar._renderStatus = () => {};
+    Sidebar._saveOverviewMarkdown(' \n \t');
+    const saved = Storage.getTopic(topic.id);
+    assert.deepStrictEqual(plain(saved.statusSummary.overview), []);
+    assert.strictEqual(saved.statusHistory.length, 1);
+});
+
+await test('truncateBeforeMessage atomically removes target and later turns and invalidates summary', () => {
+    const { Storage } = makeEnv();
+    const chat = Storage.createChat();
+    chat.title = 'Original title';
+    chat.summary = 'old summary';
+    chat.userAsked = 'old ask';
+    chat.aiCovered = 'old answer';
+    chat.embedding = [1, 2];
+    chat.summarized = true;
+    Storage.saveChat(chat);
+    Storage.addMessage(chat.id, { id: 'u1', role: 'user', content: 'first' });
+    Storage.addMessage(chat.id, { id: 'a1', role: 'assistant', content: 'reply' });
+    Storage.addMessage(chat.id, { id: 'u2', role: 'user', content: 'second' });
+
+    const result = Storage.truncateBeforeMessage(chat.id, 'u2');
+    assert.strictEqual(result.target.id, 'u2');
+    assert.deepStrictEqual(plain(Storage.getMessages(chat.id).map(m => m.id)), ['u1', 'a1']);
+    const saved = Storage.getChat(chat.id);
+    assert.strictEqual(saved.summary, '');
+    assert.strictEqual(saved.userAsked, '');
+    assert.strictEqual(saved.aiCovered, '');
+    assert.strictEqual(saved.embedding, null);
+    assert.strictEqual(saved.summarized, false);
+    assert.strictEqual(saved.title, 'Original title');
+});
+
+await test('truncateBeforeMessage leaves persisted history intact when storage write fails', () => {
+    const { Storage } = makeEnv();
+    const chat = Storage.createChat();
+    Storage.addMessage(chat.id, { id: 'u1', role: 'user', content: 'first' });
+    Storage.addMessage(chat.id, { id: 'a1', role: 'assistant', content: 'reply' });
+    Storage._saveAll = () => false;
+    assert.strictEqual(Storage.truncateBeforeMessage(chat.id, 'u1'), null);
+    assert.deepStrictEqual(plain(Storage.getMessages(chat.id).map(m => m.id)), ['u1', 'a1']);
+});
+
+await test('truncateBeforeMessage handles a middle user turn and preserves earlier history', () => {
+    const { Storage } = makeEnv();
+    const chat = Storage.createChat();
+    ['u1', 'a1', 'u2', 'a2', 'u3'].forEach((id, index) => {
+        Storage.addMessage(chat.id, {
+            id,
+            role: id[0] === 'u' ? 'user' : 'assistant',
+            content: `message ${index}`,
+        });
+    });
+    const result = Storage.truncateBeforeMessage(chat.id, 'u2');
+    assert.deepStrictEqual(plain(Storage.getMessages(chat.id).map(m => m.id)), ['u1', 'a1']);
+    assert.deepStrictEqual(plain(result.removed.map(m => m.id)), ['u2', 'a2', 'u3']);
+});
+
+await test('message rewrite restores Construct checkpoint and clears downstream state', async () => {
+    const { Storage, Sidebar, App, loggedEvents, document } = makeEnv();
+    const topic = Storage.createTopic('ML');
+    topic.statusSummary = { overview: [{ text: 'After', source: 'inferred' }], goals: [{ text: 'Later goal' }] };
+    topic.pendingProposal = { changes: [{ kind: 'overview_add', text: 'stale' }] };
+    topic.sidebarCache = { statusUpdate: topic.statusSummary, newDirections: [] };
+    topic._flushedAnnotationIds = ['keep', 'drop'];
+    Storage.saveTopic(topic);
+    const chat = Storage.createChat();
+    chat.topicId = topic.id;
+    chat.summary = 'stale';
+    chat.embedding = [0.1];
+    Storage.saveChat(chat);
+    const checkpoint = {
+        topicId: topic.id,
+        statusSummary: { overview: [{ text: 'Before', source: 'user' }], goals: [] },
+    };
+    Storage.addMessage(chat.id, {
+        id: 'u1', role: 'user', content: 'old question', constructCheckpoint: checkpoint,
+        attachments: [{ name: 'notes.txt', mimeType: 'text/plain' }],
+    });
+    Storage.addMessage(chat.id, {
+        id: 'a1', role: 'assistant', content: 'old reply',
+        annotations: [{ id: 'drop', label: 'important', spanText: 'old' }],
+    });
+    App.currentChatId = chat.id;
+    App._renderChat = () => {};
+    Sidebar.show = () => {};
+    let sent = 0;
+    App.sendMessage = async () => { sent++; };
+
+    assert.strictEqual(await App._rewriteUserMessage('u1', 'new question', { confirmRewrite: false }), true);
+    assert.deepStrictEqual(plain(Storage.getMessages(chat.id)), []);
+    const savedTopic = Storage.getTopic(topic.id);
+    assert.strictEqual(savedTopic.statusSummary.overview[0].text, 'Before');
+    assert.strictEqual(savedTopic.pendingProposal, null);
+    assert.ok(!savedTopic.sidebarCache);
+    assert.deepStrictEqual(plain(savedTopic._flushedAnnotationIds), ['keep']);
+    assert.strictEqual(savedTopic.statusHistory.at(-1).trigger, 'message_edit_rollback');
+    assert.strictEqual(document.getElementById('chatInput').value, 'new question');
+    assert.strictEqual(App._messageRewriteMeta.attachments[0].name, 'notes.txt');
+    assert.strictEqual(sent, 1);
+    assert.strictEqual(lastOf(loggedEvents, 'message_edited').data.removedMessages, 2);
+});
+
+await test('message rewrite rejects empty, unchanged, and active-stream edits without truncating', async () => {
+    const { Storage, App } = makeEnv();
+    const chat = Storage.createChat();
+    Storage.addMessage(chat.id, { id: 'u1', role: 'user', content: 'same' });
+    App.currentChatId = chat.id;
+    App._renderChat = () => {};
+    assert.strictEqual(await App._rewriteUserMessage('u1', '   ', { confirmRewrite: false }), false);
+    assert.strictEqual(await App._rewriteUserMessage('u1', 'same', { confirmRewrite: false }), false);
+    App._sendInFlight = true;
+    assert.strictEqual(await App._rewriteUserMessage('u1', 'different', { confirmRewrite: false }), false);
+    assert.strictEqual(Storage.getMessages(chat.id).length, 1);
+});
+
+await test('message rewrite replaces only the visible query and preserves context prefixes', () => {
+    const { App } = makeEnv();
+    const original = '[My current status in "ML": Overview: prior]\n\nold visible query';
+    assert.strictEqual(
+        App._replaceVisibleUserQuery(original, 'new visible query'),
+        '[My current status in "ML": Overview: prior]\n\nnew visible query'
+    );
+});
+
+await test('topic reassignment round-trips regular and one-off state and updates current sidebar', () => {
+    const { Storage, Sidebar, App, loggedEvents, document } = makeEnv();
+    const first = Storage.createTopic('First');
+    const second = Storage.createTopic('Second');
+    const oneOff = App._getOrCreateOneTimeTopic();
+    const chat = Storage.createChat();
+    chat.topicId = first.id;
+    Storage.saveChat(chat);
+    App.currentChatId = chat.id;
+    let shown = null;
+    let hidden = 0;
+    Sidebar.show = id => { shown = id; };
+    Sidebar.hide = () => { hidden++; };
+
+    App._moveChat(chat.id, oneOff.id, first.id, { method: 'one_off' });
+    let saved = Storage.getChat(chat.id);
+    assert.strictEqual(saved.topicId, oneOff.id);
+    assert.strictEqual(saved.oneTime, true);
+    assert.strictEqual(hidden, 1);
+    assert.strictEqual(document.getElementById('topicBadge').textContent, 'One-off');
+
+    App._moveChat(chat.id, second.id, oneOff.id, { method: 'picker' });
+    saved = Storage.getChat(chat.id);
+    assert.strictEqual(saved.topicId, second.id);
+    assert.strictEqual(saved.oneTime, false);
+    assert.strictEqual(shown, second.id);
+    assert.strictEqual(document.getElementById('topicBadge').textContent, 'Second');
+    const event = lastOf(loggedEvents, 'topic_badge_reassigned');
+    assert.strictEqual(event.data.newTopicId, second.id);
+    assert.strictEqual(event.data.isOneOff, false);
+});
+
+await test('same-topic reassignment is a no-op', () => {
+    const { Storage, App, loggedEvents } = makeEnv();
+    const topic = Storage.createTopic('Same');
+    const chat = Storage.createChat();
+    chat.topicId = topic.id;
+    Storage.saveChat(chat);
+    App._moveChat(chat.id, topic.id, topic.id);
+    assert.strictEqual(loggedEvents.filter(e => e.type === 'chat_moved').length, 0);
+});
+
+await test('inline topic creation reuses duplicate names case-insensitively', () => {
+    const { Storage, App, loggedEvents } = makeEnv();
+    const existing = Storage.createTopic('Research Methods');
+    const reused = App._getOrCreateTopicByName('  research methods  ');
+    assert.strictEqual(reused.id, existing.id);
+    assert.strictEqual(loggedEvents.filter(e => e.type === 'topic_created').length, 0);
+    const created = App._getOrCreateTopicByName('New Direction');
+    assert.strictEqual(created.name, 'New Direction');
+    assert.strictEqual(loggedEvents.filter(e => e.type === 'topic_created').length, 1);
+});
+
+await test('annotation migration keeps supported labels and removes deprecated labels', () => {
+    const { Storage } = makeEnv();
+    const data = {
+        messages: {
+            c1: [{
+                annotations: [
+                    { id: 'a1', label: 'interested', spanText: 'legacy important' },
+                    { id: 'a2', label: 'clear', spanText: 'old clear' },
+                    { id: 'a3', label: 'not_relevant', spanText: 'old irrelevant' },
+                    { id: 'a4', label: 'unsure', spanText: 'questionable' },
+                    { id: 'a5', label: 'comment', spanText: 'note', comment: '<b>mine</b>' },
+                ],
+            }],
+        },
+    };
+    assert.strictEqual(Storage._migrateAnnotations(data), true);
+    assert.deepStrictEqual(
+        plain(data.messages.c1[0].annotations.map(a => [a.id, a.label])),
+        [['a1', 'important'], ['a4', 'unsure'], ['a5', 'comment']]
+    );
+    assert.strictEqual(data.messages.c1[0].annotations[2].comment, '<b>mine</b>');
+});
+
+await test('Evolve card keeps breadth/depth data internal with neutral markup', () => {
+    const { Sidebar } = makeEnv();
+    const card = Sidebar._createSuggestedGoalCard({
+        title: 'Explore adjacent systems',
+        type: 'breadth',
+        suggestedAt: '2026-08-20T00:00:00.000Z',
+        exampleQuestion: 'What adjacent system should I explore?',
+    }, 0);
+    assert.ok(card.className.includes('suggested-goal-card'));
+    assert.ok(!card.className.includes('type-breadth'));
+    assert.ok(!card.innerHTML.includes('broader'));
+    assert.ok(!card.innerHTML.includes('Suggested</span>'));
 });
 
 await test('one-time annotations clear dirty state without profile refresh', () => {
@@ -461,6 +772,75 @@ await test('_stageProposal caps oversized proposals and logs truncation', () => 
     assert.strictEqual(event.data.originalCount, 9);
     assert.strictEqual(event.data.keptCount, 6);
     assert.strictEqual(event.data.trigger, 'interval');
+});
+
+await test('suggested overview adds render in proposed order under their header', () => {
+    const { Sidebar } = makeEnv();
+    const current = [
+        { type: 'header', text: 'Background' },
+        { type: 'bullet', text: '23-year-old player' },
+        { type: 'header', text: 'Training Preferences' },
+        { type: 'bullet', text: 'Recovers from a fibula fracture' },
+    ];
+    const proposal = {
+        changes: [
+            { kind: 'overview_add', field: 'overview', itemType: 'header', text: 'Injury & Recovery' },
+            { kind: 'overview_add', field: 'overview', itemType: 'bullet', text: 'Currently focusing on seated drills' },
+        ],
+        statusUpdate: {
+            overview: [
+                { type: 'header', text: 'Background' },
+                { type: 'bullet', text: '23-year-old player' },
+                { type: 'header', text: 'Training Preferences' },
+                { type: 'header', text: 'Injury & Recovery' },
+                { type: 'bullet', text: 'Recovers from a fibula fracture' },
+                { type: 'bullet', text: 'Currently focusing on seated drills' },
+            ],
+        },
+    };
+    const html = Sidebar._renderSuggestionOverview(current, proposal, false);
+    const injury = html.indexOf('Injury &amp; Recovery');
+    const seated = html.indexOf('Currently focusing on seated drills');
+    const recovers = html.indexOf('Recovers from a fibula fracture');
+    const training = html.indexOf('Training Preferences');
+    assert.ok(injury >= 0 && seated >= 0 && recovers >= 0);
+    assert.ok(injury > training, 'new header follows the previous section');
+    assert.ok(recovers > injury, 'existing bullet moves under the new header in preview');
+    assert.ok(seated > injury, 'new bullet follows the new header, not the bottom dump');
+});
+
+await test('overview add inserts at proposed index rather than always appending', () => {
+    const { Storage, Sidebar } = makeEnv();
+    const topic = seedTopic(Storage, {
+        overview: [
+            { type: 'header', text: 'Background' },
+            { type: 'bullet', text: '23-year-old player' },
+            { type: 'header', text: 'Training Preferences' },
+            { type: 'bullet', text: 'Recovers from a fibula fracture' },
+        ],
+        goals: [],
+    });
+    Sidebar.currentTopicId = topic.id;
+    Sidebar._stageProposal(topic, {
+        overview: [
+            { type: 'header', text: 'Background' },
+            { type: 'bullet', text: '23-year-old player' },
+            { type: 'header', text: 'Training Preferences' },
+            { type: 'header', text: 'Injury & Recovery' },
+            { type: 'bullet', text: 'Recovers from a fibula fracture' },
+        ],
+        goals: [],
+    }, 'interval');
+    const headerAdd = topic.pendingProposal.changes.find(
+        c => c.kind === 'overview_add' && c.text === 'Injury & Recovery'
+    );
+    assert.ok(headerAdd);
+    Sidebar._applyChangeToSummary(topic.statusSummary, headerAdd, 'inferred');
+    const texts = topic.statusSummary.overview.map(it => it.text);
+    const headerAt = texts.indexOf('Injury & Recovery');
+    assert.ok(headerAt >= 0);
+    assert.ok(headerAt < texts.length - 1, 'header is not dumped at the end');
+    assert.strictEqual(texts[headerAt + 1], 'Recovers from a fibula fracture');
 });
 
 await test('per-line accept updates summary, shrinks changes; last accept clears proposal', () => {
@@ -764,6 +1144,109 @@ await test('history re-render flags context_card_shown replay: true without dupl
     assert.strictEqual(all.length, 2, 'one fresh + one replay, no extras');
     assert.strictEqual(all[1].data.replay, true);
     assert.ok(!all[0].data.replay);
+});
+
+await test('sidebar folds Evolve down to one card before Construct', () => {
+    const { Sidebar, document } = makeEnv();
+    const content = document.getElementById('sidebarContent');
+    const construct = document.getElementById('sectionCurrent');
+    const evolve = document.getElementById('sectionFuture');
+    content.clientHeight = 500;
+    construct.style.display = 'block';
+    evolve.style.display = 'block';
+    construct.offsetHeight = 280;
+    construct.offsetTop = 0;
+    evolve.offsetHeight = 300;
+    evolve.offsetTop = 296;
+    Sidebar._evolveOneCardMinHeight = () => 120;
+
+    Sidebar._layoutSidebarStack();
+    assert.strictEqual(evolve.style.maxHeight, '204px');
+    assert.strictEqual(construct.style.maxHeight || '', '');
+});
+
+await test('sidebar folds Construct only after Evolve is one complete card', () => {
+    const { Sidebar, document } = makeEnv();
+    const content = document.getElementById('sidebarContent');
+    const construct = document.getElementById('sectionCurrent');
+    const evolve = document.getElementById('sectionFuture');
+    content.clientHeight = 400;
+    construct.style.display = 'block';
+    evolve.style.display = 'block';
+    construct.offsetHeight = 280;
+    construct.offsetTop = 0;
+    evolve.offsetHeight = 300;
+    evolve.offsetTop = 296;
+    Sidebar._evolveOneCardMinHeight = () => 120;
+
+    Sidebar._layoutSidebarStack();
+    assert.strictEqual(evolve.style.maxHeight, '120px');
+    assert.strictEqual(construct.style.maxHeight, '264px');
+});
+
+await test('Construct fold scrolls Overview before Goals and keeps the Goals title', () => {
+    const { Sidebar, document } = makeEnv();
+    const construct = document.getElementById('sectionCurrent');
+    const goals = document.getElementById('constructGoalsSection');
+    const goalsList = document.getElementById('constructGoalsList');
+
+    const overviewItems = makeEl('div');
+    overviewItems.offsetHeight = 180;
+    overviewItems.scrollHeight = 180;
+    const overviewLabel = makeEl('div');
+    overviewLabel.offsetHeight = 20;
+    const overviewSlot = makeEl('div');
+    overviewSlot.offsetHeight = 0;
+    const overview = makeEl('div');
+    overview.querySelector = (sel) => {
+        if (String(sel).includes('status-section-items')) return overviewItems;
+        if (String(sel).includes('status-section-label')) return overviewLabel;
+        if (String(sel).includes('overview-ai-prompt-slot')) return overviewSlot;
+        return null;
+    };
+    construct.querySelector = (sel) => {
+        if (String(sel).includes('status-section-overview')) return overview;
+        return null;
+    };
+    const goalsLabel = makeEl('div');
+    goalsLabel.offsetHeight = 22;
+    const goalsHint = makeEl('div');
+    goalsHint.offsetHeight = 16;
+    const addRow = makeEl('div');
+    addRow.offsetHeight = 28;
+    goals.querySelector = (sel) => {
+        const s = String(sel);
+        if (s.includes('status-section-label')) return goalsLabel;
+        if (s.includes('status-section-hint')) return goalsHint;
+        if (s.includes('add-')) return addRow;
+        return null;
+    };
+    goalsList.offsetHeight = 80;
+    goalsList.scrollHeight = 80;
+
+    Sidebar._foldConstructTo(construct, 260);
+    assert.strictEqual(overviewItems.style.maxHeight, '94px');
+    assert.strictEqual(overviewItems.style.overflowY, 'auto');
+    assert.ok(!goalsList.style.maxHeight, 'Goals list should stay unfolded while Overview can still shrink');
+});
+
+await test('Evolve fold puts a scroll height on the cards list', () => {
+    const { Sidebar, document } = makeEnv();
+    const evolve = document.getElementById('sectionFuture');
+    const cards = document.getElementById('directionCards');
+    const header = makeEl('div');
+    header.offsetHeight = 28;
+    const subtitle = makeEl('div');
+    subtitle.offsetHeight = 16;
+    evolve.querySelector = (sel) => {
+        if (String(sel).includes('temporal-section-header')) return header;
+        if (String(sel).includes('temporal-section-subtitle')) return subtitle;
+        return null;
+    };
+    Sidebar._capEvolveTo(evolve, 160);
+    assert.strictEqual(evolve.style.maxHeight, '160px');
+    assert.strictEqual(cards.style.maxHeight, '116px');
+    assert.strictEqual(cards.style.overflowY, 'auto');
 });
 
 console.log(`\n═══════════════════════════════════`);

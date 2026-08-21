@@ -52,19 +52,31 @@ test('app.js defines annotation popover + apply/remove', () => {
   assert.ok(appSrc.includes('mark.anno'), 'anno mark selector');
 });
 
-test('quick labels cover four types plus comment', () => {
-  for (const label of ['important', 'clear', 'unsure', 'not_relevant', 'comment']) {
+test('quick labels are limited to Important, Unsure, and Comment', () => {
+  for (const label of ['important', 'unsure', 'comment']) {
     assert.ok(appSrc.includes(`data-label="${label}"`) || appSrc.includes(`'${label}'`),
       `should support label ${label}`);
   }
+  assert.ok(!appSrc.includes('data-label="clear"'), 'Got it action removed');
+  assert.ok(!appSrc.includes('data-label="not_relevant"'), 'Not relevant action removed');
   assert.ok(appSrc.includes('data-action="comment"'), 'Comment… action');
 });
 
-test('Important is first and visually selected by default', () => {
+test('Important is first but fresh manual selection has no active default', () => {
   const importantAt = appSrc.indexOf('data-label="important"');
-  const clearAt = appSrc.indexOf('data-label="clear"');
-  assert.ok(importantAt >= 0 && importantAt < clearAt, 'Important appears first');
-  assert.ok(appSrc.includes("existingAnno?.label || 'important'"), 'Important is default active label');
+  const unsureAt = appSrc.indexOf('data-label="unsure"');
+  assert.ok(importantAt >= 0 && importantAt < unsureAt, 'Important appears first');
+  assert.ok(appSrc.includes('existingAnno?.label || null'), 'fresh selection has no active label');
+  assert.ok(!appSrc.includes("existingAnno?.label || 'important'"), 'Important is not preselected');
+});
+
+test('AI suggested highlights open on hover and keep Important unconfirmed', () => {
+  assert.ok(appSrc.includes('pointerover'), 'hover opens suggested highlight popover');
+  assert.ok(appSrc.includes('_openAnnoPopoverForPending'), 'pending popover helper');
+  assert.ok(appSrc.includes("btn.classList.toggle('suggested'"), 'Important is marked suggested, not confirmed');
+  assert.ok(appSrc.includes('activeLabel = pending'), 'pending path does not pre-select Important as active');
+  assert.ok(!appSrc.includes("_dismissPendingHighlights('batch')"),
+    'sending a new message should leave earlier suggested highlights');
 });
 
 test('annotations stored on message.annotations', () => {
@@ -129,8 +141,9 @@ console.log('\n─── Styles ───');
 test('anno + label-popover styles present', () => {
   assert.ok(stylesSrc.includes('mark.anno'), 'anno mark');
   assert.ok(stylesSrc.includes('anno-important'), 'important style');
-  assert.ok(stylesSrc.includes('anno-not_relevant'), 'not_relevant style');
-  assert.ok(stylesSrc.includes('.label-popover'), 'popover');
+  assert.ok(stylesSrc.includes('.anno-comment-note'), 'persistent comment note style');
+  assert.ok(stylesSrc.includes('.hl-pending'), 'pending highlight');
+  assert.ok(stylesSrc.includes('.label-popover-btn.suggested'), 'unconfirmed Important hint');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

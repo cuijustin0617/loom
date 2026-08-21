@@ -83,6 +83,21 @@ test('HTML has section-current with statusStructured', () => {
         'index.html should have statusStructured');
 });
 
+test('Construct visibly labels goals as User goals', () => {
+    assert.ok(htmlContent.includes('User goals'), 'visible section label should say User goals');
+    assert.ok(htmlContent.includes('Add a user goal…'), 'add-goal placeholder should use User goals copy');
+    assert.ok(sidebarContent.includes('User goals you add will appear here.'),
+        'empty state should use User goals copy');
+});
+
+test('Overview Markdown editor expands a collapsed Overview and stays open for Save or Cancel', () => {
+    assert.ok(sidebarContent.includes("items.classList.remove('section-collapsed')"),
+        'opening the editor should reveal collapsed Overview items');
+    assert.ok(sidebarContent.includes('overview-markdown-save')
+        && sidebarContent.includes('overview-markdown-cancel'),
+        'editor has explicit Save and Cancel controls');
+});
+
 test('HTML has section-future with directionCards', () => {
     assert.ok(htmlContent.includes('id="sectionFuture"'),
         'index.html should have sectionFuture');
@@ -97,8 +112,8 @@ test('HTML has section-future with directionCards', () => {
     assert.ok(!htmlContent.includes('id="goalsList"'), 'Evolve goals fold removed');
     assert.ok(htmlContent.includes('id="addGoalInput"') && htmlContent.includes('constructGoals'),
         'Add-goal input lives in Construct');
-    assert.ok(htmlContent.includes('status-section-hint') && htmlContent.includes('what you want to work toward'),
-        'Goals section has a one-line usage hint');
+    assert.ok(htmlContent.includes('status-section-hint') && htmlContent.includes('goals you set for this topic'),
+        'User goals section has a one-line usage hint');
     assert.ok(htmlContent.includes('temporal-topic-name') && htmlContent.includes('id="currentTopicName"'),
         'Topic name uses the emphasized topic-name class');
 });
@@ -174,6 +189,17 @@ test('status update button uses loading class animation (like shuffle)', () => {
         'Should add loading class for spinner animation');
     assert.ok(sidebarContent.includes("btn.classList.remove('loading')"),
         'Should remove loading class after update');
+});
+
+test('new topics trigger their initial profile update after the first completed user turn', () => {
+    assert.ok(appContent.includes('completedTopic?.needsInitialUpdate'),
+        'completed first turn checks the new-topic marker');
+    assert.ok(appContent.includes('_triggerInitialTopicUpdate(completedTopic.id)'),
+        'new topic starts its initial update immediately');
+    assert.ok(appContent.includes("Sidebar.refresh('initial')"),
+        'initial update uses an explicit refresh trigger');
+    assert.ok(appContent.includes('this.msgCountSinceRefresh % 3 === 0'),
+        'established topics retain the three-message interval');
 });
 
 test('status-update-btn has loading animation style', () => {
@@ -279,13 +305,41 @@ test('overview field in Module 1 is collapsible', () => {
         'CSS should define section-collapsed items rule');
 });
 
-test('overview items have independent scroll container', () => {
+test('overview uses leftover sidebar space instead of a short inner scroll', () => {
     assert.ok(sidebarContent.includes('status-section-overview'),
         'sidebar render should tag overview section');
     assert.ok(cssContent.includes('.status-section-overview .status-section-items'),
-        'CSS should define independent overview scrolling');
-    assert.ok(cssContent.includes('max-height: 220px') && cssContent.includes('overflow-y: auto'),
-        'Overview section items should have max-height + overflow auto');
+        'CSS should define overview items');
+    const overviewRule = cssContent.slice(
+        cssContent.indexOf('.status-section-overview .status-section-items')
+    );
+    assert.ok(!overviewRule.slice(0, 180).includes('max-height: 220px'),
+        'Overview should not be capped at a short 220px fold');
+    const currentRule = cssContent.slice(cssContent.indexOf('.section-current {'));
+    assert.ok(currentRule.slice(0, 250).includes('flex: 0 0 auto'),
+        'Construct should size to content until the stack no longer fits');
+    const futureRule = cssContent.slice(cssContent.indexOf('.section-future {'));
+    assert.ok(!futureRule.slice(0, 280).includes('max-height: calc(100% - 96px)'),
+        'Evolve height should come from the one-card layout pass, not a CSS floor');
+    assert.ok(sidebarContent.includes('_layoutSidebarStack'),
+        'Sidebar should fold Evolve down to one complete card before folding Construct');
+    assert.ok(sidebarContent.includes('_evolveOneCardMinHeight'),
+        'Evolve min height should be one complete card plus chrome');
+    assert.ok(sidebarContent.includes('_foldConstructTo'),
+        'Construct fold should keep Goals visible and scroll Overview first');
+    const overviewItemsRule = cssContent.slice(
+        cssContent.indexOf('.status-section-overview .status-section-items')
+    );
+    assert.ok(overviewItemsRule.slice(0, 220).includes('overflow-y: auto'),
+        'Overview items should scroll when Construct is folded');
+    const cardsRule = cssContent.slice(cssContent.indexOf('.direction-cards {'));
+    assert.ok(cardsRule.slice(0, 160).includes('overflow-y: auto'),
+        'Evolve cards should scroll when Evolve is folded');
+    const goalsLabelRule = cssContent.slice(
+        cssContent.indexOf('.status-section-goals .status-section-label')
+    );
+    assert.ok(goalsLabelRule.slice(0, 180).includes('flex-shrink: 0'),
+        'Goals title should stay visible instead of folding away');
 });
 
 test('sidebar has no Concepts Traversed section (concepts removed)', () => {
@@ -357,8 +411,8 @@ test('suggested goal cards are not draggable', () => {
 test('evolve cards show only unsaved suggestions with two ask actions', () => {
     assert.ok(!sidebarContent.includes('tag-saved'),
         'Saved duplicate cards are removed from Evolve');
-    assert.ok(sidebarContent.includes('tag-suggested'),
-        'Cards should show a Suggested tag when not saved');
+    assert.ok(!sidebarContent.includes('tag-suggested'),
+        'Redundant Suggested tag should be removed');
     assert.ok(sidebarContent.includes('goal-ask-here-btn') && sidebarContent.includes('goal-ask-new-btn'),
         'Suggested cards expose both ask actions');
     assert.ok(sidebarContent.includes('goal-card-body') && sidebarContent.includes('is-expanded'),
@@ -500,18 +554,14 @@ test('subtitle "Personalized context modules" is removed', () => {
         'HTML should not contain "Personalized context modules" subtitle');
 });
 
-test('direction card breadth type has rgba border (subtle)', () => {
-    const breadthRule = cssContent.match(/\.temporal-card\.direction-card\.type-breadth\s*\{[^}]*border-left-color:\s*([^;]+)/);
-    assert.ok(breadthRule, 'Should find .type-breadth rule');
-    assert.ok(breadthRule[1].includes('rgba'),
-        `Breadth border should use rgba for subtlety, got: ${breadthRule[1]}`);
+test('direction card breadth type is not visually encoded', () => {
+    assert.ok(!cssContent.includes('.temporal-card.direction-card.type-breadth'),
+        'Breadth should not have a special card style');
 });
 
-test('direction card depth type has rgba border (subtle)', () => {
-    const depthRule = cssContent.match(/\.temporal-card\.direction-card\.type-depth\s*\{[^}]*border-left-color:\s*([^;]+)/);
-    assert.ok(depthRule, 'Should find .type-depth rule');
-    assert.ok(depthRule[1].includes('rgba'),
-        `Depth border should use rgba for subtlety, got: ${depthRule[1]}`);
+test('direction card depth type is not visually encoded', () => {
+    assert.ok(!cssContent.includes('.temporal-card.direction-card.type-depth'),
+        'Depth should not have a special card style');
 });
 
 test('directions prompt generates exactly breadth + depth directions', () => {
@@ -616,6 +666,17 @@ test('app.js closes popover on outside click', () => {
     const dropdownFn = appContent.substring(start, end);
     assert.ok(dropdownFn.includes('mousedown'),
         '_showMoveDropdown should add mousedown listener for outside-click close');
+});
+
+test('header topic badge is a keyboard-accessible reassignment control', () => {
+    assert.ok(htmlContent.includes('id="topicBadge"') && htmlContent.includes('aria-haspopup="menu"'),
+        'chat header has a topic menu button');
+    assert.ok(appContent.includes("document.addEventListener('keydown', closeOnKey)"),
+        'topic menu handles Escape');
+    assert.ok(appContent.includes("document.createElement('button')"),
+        'topic options use native buttons');
+    assert.ok(appContent.includes('move-topic-create-input'),
+        'topic menu supports inline topic creation');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1722,24 +1783,24 @@ test('direction prompt returns type field in each direction', () => {
         'Prompt return JSON should include "anchor" field');
 });
 
-test('sidebar.js _createSuggestedGoalCard merges type into provenance', () => {
+test('sidebar.js keeps direction type internal and out of provenance', () => {
     assert.ok(!sidebarContent.includes('direction-type-badge'),
         'sidebar.js should not render direction-type-badge');
-    assert.ok(sidebarContent.includes("'broader'") || sidebarContent.includes('"broader"'),
-        'sidebar.js should include broader type word in provenance');
-    assert.ok(sidebarContent.includes("'deeper'") || sidebarContent.includes('"deeper"'),
-        'sidebar.js should include deeper type word in provenance');
-    assert.ok(sidebarContent.includes('type-breadth') || sidebarContent.includes('type-depth'),
-        'sidebar.js should keep type class on suggested cards');
+    assert.ok(!sidebarContent.includes("provenanceParts.push('broader')"),
+        'sidebar.js should not show broader in provenance');
+    assert.ok(!sidebarContent.includes("provenanceParts.push('deeper')"),
+        'sidebar.js should not show deeper in provenance');
+    assert.ok(!sidebarContent.includes('type-breadth') && !sidebarContent.includes('type-depth'),
+        'sidebar.js should not attach visual type classes');
 });
 
-test('CSS has .type-breadth/.type-depth (no badge pills)', () => {
+test('CSS has no breadth/depth visual encoding', () => {
     assert.ok(!cssContent.includes('badge-breadth'),
         'CSS should not style badge-breadth pills');
-    assert.ok(cssContent.includes('type-breadth'),
-        'CSS should style breadth directions');
-    assert.ok(cssContent.includes('type-depth'),
-        'CSS should style depth directions');
+    assert.ok(!cssContent.includes('type-breadth'),
+        'CSS should not style breadth directions');
+    assert.ok(!cssContent.includes('type-depth'),
+        'CSS should not style depth directions');
 });
 
 test('sidebar.js shows unsaved suggested goals with breadth before depth', () => {

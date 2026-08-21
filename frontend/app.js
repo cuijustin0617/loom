@@ -646,6 +646,14 @@ const App = {
     document.getElementById('newTopicBtn').addEventListener('click', () => this._showTopicDialog());
     document.getElementById('topicCancelBtn').addEventListener('click', () => this._hideTopicDialog());
     document.getElementById('topicCreateBtn').addEventListener('click', () => this._createTopic());
+    const topicBadge = document.getElementById('topicBadge');
+    if (topicBadge) {
+      topicBadge.addEventListener('click', e => {
+        e.stopPropagation();
+        const chat = this.currentChatId ? Storage.getChat(this.currentChatId) : null;
+        if (chat) this._showMoveDropdown(topicBadge, chat.id, chat.topicId, { fromHeader: true });
+      });
+    }
 
     // View toggle
     document.querySelectorAll('.toggle-btn').forEach(btn => {
@@ -959,7 +967,27 @@ const App = {
     this.msgCountSinceRefresh = 0;
   },
 
+  async _triggerInitialTopicUpdate(topicId) {
+    const topic = topicId ? Storage.getTopic(topicId) : null;
+    if (!topic || !topic.needsInitialUpdate || this._isOneTimeTopic(topicId)) return false;
+    topic.needsInitialUpdate = false;
+    Storage.saveTopic(topic);
+    const updated = await Sidebar.refresh('initial');
+    if (!updated) {
+      const freshTopic = Storage.getTopic(topicId);
+      if (freshTopic) {
+        freshTopic.needsInitialUpdate = true;
+        Storage.saveTopic(freshTopic);
+      }
+    }
+    return updated;
+  },
+
   async sendMessage() {
+    if (this._sendInFlight) {
+      Utils.showToast('Please wait for the current response to finish.');
+      return;
+    }
     const input = document.getElementById('chatInput');
     let content = input.value.trim();
 
@@ -978,6 +1006,7 @@ const App = {
     const sendSelectedTopicId = this.selectedTopicId;
     const sendUseSearch = this.useSearch;
     const sendChatModel = Storage.getChatModel();
+    const rewriteMeta = this._messageRewriteMeta || null;
 
     // Pre-assign topic and inject status as context if a topic is selected
     if (sendSelectedTopicId) {
@@ -1009,19 +1038,26 @@ const App = {
       chatId: sendChatId,
       role: 'user',
       content: content,
-      contextBlock: null,
-      contextMeta: null,
+      contextBlock: rewriteMeta?.contextBlock || null,
+      contextMeta: rewriteMeta?.contextMeta || null,
       attachments: this.pendingAttachments.length > 0
         ? this.pendingAttachments.map(a => ({ name: a.name, mimeType: a.mimeType }))
-        : null,
+        : (rewriteMeta?.attachments || null),
+      constructCheckpoint: this._captureConstructCheckpoint(
+        Storage.getChat(sendChatId)?.topicId || sendSelectedTopicId
+      ),
       timestamp: Utils.timestamp(),
     };
+    this._sendInFlight = true;
     const saved = Storage.addMessage(sendChatId, userMsg);
     if (!saved) {
+      this._sendInFlight = false;
+      this._messageRewriteMeta = null;
       Utils.showToast('Storage full — could not save message. Try clearing old chats.', 'error');
       input.value = savedInput;
       return;
     }
+    this._messageRewriteMeta = null;
 
     input.value = '';
     input.style.height = 'auto';
@@ -1059,8 +1095,6 @@ const App = {
       this.pendingAttachments = [];
       this._renderAttachments();
     }
-
-    this._dismissPendingHighlights('batch');
 
     const messages = Storage.getMessages(sendChatId).map(m => ({
       role: m.role, content: m.content,
@@ -1100,6 +1134,7 @@ const App = {
               ...cls,
               assignMethod: 'pre_reply_classify',
             });
+            this._ensureMessageConstructCheckpoint(sendChatId, userMsg.id);
           }
         } catch (e) {
           console.warn('Pre-reply classification failed (continuing without topic):', e);
@@ -1286,7 +1321,11 @@ const App = {
         this.msgCountSinceRefresh++;
         const completedChat = Storage.getChat(sendChatId);
         if (STUDY_CONDITION === 'loom' && !this._isOneTimeTopic(completedChat?.topicId)) {
-          if (this.msgCountSinceRefresh > 0 && this.msgCountSinceRefresh % 3 === 0) {
+          const completedTopic = completedChat?.topicId
+            ? Storage.getTopic(completedChat.topicId) : null;
+          if (completedTopic?.needsInitialUpdate) {
+            this._triggerInitialTopicUpdate(completedTopic.id);
+          } else if (this.msgCountSinceRefresh > 0 && this.msgCountSinceRefresh % 3 === 0) {
             Sidebar.refresh('interval');
           }
         } else if (STUDY_CONDITION !== 'loom') {
@@ -1300,6 +1339,7 @@ const App = {
       this._finalizeStreamingMessage(assistantEl, 'Failed to get response. Check your connection.');
       Utils.showToast('Failed to get response. Check your connection.', 'error');
     } finally {
+      this._sendInFlight = false;
       document.getElementById('sendBtn').disabled = false;
     }
   },
@@ -1308,9 +1348,7 @@ const App = {
 
   _LABEL_META: {
     important: { symbol: '★', title: 'Important' },
-    clear: { symbol: '✓', title: 'Got it' },
     unsure: { symbol: '?', title: 'Unsure' },
-    not_relevant: { symbol: '✗', title: 'Not relevant' },
     comment: { symbol: '💬', title: 'Comment' },
   },
 
@@ -1327,9 +1365,7 @@ const App = {
       <div class="label-popover-header" style="display:none"></div>
       <div class="label-popover-actions">
         <button type="button" class="label-popover-btn" data-label="important" title="Important">★ Important</button>
-        <button type="button" class="label-popover-btn" data-label="clear" title="Got it">✓ Got it</button>
         <button type="button" class="label-popover-btn" data-label="unsure" title="Unsure">? Unsure</button>
-        <button type="button" class="label-popover-btn" data-label="not_relevant" title="Not relevant">✗ Not relevant</button>
         <button type="button" class="label-popover-btn" data-action="comment" title="Add a comment">Comment…</button>
         <button type="button" class="label-popover-btn danger" data-action="dismiss-suggestion" style="display:none">Dismiss</button>
         <button type="button" class="label-popover-btn danger" data-action="remove" title="Remove label" style="display:none">Remove</button>
@@ -1379,6 +1415,10 @@ const App = {
       e.stopPropagation();
     });
     this._annoPopover = el;
+    el.addEventListener('pointerenter', () => this._clearPendingHoverHide());
+    el.addEventListener('pointerleave', () => {
+      if (this._annoState && this._annoState.pending) this._schedulePendingHoverHide();
+    });
     return el;
   },
 
@@ -1392,12 +1432,28 @@ const App = {
     });
     document.addEventListener('mousedown', (e) => {
       const t = e.target.nodeType === 3 ? e.target.parentElement : e.target;
-      if (this._annoPopover && t && t.closest && !t.closest('#labelPopover') && !t.closest('mark.anno')) {
+      if (this._annoPopover && t && t.closest
+          && !t.closest('#labelPopover')
+          && !t.closest('mark.anno')
+          && !t.closest('.hl-pending')) {
         this._hideAnnoPopover();
       }
     });
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') this._hideAnnoPopover();
+    });
+    document.addEventListener('pointerover', (e) => {
+      const pending = e.target.closest && e.target.closest('.hl-pending');
+      if (!pending || (this._annoPopover && this._annoPopover.contains(e.target))) return;
+      this._clearPendingHoverHide();
+      this._openAnnoPopoverForPending(pending);
+    });
+    document.addEventListener('pointerout', (e) => {
+      const pending = e.target.closest && e.target.closest('.hl-pending');
+      if (!pending) return;
+      const to = e.relatedTarget;
+      if (to && (pending.contains(to) || (this._annoPopover && this._annoPopover.contains(to)))) return;
+      this._schedulePendingHoverHide();
     });
     document.addEventListener('click', (e) => {
       const pending = e.target.closest('.hl-pending');
@@ -1540,25 +1596,52 @@ const App = {
   _openAnnoPopoverForPending(span) {
     const content = span.closest('.message-content');
     if (!content) return;
+    const spanText = span.dataset.spanText || span.textContent || '';
+    const occurrence = Number(span.dataset.occurrence || 0);
+    if (this._annoState && this._annoState.pending
+        && this._annoState.msgId === content.dataset.msgId
+        && this._annoState.spanText === spanText
+        && (this._annoState.occurrence || 0) === occurrence
+        && this._annoPopover && this._annoPopover.classList.contains('visible')) {
+      return;
+    }
     this._annoState = {
       msgId: content.dataset.msgId,
-      spanText: span.dataset.spanText || span.textContent || '',
-      occurrence: Number(span.dataset.occurrence || 0),
+      spanText,
+      occurrence,
       existingId: null,
       pending: true,
     };
     this._showAnnoPopover(span.getBoundingClientRect(), null, { pending: true });
   },
 
+  _clearPendingHoverHide() {
+    if (this._pendingHoverTimer) {
+      clearTimeout(this._pendingHoverTimer);
+      this._pendingHoverTimer = null;
+    }
+  },
+
+  _schedulePendingHoverHide() {
+    this._clearPendingHoverHide();
+    this._pendingHoverTimer = setTimeout(() => {
+      this._pendingHoverTimer = null;
+      if (this._annoState && this._annoState.pending) this._hideAnnoPopover();
+    }, 180);
+  },
+
   _showAnnoPopover(rect, existingAnno = null, opts = {}) {
     const el = this._ensureAnnoPopover();
+    const pending = !!opts.pending;
     el.querySelectorAll('[data-label]').forEach(btn => {
-      const activeLabel = existingAnno?.label || 'important';
-      btn.classList.toggle('active', activeLabel === btn.dataset.label);
+      const activeLabel = pending
+        ? null
+        : (existingAnno?.label || null);
+      btn.classList.toggle('active', !!activeLabel && activeLabel === btn.dataset.label);
+      btn.classList.toggle('suggested', !!(pending && btn.dataset.label === 'important'));
     });
     const removeBtn = el.querySelector('[data-action="remove"]');
     removeBtn.style.display = existingAnno ? '' : 'none';
-    const pending = !!opts.pending;
     const header = el.querySelector('.label-popover-header');
     header.textContent = pending ? 'AI suggested — confirm or change' : '';
     header.style.display = pending ? '' : 'none';
@@ -1587,6 +1670,7 @@ const App = {
   },
 
   _hideAnnoPopover() {
+    this._clearPendingHoverHide();
     if (!this._annoPopover) return;
     this._annoPopover.classList.remove('visible');
     this._annoPopover.querySelector('.label-popover-comment')?.classList.remove('open');
@@ -1782,6 +1866,7 @@ const App = {
       parent.removeChild(mark);
       parent.normalize();
     });
+    content.querySelectorAll('.anno-comment-note').forEach(note => note.remove());
     const list = Array.isArray(annotations) ? annotations.slice() : [];
     // One highlight per span+occurrence — keep the newest if duplicates exist
     const byKey = new Map();
@@ -1871,6 +1956,21 @@ const App = {
       }
       middle.parentNode.replaceChild(mark, middle);
       mark.appendChild(middle);
+      if (!opts.dataset && anno.label === 'comment' && anno.comment && i === segments.length - 1) {
+        const note = document.createElement('button');
+        note.type = 'button';
+        note.className = 'anno-comment-note';
+        note.dataset.annoId = anno.id;
+        note.textContent = Utils.truncate(anno.comment, 32);
+        note.title = anno.comment;
+        note.setAttribute('aria-label', `Comment: ${anno.comment}`);
+        note.addEventListener('click', e => {
+          e.preventDefault();
+          e.stopPropagation();
+          this._openAnnoPopoverForMark(mark);
+        });
+        mark.parentNode.insertBefore(note, mark.nextSibling);
+      }
     }
     return true;
   },
@@ -2381,6 +2481,137 @@ const App = {
     ));
   },
 
+  _renderTopicBadge(chat) {
+    const badge = document.getElementById('topicBadge');
+    if (!badge) return;
+    if (!chat || STUDY_CONDITION !== 'loom') {
+      badge.style.display = 'none';
+      return;
+    }
+    const topic = chat.topicId ? Storage.getTopic(chat.topicId) : null;
+    const oneOff = !!(chat.oneTime || (topic && this._isOneTimeTopic(topic.id)));
+    badge.style.display = 'inline-flex';
+    badge.classList.toggle('one-off', oneOff);
+    badge.textContent = oneOff ? 'One-off' : (topic?.name || 'No topic');
+    if (topic && !oneOff) {
+      const color = Utils.getTopicColor(topic);
+      badge.style.background = color.light;
+      badge.style.color = color.color;
+    } else {
+      badge.style.background = '';
+      badge.style.color = '';
+    }
+    badge.title = 'Change topic';
+  },
+
+  _captureConstructCheckpoint(topicId) {
+    if (!topicId || this._isOneTimeTopic(topicId)) return null;
+    const topic = Storage.getTopic(topicId);
+    if (!topic) return null;
+    return {
+      topicId,
+      statusSummary: JSON.parse(JSON.stringify(topic.statusSummary || { overview: [], goals: [] })),
+      statusVersion: topic.currentVersion || 0,
+    };
+  },
+
+  _ensureMessageConstructCheckpoint(chatId, messageId) {
+    const chat = Storage.getChat(chatId);
+    if (!chat?.topicId || this._isOneTimeTopic(chat.topicId)) return null;
+    const message = Storage.getMessages(chatId).find(m => m.id === messageId);
+    if (!message || message.constructCheckpoint) return message?.constructCheckpoint || null;
+    const checkpoint = this._captureConstructCheckpoint(chat.topicId);
+    return checkpoint
+      ? Storage.updateMessage(chatId, messageId, { constructCheckpoint: checkpoint })?.constructCheckpoint || null
+      : null;
+  },
+
+  _restoreConstructCheckpoint(chat, checkpoint, removedMessages) {
+    const topicId = chat?.topicId;
+    if (!topicId || this._isOneTimeTopic(topicId)) return;
+    const topic = Storage.getTopic(topicId);
+    if (!topic) return;
+    const removedAnnotationIds = new Set();
+    (removedMessages || []).forEach(message => {
+      (message.annotations || []).forEach(annotation => {
+        if (annotation?.id) removedAnnotationIds.add(annotation.id);
+      });
+    });
+    if (Array.isArray(topic._flushedAnnotationIds) && removedAnnotationIds.size) {
+      topic._flushedAnnotationIds = topic._flushedAnnotationIds.filter(id => !removedAnnotationIds.has(id));
+    }
+    Storage.pushStatusSnapshot(topic, 'message_edit_rollback');
+    if (checkpoint?.topicId === topicId && checkpoint.statusSummary) {
+      topic.statusSummary = JSON.parse(JSON.stringify(checkpoint.statusSummary));
+    }
+    topic.pendingProposal = null;
+    delete topic.sidebarCache;
+    topic.statusLastUpdated = Utils.timestamp();
+    Storage.saveTopic(topic);
+    if (this.currentChatId === chat.id) Sidebar.show(topicId);
+  },
+
+  _replaceVisibleUserQuery(originalContent, newText) {
+    const original = String(originalContent || '');
+    const parsed = this._parseUserMessageModules(original);
+    const visible = parsed.userQuery || original;
+    const idx = visible ? original.lastIndexOf(visible) : -1;
+    return idx >= 0 ? `${original.slice(0, idx)}${newText}` : newText;
+  },
+
+  async _rewriteUserMessage(messageId, newText, { confirmRewrite = true } = {}) {
+    const chatId = this.currentChatId;
+    const chat = chatId ? Storage.getChat(chatId) : null;
+    const messages = chatId ? Storage.getMessages(chatId) : [];
+    const index = messages.findIndex(message => message.id === messageId && message.role === 'user');
+    const text = String(newText || '').trim();
+    if (!chat || index < 0 || !text) {
+      Utils.showToast('Message cannot be empty.', 'error');
+      return false;
+    }
+    const target = messages[index];
+    const currentVisible = this._parseUserMessageModules(target.content).userQuery || target.content || '';
+    if (text === currentVisible.trim()) {
+      this._renderChat(chatId);
+      return false;
+    }
+    if (this._sendInFlight) {
+      Utils.showToast('Wait for the current response before editing.', 'error');
+      return false;
+    }
+    const followingCount = messages.length - index - 1;
+    if (confirmRewrite && followingCount > 0 && typeof window.confirm === 'function') {
+      const ok = window.confirm(`Editing this message will remove ${followingCount} later message${followingCount === 1 ? '' : 's'} and regenerate the response. Continue?`);
+      if (!ok) return false;
+    }
+
+    const truncated = Storage.truncateBeforeMessage(chatId, messageId);
+    if (!truncated) {
+      Utils.showToast('Could not rewrite message history.', 'error');
+      return false;
+    }
+    const freshChat = Storage.getChat(chatId);
+    this._restoreConstructCheckpoint(freshChat, target.constructCheckpoint, truncated.removed);
+    this.pendingSummarize = true;
+    this.msgCountSinceRefresh = 0;
+    this._messageRewriteMeta = {
+      attachments: target.attachments || null,
+      contextBlock: target.contextBlock || null,
+      contextMeta: target.contextMeta || null,
+    };
+    const input = document.getElementById('chatInput');
+    input.value = this._replaceVisibleUserQuery(target.content, text);
+    this._renderChat(chatId);
+    StudyLog.event('message_edited', {
+      chatId,
+      topicId: freshChat?.topicId || null,
+      removedMessages: truncated.removed.length,
+      messageIndex: index,
+    });
+    await this.sendMessage();
+    return true;
+  },
+
   _getOrCreateOneTimeTopic() {
     const existing = Storage.getTopics().find(t =>
       t.oneTimeBucket || t.name === 'Unassigned' || t.name === 'One-time questions'
@@ -2390,6 +2621,18 @@ const App = {
     topic.userCreated = false;
     topic.oneTimeBucket = true;
     Storage.saveTopic(topic);
+    return topic;
+  },
+
+  _getOrCreateTopicByName(name, source = 'header_badge') {
+    const normalized = String(name || '').trim();
+    if (!normalized) return null;
+    const existing = Storage.getTopics().find(t =>
+      !this._isOneTimeTopic(t.id) && t.name.toLowerCase() === normalized.toLowerCase()
+    );
+    if (existing) return existing;
+    const topic = Storage.createTopic(normalized);
+    StudyLog.event('topic_created', { topicId: topic.id, isAutoDetected: false, source });
     return topic;
   },
 
@@ -2414,7 +2657,10 @@ const App = {
       StudyLog.event('topic_assigned', {
         chatId, topicId: bucket.id, assignMethod, isOneOff: true,
       });
-      if (this.currentChatId === chatId) Sidebar.hide();
+      if (this.currentChatId === chatId) {
+        Sidebar.hide();
+        this._renderTopicBadge(chat);
+      }
       this._renderChatList();
       return;
     }
@@ -2446,6 +2692,7 @@ const App = {
 
       if (this.currentChatId === chatId && !this._isOneTimeTopic(topicId)) {
         Sidebar.show(topicId);
+        this._renderTopicBadge(chat);
       }
       this._renderChatList();
     }
@@ -2720,6 +2967,7 @@ const App = {
     const mainContent = document.getElementById('mainContent');
 
     document.getElementById('chatTitle').textContent = chat?.title || 'New Chat';
+    this._renderTopicBadge(chat);
     const msgContainer = document.getElementById('chatMessages');
     msgContainer.innerHTML = '';
 
@@ -3058,6 +3306,7 @@ const App = {
 
     const el = document.createElement('div');
     el.className = `message ${msg.role}`;
+    if (msg.id) el.dataset.msgId = msg.id;
     // Attachment rendering below checks att.data and falls back to att.name.
 
     let contextBarHtml = '';
@@ -3120,6 +3369,15 @@ const App = {
     } else {
       el.innerHTML = `${attachHtml}<div class="message-content"${msgIdAttr}>${renderedContent}</div>`;
     }
+    if (msg.role === 'user' && msg.id) {
+      const actions = document.createElement('div');
+      actions.className = 'user-message-actions';
+      actions.innerHTML = '<button type="button" class="user-message-edit-btn" title="Edit message" aria-label="Edit message">Edit</button>';
+      actions.querySelector('.user-message-edit-btn').addEventListener('click', () => {
+        this._startUserMessageEdit(el, msg);
+      });
+      el.appendChild(actions);
+    }
     container.appendChild(el);
 
     if (visibleModules.length > 0) {
@@ -3162,6 +3420,58 @@ const App = {
     }
 
     container.scrollTop = container.scrollHeight;
+  },
+
+  _startUserMessageEdit(messageEl, msg) {
+    if (!messageEl || messageEl.querySelector('.user-message-editor')) return;
+    if (this._sendInFlight) {
+      Utils.showToast('Wait for the current response before editing.', 'error');
+      return;
+    }
+    const parsed = this._parseUserMessageModules(msg.content);
+    const original = (parsed.userQuery || msg.content || '').trim();
+    const editor = document.createElement('div');
+    editor.className = 'user-message-editor';
+    editor.innerHTML = `
+      <textarea class="user-message-edit-input" aria-label="Edit sent message"></textarea>
+      <div class="user-message-edit-actions">
+        <button type="button" class="probe-btn user-message-edit-cancel">Cancel</button>
+        <button type="button" class="probe-btn user-message-edit-save">Save and regenerate</button>
+      </div>`;
+    const input = editor.querySelector('.user-message-edit-input');
+    input.value = original;
+    const content = messageEl.querySelector('.message-content');
+    const actions = messageEl.querySelector('.user-message-actions');
+    if (content) content.style.display = 'none';
+    if (actions) actions.style.display = 'none';
+    const cancel = () => {
+      editor.remove();
+      if (content) content.style.display = '';
+      if (actions) actions.style.display = '';
+    };
+    editor.querySelector('.user-message-edit-cancel').addEventListener('click', cancel);
+    const saveBtn = editor.querySelector('.user-message-edit-save');
+    const save = async () => {
+      saveBtn.disabled = true;
+      const changed = await this._rewriteUserMessage(msg.id, input.value);
+      if (!changed && editor.isConnected) {
+        saveBtn.disabled = false;
+        if (input.value.trim() === original) cancel();
+      }
+    };
+    saveBtn.addEventListener('click', save);
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        cancel();
+      } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        save();
+      }
+    });
+    messageEl.appendChild(editor);
+    input.focus();
+    input.select();
   },
 
   _appendSystemMessage(text) {
@@ -3391,6 +3701,7 @@ const App = {
     const chat = Storage.getChat(chatId);
     if (!chat) return;
     chat.topicId = null;
+    chat.oneTime = false;
     Storage.saveChat(chat);
 
     if (topicId) {
@@ -3402,6 +3713,7 @@ const App = {
 
     if (chatId === this.currentChatId) {
       Sidebar.hide();
+      this._renderTopicBadge(chat);
     }
 
     this._renderChatList();
@@ -3409,54 +3721,110 @@ const App = {
     Utils.showToast('Chat removed from topic', 'info');
   },
 
-  _showMoveDropdown(anchorEl, chatId, currentTopicId) {
+  _showMoveDropdown(anchorEl, chatId, currentTopicId, opts = {}) {
     const chat = Storage.getChat(chatId);
     if (!chat) return;
 
     const topics = Storage.getTopics().filter(t =>
       t.id !== currentTopicId && !this._isOneTimeTopic(t.id)
     );
-    if (topics.length === 0) {
-      Utils.showToast('No other topics to move to', 'info');
-      return;
-    }
 
     this._moveChatId = chatId;
     this._moveChatOldTopicId = currentTopicId;
 
     const popover = document.getElementById('moveChatPopover');
-    popover.innerHTML = '<div class="move-chat-popover-label">Move to topic</div>';
+    let closeOnOutside;
+    let closeOnKey;
+    const close = () => {
+      popover.style.display = 'none';
+      if (anchorEl === document.getElementById('topicBadge')) anchorEl.setAttribute('aria-expanded', 'false');
+      if (closeOnOutside) document.removeEventListener('mousedown', closeOnOutside);
+      if (closeOnKey) document.removeEventListener('keydown', closeOnKey);
+    };
+    popover.innerHTML = `<div class="move-chat-popover-label">${opts.fromHeader ? 'Change topic' : 'Move to topic'}</div>`;
     topics.forEach(t => {
       const tc = Utils.getTopicColor(t);
-      const chip = document.createElement('div');
+      const chip = document.createElement('button');
+      chip.type = 'button';
       chip.className = 'move-topic-chip';
       chip.innerHTML = `<span class="move-topic-chip-dot" style="background:${tc.color}"></span><span class="move-topic-chip-name">${Utils.escapeHtml(t.name)}</span>`;
       chip.addEventListener('click', () => {
-        popover.style.display = 'none';
+        close();
         this._moveChat(chatId, t.id, currentTopicId);
       });
       popover.appendChild(chip);
     });
 
+    if (!chat.oneTime && !this._isOneTimeTopic(currentTopicId)) {
+      const oneOff = document.createElement('button');
+      oneOff.type = 'button';
+      oneOff.className = 'move-topic-chip move-topic-one-off';
+      oneOff.innerHTML = '<span class="move-topic-chip-dot"></span><span class="move-topic-chip-name">One-off</span>';
+      oneOff.addEventListener('click', () => {
+        close();
+        const bucket = this._getOrCreateOneTimeTopic();
+        this._moveChat(chatId, bucket.id, currentTopicId, { method: 'one_off' });
+      });
+      popover.appendChild(oneOff);
+    }
+
+    const create = document.createElement('button');
+    create.type = 'button';
+    create.className = 'move-topic-chip move-topic-create';
+    create.innerHTML = '<span class="move-topic-chip-plus">+</span><span class="move-topic-chip-name">New topic…</span>';
+    create.addEventListener('click', () => {
+      popover.innerHTML = `
+        <div class="move-chat-popover-label">New topic</div>
+        <div class="move-topic-create-row">
+          <input class="move-topic-create-input" type="text" maxlength="80" placeholder="Topic name" aria-label="New topic name">
+          <button class="move-topic-create-btn" type="button">Create</button>
+        </div>`;
+      const input = popover.querySelector('.move-topic-create-input');
+      const submit = () => {
+        const name = input.value.trim();
+        if (!name) return;
+        const topic = this._getOrCreateTopicByName(name);
+        close();
+        this._moveChat(chatId, topic.id, currentTopicId, { method: 'new_topic' });
+      };
+      popover.querySelector('.move-topic-create-btn').addEventListener('click', submit);
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') submit();
+        if (e.key === 'Escape') close();
+      });
+      input.focus();
+    });
+    popover.appendChild(create);
+
     const rect = anchorEl.getBoundingClientRect();
     popover.style.display = 'block';
+    if (anchorEl === document.getElementById('topicBadge')) anchorEl.setAttribute('aria-expanded', 'true');
     popover.style.left = Math.min(rect.left, window.innerWidth - 250) + 'px';
     popover.style.top = (rect.bottom + 4) + 'px';
 
-    const closeOnOutside = (e) => {
+    closeOnOutside = (e) => {
       if (!popover.contains(e.target) && e.target !== anchorEl) {
-        popover.style.display = 'none';
-        document.removeEventListener('mousedown', closeOnOutside);
+        close();
+      }
+    };
+    closeOnKey = e => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close();
+        anchorEl.focus();
       }
     };
     setTimeout(() => document.addEventListener('mousedown', closeOnOutside), 0);
+    document.addEventListener('keydown', closeOnKey);
   },
 
-  _moveChat(chatId, newTopicId, oldTopicId) {
+  _moveChat(chatId, newTopicId, oldTopicId, opts = {}) {
     const chat = Storage.getChat(chatId);
     if (!chat) return;
     const oldId = oldTopicId || chat.topicId;
+    if (newTopicId === oldId) return;
     chat.topicId = newTopicId;
+    chat.oneTime = this._isOneTimeTopic(newTopicId);
     chat.lastActive = Utils.timestamp();
     Storage.saveChat(chat);
 
@@ -3473,14 +3841,23 @@ const App = {
       }
     }
 
-    if (chatId === this.currentChatId && newTopic && !this._isOneTimeTopic(newTopic.id)) {
-      Sidebar.show(newTopicId);
+    if (chatId === this.currentChatId) {
+      if (newTopic && !this._isOneTimeTopic(newTopic.id)) Sidebar.show(newTopicId);
+      else Sidebar.hide();
+      this._renderTopicBadge(chat);
     }
 
     this._renderChatList();
     this._populateTopicSelector();
     const topicName = newTopic ? newTopic.name : 'topic';
     StudyLog.event('chat_moved', { chatId, oldTopicId: oldId, newTopicId });
+    StudyLog.event('topic_badge_reassigned', {
+      chatId,
+      oldTopicId: oldId || null,
+      newTopicId,
+      method: opts.method || 'picker',
+      isOneOff: !!chat.oneTime,
+    });
     Utils.showToast(`Moved to "${topicName}"`, 'success');
   },
 

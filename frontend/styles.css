@@ -603,6 +603,8 @@ body {
 }
 
 .topic-badge {
+  align-items: center;
+  border: none;
   padding: 3px 8px;
   border-radius: 4px;
   font-size: 11px;
@@ -610,6 +612,19 @@ body {
   margin-left: 8px;
   background: var(--selected-bg);
   color: var(--text-secondary);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.topic-badge:hover,
+.topic-badge:focus-visible {
+  filter: brightness(0.97);
+  outline: none;
+}
+
+.topic-badge.one-off {
+  background: var(--selected-bg);
+  color: var(--text-muted);
 }
 
 /* ── Welcome Mode (centered input like Gemini) ──────────────────────────── */
@@ -857,6 +872,63 @@ body {
   outline: none;
   display: inline-block;
   max-width: 100%;
+}
+
+.user-message-actions {
+  height: 18px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.message.user:hover .user-message-actions,
+.user-message-actions:focus-within {
+  opacity: 1;
+}
+
+.user-message-edit-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font: 500 10px/1.2 inherit;
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.user-message-edit-btn:hover {
+  color: var(--text-primary);
+  background: var(--hover-bg);
+}
+
+.user-message-editor {
+  width: min(560px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.user-message-edit-input {
+  width: 100%;
+  min-height: 76px;
+  box-sizing: border-box;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font: 14px/1.5 inherit;
+  padding: 8px 10px;
+}
+
+.user-message-edit-input:focus {
+  outline: none;
+  border-color: rgba(55, 53, 47, 0.35);
+}
+
+.user-message-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
 }
 
 .message.assistant .message-content {
@@ -1925,10 +1997,24 @@ body {
   padding-right: 4px;
 }
 
+.status-section-overview {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.status-section-overview .status-section-label {
+  flex-shrink: 0;
+}
+
 .status-section-overview .status-section-items {
-  max-height: 220px;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
   overflow-y: auto;
-  padding-right: 6px;
+  padding-right: 0;
 }
 
 .status-empty {
@@ -1979,8 +2065,9 @@ body {
   display: none;
 }
 
-/* AI-edit button in overview header */
-.overview-ai-edit-btn {
+/* Overview editing controls */
+.overview-ai-edit-btn,
+.overview-manual-edit-btn {
   background: none;
   border: none;
   padding: 0 2px;
@@ -1990,6 +2077,42 @@ body {
   transition: color 0.15s ease;
   vertical-align: middle;
   line-height: 1;
+}
+
+.overview-manual-edit-btn {
+  margin-left: auto;
+}
+
+.overview-markdown-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.overview-markdown-input {
+  width: 100%;
+  min-height: 96px;
+  max-height: 320px;
+  box-sizing: border-box;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  padding: 8px;
+}
+
+.overview-markdown-input:focus {
+  outline: none;
+  border-color: rgba(55, 53, 47, 0.35);
+}
+
+.overview-markdown-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
 }
 
 /* AI-edit inline prompt */
@@ -2334,24 +2457,6 @@ body {
   margin-left: auto;
 }
 
-.temporal-card.direction-card.type-breadth {
-  border-left-color: rgba(6, 182, 212, 0.4);
-}
-
-.temporal-card.direction-card.type-breadth:hover {
-  border-left-color: #0891b2;
-  background: rgba(6, 182, 212, 0.04);
-}
-
-.temporal-card.direction-card.type-depth {
-  border-left-color: rgba(99, 102, 241, 0.4);
-}
-
-.temporal-card.direction-card.type-depth:hover {
-  border-left-color: #6366f1;
-  background: rgba(99, 102, 241, 0.04);
-}
-
 /* Status update button (Module 1 header, styled like shuffle) */
 .status-update-btn {
   background: none;
@@ -2518,6 +2623,7 @@ body {
 }
 
 .move-topic-chip {
+  width: 100%;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2526,12 +2632,18 @@ body {
   font-size: 13px;
   font-weight: 500;
   color: var(--text-primary);
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
   cursor: pointer;
   transition: background 0.12s;
 }
 
-.move-topic-chip:hover {
+.move-topic-chip:hover,
+.move-topic-chip:focus-visible {
   background: var(--hover-bg);
+  outline: none;
 }
 
 .move-topic-chip-dot {
@@ -2545,6 +2657,48 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.move-topic-one-off .move-topic-chip-dot {
+  background: var(--text-muted);
+}
+
+.move-topic-chip-plus {
+  width: 8px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.move-topic-create-row {
+  display: flex;
+  gap: 4px;
+  padding: 2px 4px 4px;
+}
+
+.move-topic-create-input {
+  min-width: 0;
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font: 12px/1.3 inherit;
+  padding: 5px 7px;
+}
+
+.move-topic-create-input:focus {
+  outline: none;
+  border-color: rgba(55, 53, 47, 0.35);
+}
+
+.move-topic-create-btn {
+  border: none;
+  border-radius: 4px;
+  background: var(--primary);
+  color: white;
+  font: 500 11px/1 inherit;
+  padding: 5px 8px;
+  cursor: pointer;
 }
 
 /* ── Status History Popover ─────────────────────────────────────────────── */
@@ -3088,24 +3242,75 @@ body {
   animation: slideUp 0.25s ease;
 }
 
-.section-current {
-  flex: 0 1 auto;
-  overflow: auto;
+.section-current,
+.section-future {
   min-height: 0;
-  max-height: 75%;
+}
+
+.section-current {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  max-height: none;
+  overflow: hidden;
+}
+
+.section-current .module-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .section-future {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
   min-height: 0;
-  max-height: 45%;
-  overflow: auto;
+  max-height: none;
+  overflow: hidden;
+}
+
+.section-future .module-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.direction-cards {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.status-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.status-structured {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .temporal-section + .temporal-section {
   border-top: 1px solid var(--border);
   padding-top: 8px;
   margin-top: 8px;
+}
+
+.temporal-section-header,
+.temporal-section-subtitle {
+  flex-shrink: 0;
 }
 
 .temporal-section-header {
@@ -3198,12 +3403,11 @@ body {
 }
 
 .temporal-card.direction-card {
-  border-left-color: rgba(117, 109, 233, 0.3);
+  border-left: none;
 }
 
 .temporal-card.direction-card:hover {
-  border-left-color: var(--accent-purple);
-  background: rgba(117, 109, 233, 0.04);
+  background: var(--hover-bg);
 }
 
 /* ── Intentions (Evolve) ──────────────────────────────────────────────── */
@@ -3305,24 +3509,6 @@ body {
   white-space: nowrap;
 }
 
-.goal-status-tag {
-  display: inline-flex;
-  align-items: center;
-  flex-shrink: 0;
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  padding: 1px 6px;
-  border-radius: 8px;
-  line-height: 1.3;
-}
-
-.goal-status-tag.tag-suggested {
-  background: rgba(55, 53, 47, 0.06);
-  color: var(--text-muted);
-}
-
 .temporal-card.suggested-goal-card .temporal-card-header {
   display: flex;
   align-items: center;
@@ -3405,15 +3591,17 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 6px 12px 4px;
+  padding: 6px 0 2px;
+  margin-top: 6px;
+  border-top: 1px solid var(--border);
 }
 
 .add-intention-input {
   flex: 1;
   font-size: 11px;
   font-family: inherit;
-  padding: 3px 6px;
-  border: 1px solid var(--border);
+  padding: 4px 6px;
+  border: none;
   border-radius: 4px;
   outline: none;
   background: var(--bg-primary);
@@ -3422,13 +3610,13 @@ body {
 }
 
 .add-intention-input:focus {
-  border-color: var(--accent-purple);
+  background: var(--hover-bg);
 }
 
 .add-intention-btn {
   font-size: 13px;
   line-height: 1;
-  border: 1px solid var(--border);
+  border: none;
   background: transparent;
   color: var(--text-muted);
   border-radius: 4px;
@@ -3440,8 +3628,8 @@ body {
 }
 
 .add-intention-btn:hover {
-  color: var(--accent-purple);
-  border-color: var(--accent-purple);
+  color: var(--text-primary);
+  background: var(--hover-bg);
 }
 
 .temporal-card.dragging {
@@ -3518,7 +3706,7 @@ body {
   font-weight: 500;
   padding: 2px 7px;
   border-radius: 4px;
-  border: 1px solid var(--border);
+  border: none;
   cursor: pointer;
   background: transparent;
   color: var(--text-muted);
@@ -3526,8 +3714,8 @@ body {
 }
 
 .probe-btn:hover {
-  border-color: rgba(55, 53, 47, 0.25);
   color: var(--text-secondary);
+  background: var(--hover-bg);
 }
 
 /* ── Scrutability: scope toggle and contested state ─────────────────── */
@@ -4094,9 +4282,26 @@ body {
 }
 
 .status-section-goals {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
   margin-top: 12px;
   padding-top: 10px;
   border-top: 1px solid var(--border);
+}
+
+.status-section-goals .status-section-label,
+.status-section-goals .status-section-hint,
+.status-section-goals .add-goal-row {
+  flex-shrink: 0;
+}
+
+.status-section-goals .status-section-items {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .status-section-hint {
@@ -4111,10 +4316,10 @@ body {
   margin-top: 0;
   padding: 6px 8px;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-primary);
   line-height: 1.35;
-  background: rgba(55, 53, 47, 0.035);
+  background: transparent;
   border-radius: 4px;
   border-left-color: transparent;
 }
@@ -4125,11 +4330,11 @@ body {
 
 .status-item.status-goal:hover {
   background: var(--hover-bg);
-  border-left-color: var(--text-muted);
+  border-left-color: transparent;
 }
 
 .status-section-goals .status-item-text {
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-primary);
 }
 
@@ -4466,18 +4671,6 @@ body {
   color: #6366f1;
 }
 
-.row-dir-node.type-breadth {
-  background: rgba(6, 182, 212, 0.06);
-  border-color: rgba(6, 182, 212, 0.3);
-  color: #0891b2;
-}
-
-.row-dir-node.type-depth {
-  background: rgba(99, 102, 241, 0.06);
-  border-color: rgba(99, 102, 241, 0.3);
-  color: #6366f1;
-}
-
 /* Hover / highlight states */
 .graph-node.highlighted {
   border-width: 2px;
@@ -4652,10 +4845,6 @@ mark.anno {
   box-shadow: none;
 }
 
-mark.anno-clear {
-  background: rgba(15, 123, 108, 0.12);
-}
-
 mark.anno-unsure {
   background: rgba(217, 119, 6, 0.12);
 }
@@ -4664,12 +4853,33 @@ mark.anno-important {
   background: rgba(99, 102, 241, 0.12);
 }
 
-mark.anno-not_relevant {
-  background: rgba(120, 120, 120, 0.1);
-}
-
 mark.anno-comment {
   background: rgba(55, 53, 47, 0.08);
+}
+
+.anno-comment-note {
+  display: inline-block;
+  max-width: 160px;
+  margin: 0 2px;
+  padding: 1px 4px;
+  transform: translateY(-0.35em);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-muted);
+  font: 500 9px/1.2 inherit;
+  vertical-align: baseline;
+  cursor: pointer;
+}
+
+.anno-comment-note:hover,
+.anno-comment-note:focus-visible {
+  color: var(--text-primary);
+  background: var(--hover-bg);
+  outline: none;
 }
 
 mark.anno:hover {
@@ -4677,10 +4887,14 @@ mark.anno:hover {
 }
 
 .hl-pending {
-  background: rgba(99, 102, 241, 0.07);
-  border-bottom: 1px dashed rgba(99, 102, 241, 0.65);
+  background: rgba(99, 102, 241, 0.08);
+  border-bottom: 1px dashed rgba(99, 102, 241, 0.5);
   border-radius: 2px;
   cursor: pointer;
+}
+
+.hl-pending:hover {
+  background: rgba(99, 102, 241, 0.1);
 }
 
 /* ── Label popover (selection labeling) ───────────────────────────────── */
@@ -4739,6 +4953,13 @@ mark.anno:hover {
   border-color: rgba(15, 123, 108, 0.35);
   background: rgba(15, 123, 108, 0.08);
   color: var(--accent-green, #0f7b6c);
+}
+
+.label-popover-btn.suggested {
+  border-style: dashed;
+  border-color: rgba(99, 102, 241, 0.4);
+  background: transparent;
+  color: var(--text-secondary);
 }
 
 .label-popover-btn.danger:hover {

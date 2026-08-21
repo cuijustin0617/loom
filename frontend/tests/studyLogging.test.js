@@ -522,6 +522,7 @@ console.log('\n─── Complete Event Inventory ───');
 const CANONICAL_EVENTS = [
     'session_start', 'session_end',
     'query_sent', 'chat_created', 'chat_selected', 'chat_deleted', 'chat_moved', 'chat_unassigned',
+    'message_edited', 'topic_badge_reassigned',
     'context_card_shown', 'context_excluded_for_topic', 'context_exclusion_reverted',
     'context_link_opened', 'construct_included_in_chat',
     'connection_marker_hovered', 'connection_marker_clicked', 'connection_contested',
